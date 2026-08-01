@@ -59,7 +59,18 @@ jobs:
             *) echo "::error::rust-toolchain.toml pins $channel but Cargo.toml declares rust-version $declared"; exit 1 ;;
           esac
 
-          echo "toolchain $channel | MSRV $declared | coverage floor ${floor}%" >> "$GITHUB_STEP_SUMMARY"
+          # The README's MSRV badge is a third copy of the same number, and the only one a reader
+          # sees before deciding whether this crate builds for them. A stale badge is a wrong
+          # public claim. Mirrors Invoke-Gate.ps1.
+          badge=$(grep -oP 'img\.shields\.io/badge/MSRV-\K[0-9.]+' README.md || true)
+          if [ -z "$badge" ]; then
+            echo "::error::No MSRV badge found in README.md"; exit 1
+          fi
+          if [ "$badge" != "$channel" ]; then
+            echo "::error::README MSRV badge says $badge but rust-toolchain.toml pins $channel"; exit 1
+          fi
+
+          echo "toolchain $channel | MSRV $declared | badge $badge | coverage floor ${floor}%" >> "$GITHUB_STEP_SUMMARY"
 
   # ---------------------------------------------------------------------------
   fmt:

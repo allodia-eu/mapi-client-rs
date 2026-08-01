@@ -118,7 +118,20 @@ try {
             throw "rust-toolchain.toml pins $pinned but Cargo.toml declares rust-version $declared."
         }
 
-        Write-Host "    toolchain $pinned, MSRV $declared"
+        # The README's MSRV badge is a third copy of the same number, and the only one a reader
+        # sees before deciding whether this crate builds for them. A stale badge is a wrong public
+        # claim, so it is checked here rather than trusted.
+        $badge = [regex]::Match(
+            (Get-Content -LiteralPath 'README.md' -Raw),
+            'img\.shields\.io/badge/MSRV-([0-9.]+)-')
+        if (-not $badge.Success) {
+            throw 'No MSRV badge found in README.md. If it was removed deliberately, remove this check too.'
+        }
+        if ($badge.Groups[1].Value -ne $pinned) {
+            throw "README MSRV badge says $($badge.Groups[1].Value) but rust-toolchain.toml pins $pinned."
+        }
+
+        Write-Host "    toolchain $pinned, MSRV $declared, badge $($badge.Groups[1].Value)"
         Invoke-Native $cargo @('--version')
     }
 

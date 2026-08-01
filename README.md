@@ -1,7 +1,15 @@
 # `mapi-client-rs`
 
+[![CI](https://github.com/allodia-eu/mapi-client-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/allodia-eu/mapi-client-rs/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/allodia-eu/mapi-client-rs/graph/badge.svg?token=1KS19O3UH1)](https://codecov.io/gh/allodia-eu/mapi-client-rs)
+[![MSRV](https://img.shields.io/badge/MSRV-1.97.0-dea584?logo=rust&logoColor=white)](rust-toolchain.toml)
+[![Licence](https://img.shields.io/badge/licence-MIT%20OR%20Apache--2.0-blue)](#licence)
+
 A pure-Rust, cross-platform client for **MAPI over HTTP** — the protocol Outlook actually speaks to
 Exchange.
+
+> The CI badge means every gate passed against the committed fixtures. It does **not** mean
+> "verified against Exchange" — see [What CI does and does not prove](#what-ci-does-and-does-not-prove).
 
 The only MAPI crate on crates.io today is [`outlook-mapi`], which is Windows-only COM bindings to
 `olmapi32.dll` and requires Outlook to be installed. This crate talks the wire protocol directly:
