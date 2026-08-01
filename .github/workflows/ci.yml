@@ -239,6 +239,7 @@ jobs:
       - name: Diff public API against the base branch
         run: |
           set -euo pipefail
+          base="origin/${{ github.event.pull_request.base.ref }}"
           git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1
 
           {
@@ -249,12 +250,18 @@ jobs:
           for pkg in mapi-proto mapi-autodiscover mapi-client; do
             echo "### \`$pkg\`" >> "$GITHUB_STEP_SUMMARY"
             echo '```diff' >> "$GITHUB_STEP_SUMMARY"
-            # +nightly explicitly: rust-toolchain.toml selects stable for this directory and
-            # rustdoc JSON is nightly-only, so a plain `cargo public-api` would fall into the
-            # fallback below and report nothing while looking green. Mirrors Invoke-Gate.ps1.
-            cargo +nightly public-api --package "$pkg" diff \
-              "origin/${{ github.event.pull_request.base.ref }}" \
-              >> "$GITHUB_STEP_SUMMARY" 2>&1 || echo "(diff unavailable for $pkg)" >> "$GITHUB_STEP_SUMMARY"
+            # Two things that both fail quietly if you get them wrong:
+            #   `base..head` — a bare revision is parsed as a published crate version instead;
+            #   `+nightly`   — rust-toolchain.toml selects stable here, and rustdoc JSON is
+            #                  nightly-only. Mirrors scripts/Invoke-Gate.ps1.
+            if ! cargo +nightly public-api --package "$pkg" diff "$base..HEAD" \
+              >> "$GITHUB_STEP_SUMMARY" 2>&1
+            then
+              echo "(diff unavailable for $pkg)" >> "$GITHUB_STEP_SUMMARY"
+              # Annotated rather than swallowed: a job that reports nothing must not look the
+              # same as a job that reports no changes.
+              echo "::warning::public-api diff failed for $pkg"
+            fi
             echo '```' >> "$GITHUB_STEP_SUMMARY"
           done
 
