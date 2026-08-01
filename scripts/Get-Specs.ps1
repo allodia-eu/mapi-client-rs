@@ -1,13 +1,13 @@
 ﻿<#
 .SYNOPSIS
-    Downloads the six pinned Microsoft Open Specification documents into the gitignored spec/.
+    Downloads the pinned Microsoft Open Specification documents into the gitignored spec/.
 
 .DESCRIPTION
     Reads the document table from SPEC.md — the single source of truth — downloads each PDF, then
     extracts it to text with poppler's pdftotext so the specifications are greppable.
 
     The PDFs are never committed. The IP notice permits local copies "in order to develop
-    implementations", but shipping 26 MB of Microsoft PDFs in a public repository is unnecessary
+    implementations", but shipping 29 MB of Microsoft PDFs in a public repository is unnecessary
     and muddies the licensing story. A fresh clone is one command from having the sources.
 
     Verification of the release stamp inside each PDF is Check-SpecVersion.ps1's job, and this

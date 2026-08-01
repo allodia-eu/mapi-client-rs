@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Captured from Exchange Server SE (X-ServerApplication: 15.02.2562.000) on 2026-08-01, in answer
+  to an Autodiscover POST carrying X-MapiHttpCapability: 1.
+
+  Scrubbed: the lab hostname, the mailbox GUID, the deployment id, the recipient GUID inside the
+  distinguished name, and the display name. The domain dev.local and the mailbox name are
+  synthetic and left readable, because being readable is what makes the capture useful.
+
+  Two things here are exactly why this file is a capture rather than a hand-written example:
+  the Protocol element for mapiHttp names itself with a Type *attribute* while the WEB one uses a
+  Type *child element*, and the WEB protocol nests further Protocol elements inside <Internal>.
+-->
+<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006">
+  <Response xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a">
+    <User>
+      <DisplayName>Lab Test User</DisplayName>
+      <LegacyDN>/o=Dev/ou=Exchange Administrative Group (FYDIBOHF23SPDLT)/cn=Recipients/cn=ffffffffffffffffffffffffffffffff-Lab Test User</LegacyDN>
+      <AutoDiscoverSMTPAddress>developer@dev.local</AutoDiscoverSMTPAddress>
+      <DeploymentId>00000000-0000-0000-0000-000000000000</DeploymentId>
+    </User>
+    <Account>
+      <AccountType>email</AccountType>
+      <Action>settings</Action>
+      <MicrosoftOnline>False</MicrosoftOnline>
+      <Protocol Type="mapiHttp" Version="1">
+        <MailStore>
+          <InternalUrl>https://exchange-lab-01/mapi/emsmdb/?MailboxId=00000000-0000-0000-0000-000000000000@dev.local</InternalUrl>
+        </MailStore>
+        <AddressBook>
+          <InternalUrl>https://exchange-lab-01/mapi/nspi/?MailboxId=00000000-0000-0000-0000-000000000000@dev.local</InternalUrl>
+        </AddressBook>
+      </Protocol>
+      <Protocol>
+        <Type>WEB</Type>
+        <Internal>
+          <OWAUrl AuthenticationMethod="Basic, Fba">https://exchange-lab-01.dev.local/owa/</OWAUrl>
+          <Protocol>
+            <Type>EXCH</Type>
+            <ASUrl>https://exchange-lab-01.dev.local/EWS/Exchange.asmx</ASUrl>
+          </Protocol>
+        </Internal>
+      </Protocol>
+    </Account>
+  </Response>
+</Autodiscover>

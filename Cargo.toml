@@ -26,6 +26,7 @@ mapi-autodiscover = { version = "0.1.0", path = "crates/mapi-autodiscover" }
 mapi-client = { version = "0.1.0", path = "crates/mapi-client" }
 
 thiserror = "2"
+roxmltree = "0.21"
 
 # ---------------------------------------------------------------------------
 # Lints

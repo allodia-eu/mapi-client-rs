@@ -11,9 +11,10 @@ without "the spec says Y" is unverifiable.
 
 ## Pinned documents
 
-All six documents share one release, which makes the pin unusually clean. This table is the single
-source of truth: `scripts/Get-Specs.ps1` parses it to download, and `scripts/Check-SpecVersion.ps1`
-parses it to verify.
+Six of the eight share one release; [MS-OXDSCLI] was revised three months later, which is exactly
+the drift the version pin exists to make visible. This table is the single source of truth:
+`scripts/Get-Specs.ps1` parses it to download, and `scripts/Check-SpecVersion.ps1` parses it to
+verify.
 
 <!-- SPEC-TABLE-START -->
 
@@ -25,14 +26,16 @@ parses it to verify.
 | MS-OXCTABL | v20250520 | 64 | Table Object Protocol | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCTABL/%5bMS-OXCTABL%5d.pdf |
 | MS-OXCSTOR | v20250520 | 63 | Store Object Protocol (logon) | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCSTOR/%5bMS-OXCSTOR%5d.pdf |
 | MS-OXCFOLD | v20250520 | 72 | Folder Object Protocol | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCFOLD/%5bMS-OXCFOLD%5d.pdf |
+| MS-OXDISCO | v20250520 | 26 | Autodiscover HTTP Service — where to look for the service | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXDISCO/%5bMS-OXDISCO%5d.pdf |
+| MS-OXDSCLI | v20250819 | 53 | Autodiscover Publishing and Lookup — the XML, and the mapiHttp block | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXDSCLI/%5bMS-OXDSCLI%5d.pdf |
 
 <!-- SPEC-TABLE-END -->
 
-All released **20 May 2025**.
+Six released **20 May 2025**; [MS-OXDSCLI] on **19 August 2025**.
 
 ## URLs in the repository, PDFs never
 
-`scripts/Get-Specs.ps1` reads the table above, downloads all six documents into a **gitignored
+`scripts/Get-Specs.ps1` reads the table above, downloads all eight documents into a **gitignored
 `spec/`** directory, and extracts each to text alongside it. A fresh clone is therefore one command
 away from having the authoritative sources, and the repository carries no Microsoft PDFs.
 
@@ -41,9 +44,9 @@ powershell.exe -File scripts\Get-Specs.ps1
 ```
 
 The Microsoft IP notice permits local copies "in order to develop implementations", but committing
-26 MB of Microsoft PDFs to a public repository is both unnecessary and muddies the licensing story.
+29 MB of Microsoft PDFs to a public repository is both unnecessary and muddies the licensing story.
 
-The `spec/*.txt` extracts are the useful artefact day to day: 668 pages of PDF are painful to
+The `spec/*.txt` extracts are the useful artefact day to day: 747 pages of PDF are painful to
 search, but `Select-String` over the text extracts is instant.
 
 ```powershell
@@ -66,7 +69,7 @@ log before touching any code.
 ## Citation rule
 
 **Every protocol item cites its source in a doc comment** — `[MS-OXCROPS] §2.2.4.1.1`, not just
-"the spec". With 668 pages across six documents, an uncited constant is unverifiable in practice,
+"the spec". With 747 pages across eight documents, an uncited constant is unverifiable in practice,
 which in a binary protocol means it is indistinguishable from a transcription error.
 
 ```rust

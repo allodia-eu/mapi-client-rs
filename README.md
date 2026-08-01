@@ -25,10 +25,11 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: pre-release.** `mapi-proto` — the sans-io codec — is implemented: the MAPI/HTTP
+> **Status: pre-release.** Two crates are implemented, both sans-io: `mapi-proto` (the MAPI/HTTP
 > envelope, the ROP layer with type-safe handle chaining, the OXCDATA structures and the session
-> state machine. Autodiscover, the async client and the CLI are next. No crate is published yet.
-> See `SCAFFOLD-PLAN.md` for the full plan and sequence.
+> state machine) and `mapi-autodiscover` (locating the endpoint in the first place). The async
+> client and the CLI are next. No crate is published yet. See `SCAFFOLD-PLAN.md` for the full plan
+> and sequence.
 
 ## What CI does and does not prove
 
