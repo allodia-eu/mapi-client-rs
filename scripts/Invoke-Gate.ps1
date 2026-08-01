@@ -224,9 +224,11 @@ try {
         $floor = Get-CoverageFloor
         Write-Host "    floor $floor% (from codecov.yml)"
 
+        # Anchored on the crate directory rather than on the name: a bare 'mapi-cli' also matches
+        # this repository's own path, which silently excluded every file from the measurement.
         $common = @(
             'llvm-cov', '--workspace', '--all-features',
-            '--ignore-filename-regex', 'mapi-cli')
+            '--ignore-filename-regex', 'crates.mapi-cli.src')
 
         # An empty workspace measures zero lines, and llvm-cov reports that as "-" rather than as
         # a percentage, so --fail-under-lines fails on a codebase that has nothing wrong with it.

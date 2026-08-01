@@ -174,7 +174,7 @@ jobs:
           floor='${{ needs.toolchain.outputs.coverage-floor }}'
 
           cargo llvm-cov --workspace --all-features \
-            --ignore-filename-regex 'mapi-cli' \
+            --ignore-filename-regex 'crates.mapi-cli.src' \
             --lcov --output-path lcov.info
 
           # An empty workspace measures zero lines, which llvm-cov reports as "-" rather than a
@@ -182,7 +182,7 @@ jobs:
           # Enforce the floor only when there is something to measure. This never weakens once
           # code exists, which is the property that matters. Mirrors Invoke-Gate.ps1.
           total_lines=$(cargo llvm-cov report --summary-only \
-            --ignore-filename-regex 'mapi-cli' \
+            --ignore-filename-regex 'crates.mapi-cli.src' \
             | awk '/^TOTAL/ { print $8 }')
 
           if [ -z "${total_lines:-}" ] || [ "$total_lines" -eq 0 ]; then
@@ -190,7 +190,7 @@ jobs:
             exit 0
           fi
 
-          cargo llvm-cov report --ignore-filename-regex 'mapi-cli' --fail-under-lines "$floor"
+          cargo llvm-cov report --ignore-filename-regex 'crates.mapi-cli.src' --fail-under-lines "$floor"
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v5
