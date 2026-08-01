@@ -25,9 +25,10 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: pre-release scaffolding.** The workspace, quality gates, spec pipeline and CI are in
-> place; the protocol implementation is being ported in. No crate is published yet. See
-> `SCAFFOLD-PLAN.md` for the full plan and sequence.
+> **Status: pre-release.** `mapi-proto` — the sans-io codec — is implemented: the MAPI/HTTP
+> envelope, the ROP layer with type-safe handle chaining, the OXCDATA structures and the session
+> state machine. Autodiscover, the async client and the CLI are next. No crate is published yet.
+> See `SCAFFOLD-PLAN.md` for the full plan and sequence.
 
 ## What CI does and does not prove
 

@@ -11,7 +11,21 @@ Part of [`mapi-client-rs`](https://github.com/allodia-eu/mapi-client-rs). Every 
 cites its Microsoft Open Specification section; see `SPEC.md` in the repository root for the
 pinned document versions.
 
-**Status:** pre-release scaffolding — no public API yet.
+```rust
+use mapi_proto::{FolderId, HIERARCHY_COLUMNS, ObjectHandle, RopBatch};
+
+// Handle indices are never written by hand: issuing a ROP returns a token later ROPs consume.
+let mut batch = RopBatch::new();
+let folder = batch.open_folder(logon, FolderId::new(0x0D00_0000_0000_0001));
+let table = batch.hierarchy_table(folder);
+batch.set_columns(table, &HIERARCHY_COLUMNS).query_rows(table, 50);
+
+let request = session.execute(batch)?;   // one round trip for the whole chain
+```
+
+**Status:** pre-release. The transport envelope, the ROP layer, the OXCDATA structures and the
+session state machine are implemented; `Connect`, `Execute`, `Disconnect` and `PING` are the
+request types covered, with logon, folder and table ROPs on top.
 
 ## Licence
 
