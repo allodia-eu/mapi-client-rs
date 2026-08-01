@@ -1,0 +1,90 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/mapi-proto",
+    "crates/mapi-autodiscover",
+    "crates/mapi-client",
+    "crates/mapi-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+# Kept in lockstep with rust-toolchain.toml, which is the single source of truth
+# for the version CI installs. This field is what tells *consumers* the floor.
+rust-version = "1.97"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/allodia-eu/mapi-client-rs"
+homepage = "https://github.com/allodia-eu/mapi-client-rs"
+authors = ["Dennis Ameling <dennis@dennisameling.nl>"]
+keywords = ["mapi", "exchange", "outlook", "email", "protocol"]
+categories = ["email", "network-programming", "parser-implementations"]
+
+[workspace.dependencies]
+mapi-proto = { version = "0.1.0", path = "crates/mapi-proto" }
+mapi-autodiscover = { version = "0.1.0", path = "crates/mapi-autodiscover" }
+mapi-client = { version = "0.1.0", path = "crates/mapi-client" }
+
+thiserror = "2"
+
+# ---------------------------------------------------------------------------
+# Lints
+#
+# Every crate opts in with `[lints] workspace = true`. Nothing here is advisory:
+# CI runs `clippy --all-targets --all-features -- -D warnings`.
+# ---------------------------------------------------------------------------
+
+[workspace.lints.rust]
+# `forbid`, not `deny`: a module cannot opt back in with `#![allow(unsafe_code)]`.
+unsafe_code = "forbid"
+missing_docs = "deny"
+missing_debug_implementations = "deny"
+unreachable_pub = "deny"
+unused_qualifications = "deny"
+trivial_casts = "deny"
+trivial_numeric_casts = "deny"
+rust_2018_idioms = { level = "deny", priority = -1 }
+
+[workspace.lints.rustdoc]
+all = { level = "deny", priority = -1 }
+missing_crate_level_docs = "deny"
+
+[workspace.lints.clippy]
+all = { level = "deny", priority = -1 }
+pedantic = { level = "deny", priority = -1 }
+cargo = { level = "deny", priority = -1 }
+
+# Specifically for a binary protocol parser. `indexing_slicing` is the important
+# one: it forces `.get()` everywhere, which makes "this parser never panics on
+# hostile input" a structural property rather than a hoped-for one.
+indexing_slicing = "deny"
+arithmetic_side_effects = "deny"
+as_conversions = "deny"
+cast_possible_truncation = "deny"
+cast_possible_wrap = "deny"
+cast_sign_loss = "deny"
+unwrap_used = "deny"
+expect_used = "deny"
+panic = "deny"
+unreachable = "deny"
+todo = "deny"
+unimplemented = "deny"
+dbg_macro = "deny"
+print_stdout = "deny"
+print_stderr = "deny"
+# Relaxations for the above inside `#[cfg(test)]` live in clippy.toml, so the
+# production path keeps the full set.
+
+# Cargo group, with the one exception that is not actionable: transitive
+# dependency trees routinely carry two majors of the same crate, and we do not
+# control that. Re-evaluate if it ever flags a *direct* duplicate.
+multiple_crate_versions = "allow"
+
+[profile.dev]
+# Full debuginfo is the single biggest contributor to `target/` bloat — an
+# earlier workspace reached 1.19 GB for one dependency by silently opting out of
+# this. Line tables are all a backtrace actually needs.
+debug = "line-tables-only"
+
+[profile.test]
+debug = "line-tables-only"

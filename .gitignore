@@ -1,0 +1,21 @@
+# Rust
+/target/
+**/*.rs.bk
+*.pdb
+
+# Microsoft Open Specification documents.
+#
+# Local copies only — never committed. The IP notice permits copies "in order to
+# develop implementations", but shipping ~26 MB of Microsoft PDFs in a public repo
+# is unnecessary and muddies the licensing story.
+#
+# Versions and download URLs are pinned in SPEC.md; fetch with scripts/Get-Specs.ps1.
+/spec/
+
+# Captured fixtures are committed (they are the offline test corpus), but the raw
+# unscrubbed staging area never is.
+/fixtures/**/raw/
+
+# Local environment
+.env
+*.local.ps1

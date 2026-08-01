@@ -1,0 +1,276 @@
+# CI for mapi-client-rs.
+#
+# There is deliberately no live job. CI never sees the Exchange server, so a green badge here
+# means "the committed fixtures still decode and every gate passes" — never "verified against
+# Exchange". Live verification is scripts/Test-Live.ps1, run deliberately, on a machine that has
+# the lab. The README says the same thing, so nobody has to infer it.
+#
+# scripts/Invoke-Gate.ps1 mirrors this file step for step. If you change one, change the other.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  RUSTFLAGS: -D warnings
+  # Keeps the runner's target/ small for the cache, for the same reason
+  # [profile.dev] debug = "line-tables-only" exists in Cargo.toml.
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # rust-toolchain.toml is the single source of truth. Every other job reads the
+  # version from here rather than repeating it.
+  # ---------------------------------------------------------------------------
+  toolchain:
+    name: toolchain
+    runs-on: ubuntu-latest
+    outputs:
+      channel: ${{ steps.parse.outputs.channel }}
+      coverage-floor: ${{ steps.parse.outputs.coverage_floor }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: parse
+        name: Parse pinned toolchain and coverage floor
+        run: |
+          set -euo pipefail
+
+          channel=$(grep -oP 'channel\s*=\s*"\K[^"]+' rust-toolchain.toml)
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+          # The coverage floor is defined once, in codecov.yml. Read it, do not repeat it.
+          floor=$(grep -A3 '^\s*project:' codecov.yml | grep -oP 'target:\s*\K\d+' | head -1)
+          echo "coverage_floor=$floor" >> "$GITHUB_OUTPUT"
+
+          # An MSRV claim that disagrees with the pinned toolchain is a claim that is wrong.
+          declared=$(grep -oP '^rust-version\s*=\s*"\K[^"]+' Cargo.toml)
+          case "$channel" in
+            "$declared"*) ;;
+            *) echo "::error::rust-toolchain.toml pins $channel but Cargo.toml declares rust-version $declared"; exit 1 ;;
+          esac
+
+          echo "toolchain $channel | MSRV $declared | coverage floor ${floor}%" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  fmt:
+    name: fmt
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # Nightly, because rustfmt.toml uses nightly-only options (error_on_line_overflow,
+      # wrap_comments, imports_granularity). The compiler itself stays on stable.
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rustfmt
+      - run: cargo +nightly fmt --all -- --check
+
+  # ---------------------------------------------------------------------------
+  clippy:
+    name: clippy
+    needs: toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+  # ---------------------------------------------------------------------------
+  build:
+    name: build
+    needs: toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo build --workspace --all-features
+
+  # ---------------------------------------------------------------------------
+  # Both platforms, because this crate's whole point is that it does not require
+  # Windows — an accidental platform dependency must fail here, not for a user.
+  # ---------------------------------------------------------------------------
+  test:
+    name: test (${{ matrix.os }})
+    needs: toolchain
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@nextest
+      # --no-tests=warn because the workspace is still being populated and nextest treats an empty
+      # suite as an error. Not a hole in the gate: a suite that silently emptied out would fail
+      # the 95% coverage floor long before it would fail here.
+      - run: cargo nextest run --workspace --all-features --no-tests=warn
+      # nextest does not run doctests, and the doctests on the main entry points are part of the
+      # public API contract. Run them rather than lose them.
+      - run: cargo test --workspace --all-features --doc
+
+  # ---------------------------------------------------------------------------
+  doc:
+    name: doc
+    needs: toolchain
+    runs-on: ubuntu-latest
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo doc --workspace --all-features --no-deps
+
+  # ---------------------------------------------------------------------------
+  coverage:
+    name: coverage
+    needs: toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+          components: llvm-tools-preview
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Measure coverage
+        run: |
+          set -euo pipefail
+          floor='${{ needs.toolchain.outputs.coverage-floor }}'
+
+          cargo llvm-cov --workspace --all-features \
+            --ignore-filename-regex 'mapi-cli' \
+            --lcov --output-path lcov.info
+
+          # An empty workspace measures zero lines, which llvm-cov reports as "-" rather than a
+          # percentage, so --fail-under-lines would fail a codebase with nothing wrong with it.
+          # Enforce the floor only when there is something to measure. This never weakens once
+          # code exists, which is the property that matters. Mirrors Invoke-Gate.ps1.
+          total_lines=$(cargo llvm-cov report --summary-only \
+            --ignore-filename-regex 'mapi-cli' \
+            | awk '/^TOTAL/ { print $8 }')
+
+          if [ -z "${total_lines:-}" ] || [ "$total_lines" -eq 0 ]; then
+            echo "::warning::No instrumented lines yet - the ${floor}% floor is not enforceable until code lands."
+            exit 0
+          fi
+
+          cargo llvm-cov report --ignore-filename-regex 'mapi-cli' --fail-under-lines "$floor"
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: lcov.info
+          fail_ci_if_error: false
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
+  # ---------------------------------------------------------------------------
+  # The mechanism behind "permissive dependencies only": a copyleft transitive
+  # dependency fails the build rather than being noticed at publish time.
+  # ---------------------------------------------------------------------------
+  deny:
+    name: deny
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+
+  # ---------------------------------------------------------------------------
+  # Posts the public API diff on every PR, so an accidental breaking change is
+  # visible in review rather than after publish.
+  # ---------------------------------------------------------------------------
+  public-api:
+    name: public-api
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@nightly
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-public-api
+
+      - name: Diff public API against the base branch
+        run: |
+          set -euo pipefail
+          git fetch origin "${{ github.event.pull_request.base.ref }}" --depth=1
+
+          {
+            echo "## Public API diff"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          for pkg in mapi-proto mapi-autodiscover mapi-client; do
+            echo "### \`$pkg\`" >> "$GITHUB_STEP_SUMMARY"
+            echo '```diff' >> "$GITHUB_STEP_SUMMARY"
+            cargo public-api --package "$pkg" diff \
+              "origin/${{ github.event.pull_request.base.ref }}" \
+              >> "$GITHUB_STEP_SUMMARY" 2>&1 || echo "(diff unavailable for $pkg)" >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          done
+
+  # ---------------------------------------------------------------------------
+  typos:
+    name: typos
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: crate-ci/typos@master
+
+  # ---------------------------------------------------------------------------
+  # Runs on Windows because Check-FileLength.ps1 is a PowerShell 5.1 script, and
+  # 5.1 is Windows-only by definition (see scripts/_Boot.ps1 for why 5.1). One
+  # implementation, exercised the same way locally and in CI.
+  # ---------------------------------------------------------------------------
+  file-length:
+    name: file-length
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the 500-line limit
+        shell: powershell
+        run: .\scripts\Check-FileLength.ps1
+
+  # ---------------------------------------------------------------------------
+  # One required check to point branch protection at, so adding a job later does
+  # not silently leave it unenforced.
+  # ---------------------------------------------------------------------------
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [toolchain, fmt, clippy, build, test, doc, coverage, deny, typos, file-length]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail if any needed job did not succeed
+        if: contains(needs.*.result, 'failure') || contains(needs.*.result, 'cancelled')
+        run: exit 1
+      - run: echo "All gates passed."

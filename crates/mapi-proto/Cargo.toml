@@ -1,0 +1,19 @@
+[package]
+name = "mapi-proto"
+description = "Sans-io codec for MAPI over HTTP: the wire envelope, ROPs and OXCDATA structures, with no network and no async runtime."
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+[lints]
+workspace = true

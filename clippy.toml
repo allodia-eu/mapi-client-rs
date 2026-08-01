@@ -1,0 +1,16 @@
+# The strict lints in [workspace.lints.clippy] are relaxed inside `#[cfg(test)]`
+# only. A test that indexes a fixture at a known offset and unwraps the result
+# is saying something true about the fixture; the same code in the parser would
+# be a panic waiting for a malformed packet.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true
+allow-panic-in-tests = true
+allow-indexing-slicing-in-tests = true
+allow-dbg-in-tests = true
+allow-print-in-tests = true
+
+# Kept in lockstep with workspace.package.rust-version.
+msrv = "1.97.0"
+
+# Protocol constants are written the way the spec writes them.
+literal-representation-threshold = 16

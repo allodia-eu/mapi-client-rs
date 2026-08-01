@@ -1,0 +1,22 @@
+[files]
+extend-exclude = [
+    "spec/",
+    "fixtures/",
+    "LICENSE-APACHE",
+    "LICENSE-MIT",
+]
+
+[default]
+# Git SHAs and hex constants are not words. Without this, `4d458ba` is reported as a misspelling
+# of "by", which is the kind of false positive that teaches people to ignore the tool.
+extend-ignore-identifiers-re = [
+    "\\b[0-9a-f]{7,40}\\b",
+]
+
+[default.extend-words]
+# MAPI/Exchange vocabulary that reads as a typo to a spell checker.
+DN = "DN"          # distinguished name, as in LegacyDN
+dn = "dn"
+ROP = "ROP"        # remote operation
+rop = "rop"
+nd = "nd"

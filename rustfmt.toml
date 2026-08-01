@@ -1,0 +1,29 @@
+# Formatting is checked with the *nightly* rustfmt (CI pins it), because the
+# options that actually matter for a spec-citing codebase — wrapping doc
+# comments, normalising them, erroring rather than silently overflowing — are
+# all nightly-only. The compiler toolchain stays pinned at stable 1.97.0.
+style_edition = "2024"
+
+max_width = 100
+error_on_line_overflow = true
+error_on_unformatted = true
+
+# Doc comments carry the spec citations. Left unwrapped they drift past 100
+# columns and stop being reviewable in a side-by-side diff.
+comment_width = 100
+wrap_comments = true
+format_code_in_doc_comments = true
+doc_comment_code_block_width = 90
+normalize_comments = true
+normalize_doc_attributes = true
+
+format_macro_matchers = true
+format_strings = false
+
+group_imports = "StdExternalCrate"
+imports_granularity = "Module"
+reorder_impl_items = true
+
+use_field_init_shorthand = true
+use_try_shorthand = true
+newline_style = "Unix"

@@ -1,0 +1,44 @@
+# Line-ending policy, set explicitly because this repository stores byte-exact
+# protocol captures and `core.autocrlf` is on by default on Windows.
+#
+# A fixture that git "helpfully" converts LF to CRLF in is not a fixture any
+# more: every offset after the first 0x0A shifts by one, and the decoder fails
+# somewhere unrelated to the actual corruption. The binary rules below are the
+# most load-bearing lines in this file.
+
+# Sensible default: normalise text to LF in the repository.
+* text=auto eol=lf
+
+# ---------------------------------------------------------------------------
+# Binary. Never converted, never diffed as text.
+# ---------------------------------------------------------------------------
+*.bin       binary
+*.pdf       binary
+*.png       binary
+*.ico       binary
+
+# Captured request/response bodies, whatever they are named.
+fixtures/**/*.request.*   binary
+fixtures/**/*.response.*  binary
+
+# ---------------------------------------------------------------------------
+# PowerShell scripts are Windows-only by design (see scripts/_Boot.ps1), so
+# CRLF is the native choice. They are also required to carry a UTF-8 BOM, which
+# Invoke-Gate.ps1 checks; the BOM is at byte 0 and unaffected by eol handling.
+# ---------------------------------------------------------------------------
+*.ps1       text eol=crlf
+*.psd1      text eol=crlf
+*.psm1      text eol=crlf
+
+# ---------------------------------------------------------------------------
+# Everything else that must stay LF regardless of platform.
+# ---------------------------------------------------------------------------
+*.rs        text eol=lf
+*.toml      text eol=lf
+*.yml       text eol=lf
+*.yaml      text eol=lf
+*.md        text eol=lf
+*.sh        text eol=lf
+
+# Keep generated/vendored noise out of diffs and language stats.
+Cargo.lock  linguist-generated=true

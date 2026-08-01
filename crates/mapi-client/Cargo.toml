@@ -1,0 +1,20 @@
+[package]
+name = "mapi-client"
+description = "Async client for MAPI over HTTP: HTTP, TLS, auth and retry over the sans-io mapi-proto codec."
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+mapi-proto.workspace = true
+thiserror.workspace = true
+
+[lints]
+workspace = true

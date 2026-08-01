@@ -1,0 +1,9 @@
+# The single source of truth for the toolchain version. CI parses this file
+# rather than repeating the number, so there is exactly one place to bump.
+#
+# `workspace.package.rust-version` in Cargo.toml states the same floor to
+# *consumers*; the two are kept in lockstep and Invoke-Gate.ps1 checks it.
+[toolchain]
+channel = "1.97.0"
+components = ["rustfmt", "clippy", "llvm-tools-preview"]
+profile = "minimal"

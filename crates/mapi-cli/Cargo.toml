@@ -1,0 +1,27 @@
+[package]
+name = "mapi-cli"
+description = "Diagnostic command-line client for MAPI over HTTP, and the fixture capture tool."
+readme = "README.md"
+# Diagnostic tooling, not a library surface. Keeping it unpublished keeps its
+# dependencies out of anything a consumer resolves.
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[[bin]]
+name = "mapi-cli"
+path = "src/main.rs"
+
+[dependencies]
+mapi-client.workspace = true
+mapi-proto.workspace = true
+
+[lints]
+workspace = true
