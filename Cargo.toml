@@ -16,7 +16,7 @@ rust-version = "1.97"
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/allodia-eu/mapi-client-rs"
 homepage = "https://github.com/allodia-eu/mapi-client-rs"
-authors = ["Dennis Ameling <dennis@dennisameling.nl>"]
+authors = ["Dennis Ameling - Allodia <info@allodia.eu>"]
 keywords = ["mapi", "exchange", "outlook", "email", "protocol"]
 categories = ["email", "network-programming", "parser-implementations"]
 

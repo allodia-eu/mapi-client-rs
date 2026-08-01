@@ -52,6 +52,13 @@ if ($List) {
 }
 
 if ($Only) {
+    # powershell.exe -File passes every argument as a plain string, so the documented
+    # `-Only fmt,clippy` arrives as the single element "fmt,clippy" rather than as two. Splitting
+    # here makes the documented form work and costs nothing for the -Command form, which really
+    # does bind an array.
+    $Only = @($Only | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } |
+        Where-Object { $_ })
+
     foreach ($name in $Only) {
         if ($stepNames -notcontains $name) {
             throw "Unknown step '$name'. Known steps: $($stepNames -join ', ')"
