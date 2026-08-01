@@ -229,7 +229,12 @@ jobs:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@cargo-public-api
+      # The tool name is an input here, not a tag: unlike `@nextest` and `@cargo-llvm-cov`, there
+      # is no `@cargo-public-api` tag, and an unresolvable action fails the job before any step
+      # runs — which is what happened the first time this job ever executed.
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-public-api
 
       - name: Diff public API against the base branch
         run: |
@@ -244,7 +249,10 @@ jobs:
           for pkg in mapi-proto mapi-autodiscover mapi-client; do
             echo "### \`$pkg\`" >> "$GITHUB_STEP_SUMMARY"
             echo '```diff' >> "$GITHUB_STEP_SUMMARY"
-            cargo public-api --package "$pkg" diff \
+            # +nightly explicitly: rust-toolchain.toml selects stable for this directory and
+            # rustdoc JSON is nightly-only, so a plain `cargo public-api` would fall into the
+            # fallback below and report nothing while looking green. Mirrors Invoke-Gate.ps1.
+            cargo +nightly public-api --package "$pkg" diff \
               "origin/${{ github.event.pull_request.base.ref }}" \
               >> "$GITHUB_STEP_SUMMARY" 2>&1 || echo "(diff unavailable for $pkg)" >> "$GITHUB_STEP_SUMMARY"
             echo '```' >> "$GITHUB_STEP_SUMMARY"
