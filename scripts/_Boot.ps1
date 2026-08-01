@@ -212,10 +212,14 @@ function Resolve-PdfToText {
         Absolute path to poppler's pdftotext.exe, verified to actually be poppler.
 
     .DESCRIPTION
-        Resolving this by name alone is a trap. On this machine `pdftotext` on PATH is the Python
-        `pdftotext` package's shim, which shares the name, exits 0, prints "Done!" for -v, and
-        takes different arguments. Check-SpecVersion.ps1 calling it would extract nothing, find no
-        version string, and report a spec mismatch that does not exist.
+        Resolving this by name alone is a trap, and not a hypothetical one: the Python `pdftotext`
+        package installs a shim of the same name that exits 0, prints "Done!" for -v, and takes
+        different arguments. When it shadowed poppler on the original development machine,
+        Check-SpecVersion.ps1 extracted nothing, found no version string, and would have reported
+        a spec mismatch that did not exist.
+
+        That particular shim has since been removed from that machine, which is exactly why the
+        check stays: the next clone is on a machine nobody has audited.
 
         So: prefer an explicit MAPI_PDFTOTEXT override, then scan the known install locations, and
         in every case confirm the binary identifies itself as poppler before returning it. A tool
