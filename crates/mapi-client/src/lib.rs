@@ -87,6 +87,7 @@ mod connection;
 mod credentials;
 mod logon;
 mod observer;
+mod properties;
 mod table;
 mod transport;
 
@@ -106,9 +107,10 @@ pub use mapi_proto;
 /// The types from [`mapi-proto`](mapi_proto) that appear in this crate's own API, re-exported
 /// so that the common path needs one dependency rather than two.
 pub use mapi_proto::{
-    Bookmark, CONTENTS_COLUMNS, Cell, Connected, ErrorCode, FileTime, FolderId, Guid,
-    HIERARCHY_COLUMNS, Headers, Lcid, LegacyDn, LogonResponse, MessageId, PropertyRow, PropertyTag,
-    PropertyType, PropertyValue, ReplicaId, RequestType, RowForm, TableString, WellKnownFolder,
+    Bookmark, CONTENTS_COLUMNS, Cell, Connected, ErrorCode, FileTime, Floating64, FolderId, Guid,
+    HIERARCHY_COLUMNS, Headers, Lcid, LegacyDn, LogonResponse, MAILBOX_PROPERTIES, MessageId,
+    PropertyProblem, PropertyRow, PropertySet, PropertySetIter, PropertyTag, PropertyType,
+    PropertyValue, ReplicaId, RequestType, RowForm, TableString, TaggedValue, WellKnownFolder,
 };
 
 pub use crate::builder::MapiClientBuilder;
@@ -118,6 +120,7 @@ pub use crate::credentials::Credentials;
 pub use crate::error::{Error, Result};
 pub use crate::logon::{Folder, Logon};
 pub use crate::observer::{Exchange, Observer};
+pub use crate::properties::Properties;
 pub use crate::table::{Rows, TableRead};
 
 /// Names an outcome for an error message, when the one that arrived is not the one expected.
@@ -149,6 +152,7 @@ mod tests {
         assert::<Logon>();
         assert::<Error>();
         assert::<Folder<'_>>();
+        assert::<Properties<'_>>();
         assert::<TableRead<'_>>();
         assert::<Rows<'_>>();
         assert::<Exchange<'_>>();

@@ -14,7 +14,9 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Args;
-use mapi_client::{MapiClient, WellKnownFolder};
+use mapi_client::{
+    MAILBOX_PROPERTIES, MapiClient, PropertyTag, PropertyValue, TaggedValue, WellKnownFolder,
+};
 
 use crate::capture::{Recorder, scenario_directory, write_scenario};
 use crate::scrub::Rules;
@@ -26,6 +28,18 @@ const HIERARCHY_PAGE: u16 = 8;
 
 /// Messages per round trip, chosen so that a five-message inbox needs three of them.
 const CONTENTS_PAGE: u16 = 2;
+
+/// The comment the capture tries to set on the Store object, and never does.
+///
+/// [MS-OXCSTOR] §2.2.2.1.2.1 note 14 says Exchange 2013 SP1 and later answer `ecAccessDenied` when
+/// a client sets `PidTagComment`, and the lab confirms it — so this write is captured precisely
+/// *because* it changes nothing, and it gives the corpus its only evidence of what a refused
+/// property looks like: a ROP that succeeded, carrying a `PropertyProblem` that says the property
+/// did not.
+///
+/// If a future server ever accepted it, the mailbox would gain this comment and
+/// `Verify-Fixtures.ps1` would report the changed response. Both are visible; neither is quiet.
+const COMMENT_PROBE: &str = "mapi-client-rs probe";
 
 /// What `mapi-cli capture` was asked to do.
 #[derive(Clone, Debug, Args)]
@@ -200,6 +214,44 @@ async fn session(client: &MapiClient, recorder: &Recorder) -> Result<(), Failure
     recorder.label("logon");
     let mut logon = connection.logon().await?;
     let subtree = logon.folder_id(WellKnownFolder::IpmSubtree)?;
+
+    // The Store object's own properties, by name. `RopGetPropertiesAll` is deliberately *not*
+    // captured: its answer on the lab carries a dozen server clocks that move on every logon, so a
+    // fixture of it would make `Verify-Fixtures.ps1` report a difference every single run and the
+    // one difference that mattered would be lost in the noise. Normalising a tagged property list
+    // is its own piece of work, and it belongs with the rest of the write-fixture harness.
+    recorder.label("properties");
+    let mailbox = logon.store().read(MAILBOX_PROPERTIES).await?;
+    println!(
+        "  {} store properties, {} of them refused by the server",
+        mailbox.len(),
+        mailbox
+            .iter()
+            .filter(|cell| cell.value().as_error().is_some())
+            .count()
+    );
+
+    // A write the server refuses, which is why it is safe to capture. See `COMMENT_PROBE`.
+    recorder.label("properties-refused");
+    let problems = logon
+        .store()
+        .write(&[TaggedValue::new(
+            PropertyTag::COMMENT,
+            PropertyValue::String(COMMENT_PROBE.into()),
+        )?])
+        .await?;
+    println!(
+        "  setting PidTagComment reported {} problem(s)",
+        problems.len()
+    );
+    if problems.is_empty() {
+        return Err(Failure::from(
+            "the server accepted a write to PidTagComment. [MS-OXCSTOR] §2.2.2.1.2.1 note 14 says \
+             it will not, and this capture is only safe to run because of that — the mailbox now \
+             carries the probe comment. Remove it, and re-think this scenario before committing."
+                .to_owned(),
+        ));
+    }
 
     // The hierarchy, paged: the first round trip opens the folder, opens the table, sets the
     // columns and reads a page; every later one is a bare `RopQueryRows` against a handle that
