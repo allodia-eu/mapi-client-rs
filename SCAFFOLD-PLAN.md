@@ -159,7 +159,7 @@ canned bytes whatever you send, and a wrong `RopBuffer` is not readable by inspe
 
 - `scripts/Capture-Fixtures.ps1` — drives `mapi-cli` against the live server, writes byte-exact
   request/response pairs, scrubs, and updates `MANIFEST.toml`.
-- `fixtures/MANIFEST.toml` — records `X-ServerApplication` (currently `15.02.2562.000`), capture
+- `fixtures/MANIFEST.toml` — records `X-ServerApplication` (currently `15.02.2562.045`), capture
   date, spec version and a sha256 per file, so drift is *detectable* rather than assumed absent.
 - `scripts/Verify-Fixtures.ps1` — re-captures against the live server and diffs against what is
   committed. This is your "did Microsoft change the protocol" button.

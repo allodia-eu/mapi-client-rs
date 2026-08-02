@@ -130,6 +130,6 @@ pub(crate) fn ok_headers() -> crate::Headers {
     let mut headers = crate::Headers::new();
     headers
         .append("X-ResponseCode", "0")
-        .append("X-ServerApplication", "Exchange/15.02.2562.000");
+        .append("X-ServerApplication", "Exchange/15.02.2562.045");
     headers
 }
