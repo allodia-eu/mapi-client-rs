@@ -147,9 +147,9 @@ The Microsoft Open Specification documents are authoritative — over this repos
 any blog post, over any other implementation, and over any inference from an observed transcript.
 Every protocol item cites its section: `[MS-OXCROPS] §2.2.4.1.1`, never just "the spec".
 
-Eight documents — seven pinned at `v20250520`, `[MS-OXDSCLI]` at `v20250819`. They are **never
-committed**; [`SPEC.md`](SPEC.md) carries the URLs and one command fetches them into a gitignored
-`spec/`:
+Seventeen documents — fifteen pinned at `v20250520`, `[MS-OXDSCLI]` and `[MS-OXOCAL]` at
+`v20250819`. They are **never committed**; [`SPEC.md`](SPEC.md) carries the URLs and one command
+fetches them into a gitignored `spec/`:
 
 ```powershell
 powershell.exe -File scripts\Get-Specs.ps1

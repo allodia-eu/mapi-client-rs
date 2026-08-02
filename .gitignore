@@ -6,7 +6,7 @@
 # Microsoft Open Specification documents.
 #
 # Local copies only — never committed. The IP notice permits copies "in order to
-# develop implementations", but shipping ~26 MB of Microsoft PDFs in a public repo
+# develop implementations", but shipping ~58 MB of Microsoft PDFs in a public repo
 # is unnecessary and muddies the licensing story.
 #
 # Versions and download URLs are pinned in SPEC.md; fetch with scripts/Get-Specs.ps1.
