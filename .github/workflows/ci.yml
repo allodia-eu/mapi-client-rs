@@ -41,7 +41,7 @@ jobs:
       channel: ${{ steps.parse.outputs.channel }}
       coverage-floor: ${{ steps.parse.outputs.coverage_floor }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - id: parse
         name: Parse pinned toolchain and coverage floor
@@ -80,7 +80,7 @@ jobs:
     name: fmt
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # Nightly, because rustfmt.toml uses nightly-only options (error_on_line_overflow,
       # wrap_comments, imports_granularity). The compiler itself stays on stable.
       - uses: dtolnay/rust-toolchain@nightly
@@ -94,7 +94,7 @@ jobs:
     needs: toolchain
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ needs.toolchain.outputs.channel }}
@@ -108,7 +108,7 @@ jobs:
     needs: toolchain
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ needs.toolchain.outputs.channel }}
@@ -128,12 +128,14 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ needs.toolchain.outputs.channel }}
       - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@nextest
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: nextest
       # --no-tests=warn because the workspace is still being populated and nextest treats an empty
       # suite as an error. Not a hole in the gate: a suite that silently emptied out would fail
       # the 95% coverage floor long before it would fail here.
@@ -150,7 +152,7 @@ jobs:
     env:
       RUSTDOCFLAGS: -D warnings
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ needs.toolchain.outputs.channel }}
@@ -163,13 +165,15 @@ jobs:
     needs: toolchain
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ needs.toolchain.outputs.channel }}
           components: llvm-tools-preview
       - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@cargo-llvm-cov
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-llvm-cov
 
       - name: Measure coverage
         run: |
@@ -196,7 +200,7 @@ jobs:
           cargo llvm-cov report --ignore-filename-regex 'crates.mapi-cli.src' --fail-under-lines "$floor"
 
       - name: Upload to Codecov
-        uses: codecov/codecov-action@v5
+        uses: codecov/codecov-action@v7
         with:
           files: lcov.info
           token: ${{ secrets.CODECOV_TOKEN }}
@@ -212,7 +216,7 @@ jobs:
     name: deny
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check
@@ -227,14 +231,17 @@ jobs:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@nightly
       - uses: Swatinem/rust-cache@v2
-      # The tool name is an input here, not a tag: unlike `@nextest` and `@cargo-llvm-cov`, there
-      # is no `@cargo-public-api` tag, and an unresolvable action fails the job before any step
-      # runs — which is what happened the first time this job ever executed.
+      # The tool is an input, not a tag. install-action publishes per-tool tags like `@nextest`,
+      # but they carry no version, so there is nothing to keep up to date and nothing to review
+      # when they move; every use here pins `@v2` and names the tool instead. It is also the only
+      # form that works for every tool — there is no `@cargo-public-api` tag, and an unresolvable
+      # action fails the job before any step runs, which is what happened the first time this job
+      # ever executed.
       - uses: taiki-e/install-action@v2
         with:
           tool: cargo-public-api
@@ -273,8 +280,8 @@ jobs:
     name: typos
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
-      - uses: crate-ci/typos@master
+      - uses: actions/checkout@v7
+      - uses: crate-ci/typos@v1
 
   # ---------------------------------------------------------------------------
   # Runs on Windows because Check-FileLength.ps1 is a PowerShell 5.1 script, and
@@ -285,7 +292,7 @@ jobs:
     name: file-length
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Check the 500-line limit
         shell: powershell
         run: .\scripts\Check-FileLength.ps1
@@ -303,7 +310,7 @@ jobs:
     name: no-secrets
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Check the fixtures identify no real deployment
         shell: powershell
         run: .\scripts\Assert-NoSecrets.ps1
