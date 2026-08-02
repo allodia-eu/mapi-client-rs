@@ -1,6 +1,7 @@
 //! Everything decided before the first request.
 
 use core::time::Duration;
+use std::sync::Arc;
 
 use mapi_proto::{Lcid, LegacyDn};
 use reqwest::Url;
@@ -8,6 +9,7 @@ use reqwest::Url;
 use crate::client::{Identity, MapiClient};
 use crate::credentials::Credentials;
 use crate::error::{Error, Result};
+use crate::observer::Observer;
 use crate::transport::Transport;
 
 /// How long to wait for a whole request/response exchange.
@@ -70,6 +72,7 @@ pub struct MapiClientBuilder {
     root_certificates: Vec<Vec<u8>>,
     accept_invalid_certificates: bool,
     allow_plaintext_http: bool,
+    observer: Option<Arc<dyn Observer>>,
 }
 
 impl Default for MapiClientBuilder {
@@ -93,6 +96,7 @@ impl MapiClientBuilder {
             root_certificates: Vec::new(),
             accept_invalid_certificates: false,
             allow_plaintext_http: false,
+            observer: None,
         }
     }
 
@@ -192,6 +196,40 @@ impl MapiClientBuilder {
         self
     }
 
+    /// Reports every request and the response it produced to an [`Observer`].
+    ///
+    /// Shared rather than given away, so the caller keeps its handle and can read whatever the
+    /// observer collected once the client has finished with it. Clones of the built client share
+    /// the same observer; a second call replaces the first, because one set of bytes reported twice
+    /// is worse than a knob that does not compose.
+    ///
+    /// This is how `mapi-cli` captures the fixture corpus, which is the reason it is a supported
+    /// part of the API rather than a debugging hook: the capture path and the diagnostic path are
+    /// the same path.
+    ///
+    /// ```
+    /// # use std::sync::Arc;
+    /// # use mapi_client::{Exchange, MapiClient, Observer};
+    /// # #[derive(Debug)]
+    /// # struct Log;
+    /// # impl Observer for Log {
+    /// #     fn observe(&self, _exchange: &Exchange<'_>) {}
+    /// # }
+    /// let watcher = Arc::new(Log);
+    /// let builder = MapiClient::builder().observer(Arc::clone(&watcher));
+    /// // `watcher` is still ours to read afterwards.
+    /// # let _ = (builder, watcher);
+    /// ```
+    ///
+    /// Takes the concrete `Arc<O>` rather than an `Arc<dyn Observer>` deliberately: the unsizing
+    /// happens here, so a caller does not have to write the `as Arc<dyn Observer>` cast that
+    /// `trivial_casts` — denied in this workspace, and in plenty of others — then rejects.
+    #[must_use]
+    pub fn observer<O: Observer + 'static>(mut self, observer: Arc<O>) -> Self {
+        self.observer = Some(observer);
+        self
+    }
+
     /// Allows an `http://` endpoint.
     ///
     /// Without this, a plaintext endpoint is refused with [`Error::PlaintextEndpoint`] rather than
@@ -260,6 +298,7 @@ impl MapiClientBuilder {
                 endpoint,
                 credentials: self.credentials,
                 timeout: self.timeout,
+                observer: self.observer,
             },
             identity: Identity::new(),
             user_dn,

@@ -67,6 +67,13 @@
 //! matters because a default-configured Exchange offers only those two — see [`Credentials`] for
 //! what to do about it.
 //!
+//! # Seeing the bytes
+//!
+//! A wrong ROP buffer is not readable by inspection, so [`MapiClientBuilder::observer`] hands every
+//! request and the response it produced to an [`Observer`] verbatim. That is what `mapi-cli`
+//! captures the repository's fixture corpus with — the capture path and the diagnostic path are
+//! deliberately the same path.
+//!
 //! # Specification authority
 //!
 //! Every protocol behaviour cites the Microsoft Open Specification document it comes from, by
@@ -79,6 +86,7 @@ mod client;
 mod connection;
 mod credentials;
 mod logon;
+mod observer;
 mod table;
 mod transport;
 
@@ -99,8 +107,8 @@ pub use mapi_proto;
 /// so that the common path needs one dependency rather than two.
 pub use mapi_proto::{
     Bookmark, CONTENTS_COLUMNS, Cell, Connected, ErrorCode, FileTime, FolderId, Guid,
-    HIERARCHY_COLUMNS, Lcid, LegacyDn, LogonResponse, MessageId, PropertyRow, PropertyTag,
-    PropertyType, PropertyValue, ReplicaId, RowForm, TableString, WellKnownFolder,
+    HIERARCHY_COLUMNS, Headers, Lcid, LegacyDn, LogonResponse, MessageId, PropertyRow, PropertyTag,
+    PropertyType, PropertyValue, ReplicaId, RequestType, RowForm, TableString, WellKnownFolder,
 };
 
 pub use crate::builder::MapiClientBuilder;
@@ -109,6 +117,7 @@ pub use crate::connection::Connection;
 pub use crate::credentials::Credentials;
 pub use crate::error::{Error, Result};
 pub use crate::logon::{Folder, Logon};
+pub use crate::observer::{Exchange, Observer};
 pub use crate::table::{Rows, TableRead};
 
 /// Names an outcome for an error message, when the one that arrived is not the one expected.
@@ -142,6 +151,7 @@ mod tests {
         assert::<Folder<'_>>();
         assert::<TableRead<'_>>();
         assert::<Rows<'_>>();
+        assert::<Exchange<'_>>();
     }
 
     #[test]

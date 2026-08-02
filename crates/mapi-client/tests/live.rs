@@ -69,6 +69,7 @@ async fn the_whole_sequence_works_against_a_real_server() {
     let subtree = logon
         .folder_id(WellKnownFolder::IpmSubtree)
         .expect("the IPM subtree");
+    let inbox = logon.folder_id(WellKnownFolder::Inbox).expect("an Inbox");
     println!(
         "logon returned {} folder ids",
         logon.mailbox().folder_ids().len()
@@ -84,19 +85,29 @@ async fn the_whole_sequence_works_against_a_real_server() {
             .map(TableString::as_str)
             .unwrap_or_default()
             .to_owned();
-        folders.push(name);
+        folders.push((row.folder_id(), name));
     }
     let total = rows.row_count();
     rows.close().await.expect("releasing the table");
 
+    let names: Vec<&str> = folders.iter().map(|(_, name)| &**name).collect();
     println!(
-        "{} subfolders (server reported {total:?}): {folders:?}",
+        "{} subfolders (server reported {total:?}): {names:?}",
         folders.len()
     );
-    assert!(
-        folders.iter().any(|name| name == "Inbox"),
-        "a mailbox has an Inbox: {folders:?}"
-    );
+
+    // By id, not by name. A mailbox's folder names are localised to the language it was
+    // provisioned with — a Dutch mailbox calls its Inbox `Postvak IN` — so a test that looked for
+    // "Inbox" would pass against an English mailbox and fail against every other one, which is the
+    // most misleading way for a test to be wrong. The id a logon reported is the same in every
+    // language, and finding it here is what proves the two agree.
+    //
+    // [MS-OXCSTOR] §2.2.1.1.3 — `FolderIds`
+    let Some((_, inbox_name)) = folders.iter().find(|(id, _)| *id == Some(inbox)) else {
+        panic!("the Inbox the logon named is not in the hierarchy: {names:?}")
+    };
+    println!("the Inbox in this mailbox's language is {inbox_name:?}");
+
     assert_eq!(total, Some(u32::try_from(folders.len()).unwrap()));
 
     // The contents table, read with the columns this crate defaults to.

@@ -25,11 +25,13 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: pre-release.** Three crates are implemented: `mapi-proto` (the sans-io MAPI/HTTP
+> **Status: pre-release.** All four crates are implemented — `mapi-proto` (the sans-io MAPI/HTTP
 > envelope, the ROP layer with type-safe handle chaining, the OXCDATA structures and the session
-> state machine), `mapi-autodiscover` (locating the endpoint in the first place, also sans-io) and
-> `mapi-client` (the async client that does the I/O). The CLI and the fixture pipeline are next. No
-> crate is published yet. See `SCAFFOLD-PLAN.md` for the full plan and sequence.
+> state machine), `mapi-autodiscover` (locating the endpoint in the first place, also sans-io),
+> `mapi-client` (the async client that does the I/O) and `mapi-cli` (the diagnostic binary, which
+> is also the fixture capture tool) — and the fixture corpus is captured from a real Exchange
+> Server SE. Next is driving coverage to the 95% floor and publishing `0.1.0`. No crate is
+> published yet. See `SCAFFOLD-PLAN.md` for the full plan and sequence.
 
 ## What CI does and does not prove
 
@@ -43,6 +45,16 @@ Because CI has no server, **the fixtures are the only thing standing between CI 
 — which is why they are byte-exact captures with a manifest recording the server version, capture
 date and a hash per file, rather than hand-written fakes. A fake answers canned bytes whatever you
 send it, and a wrong `RopBuffer` is not readable by inspection.
+
+What CI does with them is the part that matters: every captured exchange is replayed through the
+real client against an endpoint that answers exactly what Exchange answered, and **every request
+body is compared byte for byte against the one a real server accepted**. A change to any encoding
+fails there rather than months later against somebody's deployment.
+
+Two mailboxes are captured, in two languages, because a mailbox's folder names are localised to the
+language it was provisioned with — a Dutch mailbox calls its Inbox `Postvak IN`. A client that
+looked folders up by name would work perfectly against one and return nothing against the other, so
+folders are addressed by the id a logon reports and the corpus proves it in both.
 
 ## Crates
 

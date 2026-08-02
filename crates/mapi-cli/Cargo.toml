@@ -23,5 +23,29 @@ path = "src/main.rs"
 mapi-client.workspace = true
 mapi-proto.workspace = true
 
+# `default-features = false` on purpose. The defaults pull in anstream, anstyle and strsim for
+# coloured help and "did you mean" suggestions; none of that earns its place in the dependency
+# tree of a tool whose output is read by a script as often as by a person.
+#
+# `env` is the load-bearing feature: everything that identifies a deployment arrives through the
+# environment rather than through a command line, so that a password never reaches a shell history
+# or a process list.
+clap = { version = "4", default-features = false, features = [
+    "std",
+    "derive",
+    "help",
+    "usage",
+    "error-context",
+    "env",
+] }
+
+tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+
+# The committed corpus is replayed through the real client against a fake endpoint that answers
+# exactly what Exchange answered. That belongs here rather than in a published crate: the fixtures
+# are a workspace artefact, and this is the crate that produces them.
+[dev-dependencies]
+wiremock = "0.6"
+
 [lints]
 workspace = true

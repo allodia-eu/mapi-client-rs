@@ -103,14 +103,20 @@ CI never sees an Exchange server, so nothing CI does can prove the protocol. Tha
 separate, deliberate act:
 
 ```powershell
-powershell.exe -File scripts\Test-Live.ps1
+powershell.exe -File scripts\Test-Live.ps1 -Mailbox developer,developer2 -Password '...'
 ```
 
 It runs the `#[ignore]`d tests in `crates/mapi-client/tests/live.rs` — `Connect`, `RopLogon`, both
-kinds of table, paging and `Disconnect` — against a real server. Everything that identifies a
-deployment is passed in through environment variables (`MAPI_LIVE_ENDPOINT`, `MAPI_LIVE_USER_DN`,
-`MAPI_LIVE_USERNAME`, `MAPI_LIVE_PASSWORD`), so no lab's details are ever committed. The script's
-comment-based help explains each one.
+kinds of table, paging and `Disconnect` — against a real server, once per mailbox. Everything that
+identifies a deployment is either derived from the Exchange snapin or passed in through environment
+variables (`MAPI_LIVE_ENDPOINT`, `MAPI_LIVE_USER_DN`, `MAPI_LIVE_USERNAME`, `MAPI_LIVE_PASSWORD`),
+so no lab's details are ever committed. The script's comment-based help explains each one.
+
+**Use two mailboxes in two languages.** Folder names are localised to the language a mailbox was
+provisioned with, so a client that is subtly wrong about names passes against an English mailbox
+and fails against a Dutch one — the most misleading way for a test to be wrong. Folders are
+addressed by the id a logon reports, never by name, and the live test prints what that folder is
+called so the difference is visible.
 
 Two things a lab needs: **Basic** enabled on the MAPI virtual directory, because that is the only
 scheme `mapi-client` implements, and the endpoint URL used **verbatim from Autodiscover**,
@@ -125,22 +131,37 @@ CI never sees the Exchange server, so **the fixtures are the only thing standing
 false green**. Treat them accordingly.
 
 ```powershell
-powershell.exe -File scripts\Capture-Fixtures.ps1    # drives mapi-cli against the live server
-powershell.exe -File scripts\Verify-Fixtures.ps1     # "did the protocol change?"
-powershell.exe -File scripts\Assert-NoSecrets.ps1    # runs pre-commit and in CI
+# Everything else is derived from the Exchange snapin, so only a password is passed in.
+powershell.exe -File scripts\Capture-Fixtures.ps1 -Mailbox developer,developer2 -Password '...'
+powershell.exe -File scripts\Verify-Fixtures.ps1  -Mailbox developer,developer2 -Password '...'
+powershell.exe -File scripts\Assert-NoSecrets.ps1   # needs no lab; runs in CI on every PR
+cargo test --package mapi-cli --test replay         # what CI checks the corpus with
 ```
 
 **Three scrubbing rules, each of which already cost real debugging time:**
 
 1. **Replacements must be length-preserving.** Fixtures are read by byte offset; a shifted offset
-   is worse than an unscrubbed name, because it fails somewhere unrelated.
+   is worse than an unscrubbed name, because it fails somewhere unrelated. `mapi-cli` refuses a
+   rule whose two sides differ in length.
 2. **Scrub both ASCII and UTF-16LE.** MAPI carries both encodings in the same body.
 3. **Matching is case-sensitive, so every case a server uses needs its own rule.** Exchange echoes
    the hostname uppercase while the URL carries it lowercase. A single lowercase rule silently left
-   the real hostname in a capture, and it was caught only by grepping before the push.
+   the real hostname in a capture, and it was caught only by grepping before the push. Each rule
+   now expands automatically to the as-written, lowercased and uppercased forms; any other casing
+   still needs its own.
 
 `Assert-NoSecrets.ps1` exists precisely because rule 3 is invisible: **a rule that matched nothing
 looks identical to a rule that worked.** Never trust a scrub you have not grepped.
+
+**A capture is byte-exact apart from four things, and every one of them is itemised in the
+capture's own `.meta.txt`.** They are removed so that "any difference at all is a finding" is a
+usable rule for `Verify-Fixtures.ps1` rather than a permanent false alarm: the preamble's
+`X-ElapsedTime` and `X-StartTime`, `Connect`'s per-connection `RetryDelay`, `RopLogon`'s
+`LogonTime` and `GwartTime`, and the response auxiliary buffer — which a real server fills with its
+own fully qualified name and the connection's timings, in a length that differs every time.
+
+**Never edit a fixture by hand.** It breaks the hash in `MANIFEST.toml` and, if the edit is not
+length-preserving, every byte offset after it. Widen the rules and capture again.
 
 ## Two traps worth not rediscovering
 

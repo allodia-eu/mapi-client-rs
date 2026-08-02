@@ -26,6 +26,14 @@
         Windows path, and Exchange reports the result as ecUnknownUser — which reads like a
         credential fault and is not one. This script exists partly so that nobody has to.
 
+.PARAMETER Mailbox
+    Exchange mailbox identities to run against, in turn. Everything else is then derived from the
+    local Exchange snapin, so only a password is needed.
+
+    Worth using more than one, and worth making them differ in language: a mailbox's folder names
+    are localised to the language it was provisioned with, so a client that is subtly wrong about
+    names passes against an English mailbox and fails against a Dutch one.
+
 .PARAMETER Endpoint
     Overrides MAPI_LIVE_ENDPOINT.
 
@@ -42,24 +50,103 @@
     powershell.exe -File scripts\Test-Live.ps1
 
 .EXAMPLE
+    powershell.exe -File scripts\Test-Live.ps1 -Mailbox developer,developer2 -Password '<password>'
+
+.EXAMPLE
     powershell.exe -File scripts\Test-Live.ps1 -Endpoint 'https://mail.example.test/mapi/emsmdb/?MailboxId=...@example.test'
 #>
 [CmdletBinding()]
 param(
-    [string] $Endpoint,
-    [string] $UserDn,
-    [string] $Username,
-    [string] $Password
+    [string[]] $Mailbox = @(),
+    [string]   $Endpoint,
+    [string]   $UserDn,
+    [string]   $Username,
+    [string]   $Password
 )
 
 $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\_Boot.ps1"
 Assert-BootLoaded   # a dot-sourced file that fails to parse does not stop us; this does
 
+# See Capture-Fixtures.ps1: `powershell.exe -File` hands an array over as one comma-joined string.
+$Mailbox = @($Mailbox | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } |
+    Where-Object { $_ })
+
 if ($Endpoint) { $env:MAPI_LIVE_ENDPOINT = $Endpoint }
 if ($UserDn)   { $env:MAPI_LIVE_USER_DN  = $UserDn }
 if ($Username) { $env:MAPI_LIVE_USERNAME = $Username }
 if ($Password) { $env:MAPI_LIVE_PASSWORD = $Password }
+
+$cargo = Get-CargoPath
+
+function Invoke-LiveSuite {
+    <#
+    .SYNOPSIS
+        Runs the ignored tests once, against whatever the MAPI_LIVE_* variables currently name.
+    #>
+    [CmdletBinding()]
+    param()
+
+    Write-Step "Running the live tests against $(([uri]$env:MAPI_LIVE_ENDPOINT).Host)"
+    Write-Host '    Nothing here runs in CI. This is the only thing that proves the protocol.' -ForegroundColor DarkGray
+
+    Invoke-Native -FilePath $script:cargo -WorkingDirectory (Get-RepoRoot) -Arguments @(
+        'test', '--package', 'mapi-client', '--test', 'live',
+        '--', '--ignored', '--nocapture', '--test-threads', '1'
+    )
+}
+
+# ---------------------------------------------------------------------------
+# The -Mailbox path: ask Exchange for everything except the password.
+# ---------------------------------------------------------------------------
+
+if ($Mailbox.Count -gt 0) {
+    if (-not $env:MAPI_LIVE_PASSWORD) {
+        throw 'Running by -Mailbox still needs -Password (or MAPI_LIVE_PASSWORD).'
+    }
+
+    if (-not (Get-PSSnapin -Name 'Microsoft.Exchange.Management.PowerShell.SnapIn' -ErrorAction SilentlyContinue)) {
+        Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn
+    }
+
+    $vdir = @(Get-MapiVirtualDirectory -Server $env:COMPUTERNAME)[0]
+    if (-not $vdir) { throw "No MAPI virtual directory on $env:COMPUTERNAME." }
+
+    foreach ($identity in $Mailbox) {
+        $box = Get-Mailbox -Identity $identity
+        $regional = Get-MailboxRegionalConfiguration -Identity $identity -ErrorAction SilentlyContinue
+        $language = if ($regional -and $regional.Language) { $regional.Language.Name } else { $null }
+        $domain = ([string]$box.PrimarySmtpAddress -split '@')[-1]
+
+        $env:MAPI_LIVE_ENDPOINT = "$($vdir.InternalUrl)/emsmdb/?MailboxId=$($box.ExchangeGuid)@$domain"
+        $env:MAPI_LIVE_USER_DN  = [string]$box.LegacyExchangeDN
+        $env:MAPI_LIVE_USERNAME = [string]$box.PrimarySmtpAddress
+
+        # The session locale, matched to the mailbox so the run is coherent. It does not translate
+        # anything: folder names come back in whatever language the mailbox already holds them.
+        #
+        # Resolved defensively. A mailbox with no regional configuration reports no language at
+        # all, and casting a name that is not a culture throws - which would abort the whole run
+        # before a single test had made a request, over a setting that only picks an LCID.
+        $lcid = 0x0409
+        if ($language) {
+            try {
+                $lcid = ([System.Globalization.CultureInfo]$language).LCID
+            } catch {
+                Write-Warn "$identity reports language '$language', which is not a culture; using en-US."
+            }
+        }
+        $env:MAPI_LIVE_LOCALE = '0x{0:x4}' -f $lcid
+
+        Write-Host ''
+        Write-Host "  == $identity ($(if ($language) { $language } else { 'no language set' })) ==" -ForegroundColor White
+        Invoke-LiveSuite
+    }
+
+    Write-Host ''
+    Write-Ok "The live tests passed against $($Mailbox.Count) mailbox(es): $($Mailbox -join ', ')"
+    exit 0
+}
 
 $required = @(
     @{ Name = 'MAPI_LIVE_ENDPOINT'; What = 'the MailStore URL from Autodiscover, with its ?MailboxId= parameter' },
@@ -88,14 +175,10 @@ if ($env:MAPI_LIVE_ENDPOINT -notmatch 'MailboxId=') {
     Write-Warn 'an empty HTTP 400 and no X-ResponseCode header. Use the URL Autodiscover gave you.'
 }
 
-Write-Step "Running the live tests against $(([uri]$env:MAPI_LIVE_ENDPOINT).Host)"
-Write-Host '    Nothing here runs in CI. This is the only thing that proves the protocol.' -ForegroundColor DarkGray
-
-$cargo = Get-CargoPath
-Invoke-Native -FilePath $cargo -WorkingDirectory (Get-RepoRoot) -Arguments @(
-    'test', '--package', 'mapi-client', '--test', 'live',
-    '--', '--ignored', '--nocapture', '--test-threads', '1'
-)
+Invoke-LiveSuite
 
 Write-Ok 'The live tests passed against a real server.'
+Write-Host ''
+Write-Host '  One mailbox proves one language. Folder names are localised to the language a' -ForegroundColor DarkGray
+Write-Host '  mailbox was provisioned with, so run -Mailbox with two that differ.' -ForegroundColor DarkGray
 exit 0

@@ -55,6 +55,10 @@ impl Connected {
     }
 
     /// How long to wait between retries, in milliseconds.
+    ///
+    /// Advice for *this* connection, not a property of the server: three consecutive `Connect`s to
+    /// one Exchange Server SE `15.02.2562.045` answered 13314, 13687 and 13835 ms. Treat it as the
+    /// number to wait, not as a value worth remembering or comparing between sessions.
     #[must_use]
     pub const fn retry_delay(&self) -> u32 {
         self.retry_delay

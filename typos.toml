@@ -20,3 +20,9 @@ dn = "dn"
 ROP = "ROP"        # remote operation
 rop = "rop"
 nd = "nd"
+
+# Not a word but a fragment. scripts\Initialize-ExchangeLab.ps1 seeds accented subjects as
+# `caf$([char]0xE9)` rather than as literals, because a BOM-less read would send the literal as
+# mojibake and a sent message cannot be recalled. That leaves `caf` on its own, which the checker
+# offers to correct to "calf".
+caf = "caf"

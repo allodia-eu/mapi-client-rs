@@ -11,7 +11,22 @@ of anything a consumer resolves.
 
 Part of [`mapi-client-rs`](https://github.com/allodia-eu/mapi-client-rs).
 
-**Status:** pre-release scaffolding — no subcommands yet.
+```text
+mapi-cli ping                          is the endpoint there, and do the credentials work?
+mapi-cli connect                       what the server says about the mailbox, and its folder ids
+mapi-cli discover alice@example.test   what Autodiscover says about this mailbox
+mapi-cli folders --folder ipm-subtree  walk a hierarchy table
+mapi-cli messages --folder inbox       read a contents table
+mapi-cli capture session --scrub r.tsv record a conversation as fixtures
+```
+
+Everything that identifies a deployment is read from the environment — the same four variables
+`scripts/Test-Live.ps1` uses — so nothing about anybody's lab has to be typed and a password never
+reaches a shell history. Add `--dump` to any command to hex-dump every request and response, which
+is the reason this binary exists: a wrong `RopBuffer` is not readable by inspection, and a decoded
+view of it is a view through the very code you are doubting.
+
+**Status:** pre-release.
 
 ## Licence
 

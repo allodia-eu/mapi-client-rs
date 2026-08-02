@@ -109,6 +109,47 @@ mod tests {
         assert_eq!(response.display_name, "Spike Test Usr");
     }
 
+    /// A `Connect` response carries an auxiliary buffer, and it is not small.
+    ///
+    /// Easy to get the wrong way round: every *request* this crate sends declares
+    /// `AuxiliaryBufferSize = 0`, which Exchange accepts, and that finding is what let the
+    /// [MS-OXCRPC] auxiliary layer be deferred. The *response* is a separate question, and
+    /// measured against Exchange Server SE `15.02.2562.045` the answer is 269 bytes on a
+    /// successful `Connect` and 1438 on one refused with `ecUnknownUser` — `AUX_*` blocks holding
+    /// the server's fully qualified name and the connection's timings.
+    ///
+    /// Nothing here reads them, and this is the test that says so on purpose rather than by
+    /// accident: everything before the auxiliary buffer parses identically whether it is there or
+    /// not. The committed fixtures cannot make this claim, because capture replaces the auxiliary
+    /// buffer with an empty one — its length and contents differ on every connection, so keeping
+    /// it would mean no two captures ever matched.
+    ///
+    /// [MS-OXCMAPIHTTP] §2.2.4.1.2 — `AuxiliaryBufferSize`, `AuxiliaryBuffer`
+    #[test]
+    fn a_connect_body_ignores_however_large_an_auxiliary_buffer_the_server_sends() {
+        let body = |auxiliary: &[u8]| {
+            let mut w = Writer::new();
+            w.u32(0).u32(0).u32(60_000).u32(6).u32(13_314);
+            w.ascii_z("/o=Lab/ou=Exchange Administrative Group");
+            for unit in "Developer User".encode_utf16() {
+                w.u16(unit);
+            }
+            w.u16(0).u32(u32::try_from(auxiliary.len()).unwrap());
+            w.bytes(auxiliary);
+            w.finish()
+        };
+
+        let without = ConnectResponse::parse(&body(&[])).unwrap();
+        let with = ConnectResponse::parse(&body(&[0xAB; 269])).unwrap();
+        let refused = ConnectResponse::parse(&body(&[0xCD; 1438])).unwrap();
+
+        assert_eq!(without, with);
+        assert_eq!(without, refused);
+        assert!(with.is_success());
+        assert_eq!(with.display_name, "Developer User");
+        assert_eq!(with.retry_delay, 13_314);
+    }
+
     /// §2.2.4.1.3: the failure body stops after `StatusCode`. Everything the success layout
     /// promises is simply absent.
     #[test]
