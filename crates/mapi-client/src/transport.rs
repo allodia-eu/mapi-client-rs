@@ -7,12 +7,14 @@
 //! [MS-OXCMAPIHTTP] §2.2.2.1 — common request format
 
 use core::time::Duration;
+use std::sync::Arc;
 
 use mapi_proto::{Headers, Request};
 use reqwest::{Client, Response, StatusCode, Url};
 
 use crate::credentials::Credentials;
 use crate::error::{Error, Result};
+use crate::observer::{Exchange, Observer};
 
 /// Longest a diagnostic taken from an error body is worth quoting back.
 const MAX_DIAGNOSTIC: usize = 200;
@@ -24,6 +26,7 @@ pub(crate) struct Transport {
     pub(crate) endpoint: Url,
     pub(crate) credentials: Credentials,
     pub(crate) timeout: Duration,
+    pub(crate) observer: Option<Arc<dyn Observer>>,
 }
 
 impl Transport {
@@ -52,16 +55,36 @@ impl Transport {
             .map_err(|error| self.classify(error))?;
 
         let status = response.status();
-        if status == StatusCode::UNAUTHORIZED {
-            return Err(self.unauthorized(&response));
-        }
+        // Read before the body is consumed, and only when it can matter: `WWW-Authenticate` is
+        // what distinguishes "wrong password" from "this client speaks no scheme this server
+        // accepts".
+        let offered = if status == StatusCode::UNAUTHORIZED {
+            offered_schemes(&response)
+        } else {
+            Vec::new()
+        };
 
         let headers = read_headers(&response);
+        // Read whatever the status, so that an observer sees the refusals too — a 401 body and a
+        // 400 body are exactly what somebody debugging a deployment needs, and downloading a few
+        // hundred bytes of error page costs nothing.
         let body = response
             .bytes()
             .await
             .map_err(|error| self.classify(error))?
             .to_vec();
+
+        if let Some(observer) = &self.observer {
+            observer.observe(&Exchange::new(request, status.as_u16(), &headers, &body));
+        }
+
+        if status == StatusCode::UNAUTHORIZED {
+            return Err(Error::Unauthorized {
+                url: self.endpoint.to_string(),
+                offered,
+                sent: self.credentials.describe(),
+            });
+        }
 
         // A MAPI endpoint reports protocol-level refusals as HTTP 200 with a non-zero
         // `X-ResponseCode`, so any other status means the request never reached the protocol and
@@ -104,25 +127,18 @@ impl Transport {
             source: Box::new(error),
         }
     }
+}
 
-    /// Reports a 401 with the schemes the server offered, which is what distinguishes "wrong
-    /// password" from "this client cannot speak any scheme this server accepts".
-    fn unauthorized(&self, response: &Response) -> Error {
-        let offered = response
-            .headers()
-            .get_all("WWW-Authenticate")
-            .iter()
-            .filter_map(|value| value.to_str().ok())
-            .filter_map(|value| value.split_whitespace().next())
-            .map(str::to_owned)
-            .collect();
-
-        Error::Unauthorized {
-            url: self.endpoint.to_string(),
-            offered,
-            sent: self.credentials.describe(),
-        }
-    }
+/// The authentication schemes a `WWW-Authenticate` header offered, by name.
+fn offered_schemes(response: &Response) -> Vec<String> {
+    response
+        .headers()
+        .get_all("WWW-Authenticate")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .filter_map(|value| value.split_whitespace().next())
+        .map(str::to_owned)
+        .collect()
 }
 
 /// Copies the response headers into the codec's neutral header type.

@@ -43,7 +43,7 @@ $cargo    = Get-CargoPath
 
 $stepNames = @(
     'toolchain', 'script-encoding', 'spec-version', 'fmt', 'clippy', 'build',
-    'test', 'doc', 'coverage', 'deny', 'public-api', 'typos', 'file-length'
+    'test', 'doc', 'coverage', 'deny', 'public-api', 'typos', 'file-length', 'no-secrets'
 )
 
 if ($List) {
@@ -277,6 +277,15 @@ try {
     Invoke-Step 'file-length' {
         & "$PSScriptRoot\Check-FileLength.ps1"
         if ($LASTEXITCODE -ne 0) { throw 'Rust source files exceed the 500-line limit.' }
+    }
+
+    # -----------------------------------------------------------------------
+    Invoke-Step 'no-secrets' {
+        # The committed fixtures are byte-exact captures from a real mailbox. This is the check
+        # that nothing in them names a real deployment, and it needs no lab, which is why CI runs
+        # it too.
+        & "$PSScriptRoot\Assert-NoSecrets.ps1"
+        if ($LASTEXITCODE -ne 0) { throw 'A fixture identifies a real deployment.' }
     }
 
 } finally {

@@ -19,3 +19,6 @@
 # Local environment
 .env
 *.local.ps1
+# Per-machine notes that sit beside CLAUDE.md. Local by definition, and easy to sweep into a
+# commit by accident with `git add -A`.
+*.local.md

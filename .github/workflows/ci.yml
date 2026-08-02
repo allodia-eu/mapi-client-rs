@@ -288,13 +288,32 @@ jobs:
         run: .\scripts\Check-FileLength.ps1
 
   # ---------------------------------------------------------------------------
+  # The fixtures are byte-exact captures from a real mailbox, which makes an
+  # accidental disclosure a live risk rather than a theoretical one. mapi-cli
+  # refuses to write a file that still carries a needle and Capture-Fixtures.ps1
+  # checks again afterwards — but both of those run on the machine that has the
+  # lab. This is the check that runs on every pull request, from anyone, with no
+  # lab at all: it looks for non-placeholder GUIDs, long hexadecimal runs and URL
+  # hosts this repository did not choose.
+  # ---------------------------------------------------------------------------
+  no-secrets:
+    name: no-secrets
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Check the fixtures identify no real deployment
+        shell: powershell
+        run: .\scripts\Assert-NoSecrets.ps1
+
+  # ---------------------------------------------------------------------------
   # One required check to point branch protection at, so adding a job later does
   # not silently leave it unenforced.
   # ---------------------------------------------------------------------------
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [toolchain, fmt, clippy, build, test, doc, coverage, deny, typos, file-length]
+    needs:
+      [toolchain, fmt, clippy, build, test, doc, coverage, deny, typos, file-length, no-secrets]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any needed job did not succeed
