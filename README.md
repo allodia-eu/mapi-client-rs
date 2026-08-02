@@ -25,11 +25,11 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: pre-release.** Two crates are implemented, both sans-io: `mapi-proto` (the MAPI/HTTP
+> **Status: pre-release.** Three crates are implemented: `mapi-proto` (the sans-io MAPI/HTTP
 > envelope, the ROP layer with type-safe handle chaining, the OXCDATA structures and the session
-> state machine) and `mapi-autodiscover` (locating the endpoint in the first place). The async
-> client and the CLI are next. No crate is published yet. See `SCAFFOLD-PLAN.md` for the full plan
-> and sequence.
+> state machine), `mapi-autodiscover` (locating the endpoint in the first place, also sans-io) and
+> `mapi-client` (the async client that does the I/O). The CLI and the fixture pipeline are next. No
+> crate is published yet. See `SCAFFOLD-PLAN.md` for the full plan and sequence.
 
 ## What CI does and does not prove
 
@@ -81,29 +81,42 @@ batch.query_rows(table, 50);
 let req = session.execute(batch)?;                  // one round trip
 ```
 
-**Async layer.**
+**Async layer.** Three round trips reach the first row, and the borrow checker enforces the
+protocol's "one request in flight per Session Context" rule for free.
 
 ```rust,ignore
 let client = MapiClient::builder()
-    .endpoint(url)                       // from mapi-autodiscover
-    .credentials(Credentials::basic(user, pass))
-    .build()?;
+    .credentials(Credentials::basic(user, password))
+    .discover(&EmailAddress::new("alice@example.test")?)   // or .endpoint(url).user_dn(dn).build()?
+    .await?;
 
-let logon = client.connect().await?.logon().await?;
-let mut rows = logon.folder(WellKnown::Inbox)
+let mut logon = client.connect().await?.logon().await?;
+let mut rows  = logon.well_known(WellKnownFolder::Inbox)?
     .contents()
-    .columns([PropTag::SUBJECT, PropTag::MESSAGE_DELIVERY_TIME])
+    .columns([PropertyTag::SUBJECT, PropertyTag::MESSAGE_DELIVERY_TIME])
     .rows();
 
 while let Some(row) = rows.try_next().await? {
-    println!("{}", row.str(PropTag::SUBJECT).unwrap_or_default());
+    println!("{:?}", row.string(PropertyTag::SUBJECT));
 }
+logon.disconnect().await?;
 ```
+
+Authentication is Basic or Bearer. **`Negotiate` and `NTLM` are not implemented** — a genuine gap,
+because a default-configured Exchange offers only those two. Both are multi-leg challenge/response
+handshakes bound to the connection, which a "compute one header" credential cannot express; see
+`mapi-client`'s documentation for the ways round it.
 
 **One correctness trap encoded in the types, not the docs.** Exchange silently truncates table
 string values at 255 characters with a literal `...` and no error flag. A `row.str()` that hands
 back a corrupted subject is a data-loss bug in the consumer's index, so the row API surfaces
 truncation explicitly rather than letting it be ignored by accident.
+
+**Failures name what to do about them.** A 401 reports the schemes the server offered alongside the
+one that was sent, because "the password is wrong" and "this client cannot speak any scheme this
+server accepts" are different problems with a single status code. A refused `Connect` names the
+distinguished name it refused. A request that fails in transit poisons the connection rather than
+letting the next one read the previous answer.
 
 ## Specification authority
 

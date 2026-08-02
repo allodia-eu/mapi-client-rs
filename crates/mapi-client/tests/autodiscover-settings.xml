@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  A settings response in the shape Exchange sends one, for a fictional example.test deployment.
+
+  Synthetic rather than captured: mapi-autodiscover already pins its parser against a real capture,
+  so what this file is for is driving the *client* — the candidate sequence, the redirects and the
+  handover of a URL and a distinguished name into a session.
+
+  Two shapes here are the ones that defeat a first attempt at reading a real response, and they are
+  reproduced deliberately: mapiHttp names itself with a Type *attribute* while WEB uses a Type
+  *child element*, and WEB nests further Protocol elements inside <Internal>.
+-->
+<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006">
+  <Response xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a">
+    <User>
+      <DisplayName>Alice Example</DisplayName>
+      <LegacyDN>/o=Example/ou=Exchange Administrative Group (FYDIBOHF23SPDLT)/cn=Recipients/cn=alice</LegacyDN>
+      <AutoDiscoverSMTPAddress>alice@example.test</AutoDiscoverSMTPAddress>
+      <DeploymentId>00000000-0000-0000-0000-000000000000</DeploymentId>
+    </User>
+    <Account>
+      <AccountType>email</AccountType>
+      <Action>settings</Action>
+      <MicrosoftOnline>False</MicrosoftOnline>
+      <Protocol Type="mapiHttp" Version="1">
+        <MailStore>
+          <InternalUrl>https://mail.example.test/mapi/emsmdb/?MailboxId=00000000-0000-0000-0000-000000000000@example.test</InternalUrl>
+        </MailStore>
+        <AddressBook>
+          <InternalUrl>https://mail.example.test/mapi/nspi/?MailboxId=00000000-0000-0000-0000-000000000000@example.test</InternalUrl>
+        </AddressBook>
+      </Protocol>
+      <Protocol>
+        <Type>WEB</Type>
+        <Internal>
+          <OWAUrl AuthenticationMethod="Basic, Fba">https://mail.example.test/owa/</OWAUrl>
+          <Protocol>
+            <Type>EXCH</Type>
+            <ASUrl>https://mail.example.test/EWS/Exchange.asmx</ASUrl>
+          </Protocol>
+        </Internal>
+      </Protocol>
+    </Account>
+  </Response>
+</Autodiscover>

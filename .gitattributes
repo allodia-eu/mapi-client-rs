@@ -16,6 +16,9 @@
 *.pdf       binary
 *.png       binary
 *.ico       binary
+# DER is a certificate in its raw encoding; auto-detection would probably get
+# this right, but "probably" is not what the rest of this file settles for.
+*.der       binary
 
 # Captured request/response bodies, whatever they are named.
 fixtures/**/*.request.*   binary
@@ -39,6 +42,8 @@ fixtures/**/*.response.*  binary
 *.yaml      text eol=lf
 *.md        text eol=lf
 *.sh        text eol=lf
+*.xml       text eol=lf
+*.pem       text eol=lf
 
 # Keep generated/vendored noise out of diffs and language stats.
 Cargo.lock  linguist-generated=true
