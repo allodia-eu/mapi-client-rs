@@ -3,7 +3,12 @@
 //! Every one of these is an ordinary use of `mapi-client` with nothing stubbed, which is the
 //! property that makes this binary worth having: what it prints is what the library saw.
 
-use mapi_client::{EmailAddress, FolderId, Logon, PropertyTag, WellKnownFolder};
+use std::collections::HashMap;
+
+use mapi_client::{
+    ContainerClass, EmailAddress, FOLDER_PROPERTIES, FolderId, Logon, PropertyRow, PropertyTag,
+    PropertyValue, SpecialFolder, SpecialFolderState, TableString, WellKnownFolder,
+};
 
 use crate::settings::Connection;
 use crate::{Failure, report};
@@ -53,22 +58,147 @@ pub(crate) async fn folders(
     connection: &Connection,
     folder: &str,
     page_size: u16,
+    recursive: bool,
+    class: Option<&str>,
 ) -> Result<(), Failure> {
     let client = connection.client()?;
     let mut logon = client.connect().await?.logon().await?;
     let id = resolve(&logon, folder)?;
+    let wanted = class.map(ContainerClass::new);
 
-    println!("subfolders of {folder} ({:#018x})", id.as_u64());
-    let mut rows = logon.folder(id).subfolders().page_size(page_size).rows();
-    let mut seen = 0_usize;
+    println!(
+        "{} {folder} ({:#018x})",
+        if recursive {
+            "every folder below"
+        } else {
+            "subfolders of"
+        },
+        id.as_u64()
+    );
+
+    let read = logon.folder(id);
+    let table = if recursive {
+        read.descendants()
+    } else {
+        read.subfolders()
+    };
+    let mut rows = table.page_size(page_size).rows();
+
+    let mut all = Vec::new();
     while let Some(row) = rows.try_next().await? {
-        println!("{}", report::folder_line(&row));
-        seen = seen.saturating_add(1);
+        all.push(row);
     }
     let reported = rows.row_count();
     rows.close().await?;
 
-    summarise(seen, reported);
+    // With `Depth` set the rows arrive flat, so the depth of each is worked out here from the
+    // parent ids the same read carried. Without that a recursive listing is a bag of names.
+    let depths = depths(&all, id);
+    let mut shown = 0_usize;
+    for row in &all {
+        let class_of = row
+            .string(PropertyTag::CONTAINER_CLASS)
+            .map(TableString::as_str)
+            .map(ContainerClass::new);
+        if let Some(wanted) = &wanted
+            && !class_of.is_some_and(|found| found.is_a(wanted))
+        {
+            continue;
+        }
+        let depth = row.folder_id().and_then(|id| depths.get(&id)).copied();
+        println!("{}", report::folder_line(row, depth.unwrap_or(0)));
+        shown = shown.saturating_add(1);
+    }
+
+    if wanted.is_some() {
+        println!(
+            "  {shown} of {} folder(s) match; a class matches its own refinements, so IPF.Contact \
+             finds IPF.Contact.MOC.QuickContacts too",
+            all.len()
+        );
+    }
+    summarise(all.len(), reported);
+    logon.disconnect().await?;
+    Ok(())
+}
+
+/// How far below `root` each folder sits, from the parent ids in the same read.
+///
+/// A folder whose parent is not in the table — which is every row of a non-recursive read — sits at
+/// depth zero, so the same routine serves both kinds of listing.
+fn depths(rows: &[PropertyRow], root: FolderId) -> HashMap<FolderId, usize> {
+    let parents: HashMap<FolderId, FolderId> = rows
+        .iter()
+        .filter_map(|row| {
+            let id = row.folder_id()?;
+            let parent = row
+                .get(PropertyTag::PARENT_FOLDER_ID)
+                .and_then(PropertyValue::as_u64)
+                .map(FolderId::new)?;
+            Some((id, parent))
+        })
+        .collect();
+
+    parents
+        .keys()
+        .map(|id| {
+            let mut depth = 0_usize;
+            let mut walk = *id;
+            // Bounded by the number of folders, so a parent cycle costs one pass and not a hang.
+            while let Some(parent) = parents.get(&walk).filter(|parent| **parent != root) {
+                depth = depth.saturating_add(1);
+                walk = *parent;
+                if depth >= parents.len() {
+                    break;
+                }
+            }
+            (*id, depth)
+        })
+        .collect()
+}
+
+/// Find the folders the logon does not name, and say what each one is.
+pub(crate) async fn special(connection: &Connection, details: bool) -> Result<(), Failure> {
+    let client = connection.client()?;
+    let mut logon = client.connect().await?.logon().await?;
+    let mailbox_guid = logon.mailbox().mailbox_guid();
+
+    let special = logon.special_folders().await?;
+    println!("special folders, from the entry ids on the Inbox");
+    println!("  mailbox {mailbox_guid}");
+    for entry in &special {
+        println!("  {:<10} {}", entry.folder(), entry.state());
+        if let SpecialFolderState::Found { entry_id, .. } = entry.state() {
+            println!("             long-term {}", entry_id.long_term_id());
+            if !entry_id.belongs_to(mailbox_guid) {
+                println!(
+                    "             ^ issued by {}, not this mailbox — converting it would open a \
+                     folder in another store",
+                    entry_id.provider_uid()
+                );
+            }
+        }
+    }
+    println!(
+        "  {} of {} present",
+        special.found(),
+        SpecialFolder::ALL.len()
+    );
+
+    if details {
+        for entry in &special {
+            let Some(id) = entry.id() else { continue };
+            println!();
+            println!("{} ({:#018x})", entry.folder(), id.as_u64());
+            let properties = logon
+                .folder(id)
+                .properties()
+                .read(FOLDER_PROPERTIES)
+                .await?;
+            println!("{}", report::folder_summary(&properties));
+        }
+    }
+
     logon.disconnect().await?;
     Ok(())
 }
@@ -94,7 +224,7 @@ pub(crate) async fn messages(
         }
         if row
             .string(PropertyTag::SUBJECT)
-            .is_some_and(mapi_client::TableString::is_truncated)
+            .is_some_and(TableString::is_truncated)
         {
             truncated = truncated.saturating_add(1);
         }

@@ -10,11 +10,31 @@
 use core::borrow::Borrow;
 
 use mapi_proto::{
-    ObjectHandle, PropertyProblem, PropertySet, PropertyTag, RopBatch, RopResponse, TaggedValue,
+    FolderId, HandleSlot, ObjectHandle, PropertyProblem, PropertySet, PropertyTag, RopBatch,
+    RopResponse, TaggedValue,
 };
 
 use crate::connection::Connection;
 use crate::error::{Error, Result};
+
+/// Which object a fetch or a write is aimed at.
+///
+/// A Logon object is already open — the handle came back with the logon — while a folder is not,
+/// and opening it is a ROP of its own. Chaining the two in one buffer keeps a folder's properties
+/// at the same one round trip a mailbox's cost, which is the whole reason the distinction is
+/// hidden here rather than pushed at the caller.
+#[derive(Clone, Copy, Debug)]
+enum Target {
+    /// A handle the server is already holding.
+    Open(ObjectHandle),
+    /// A folder to open in the same batch as the operation, and release again afterwards.
+    Folder {
+        /// The Logon object the folder hangs off.
+        logon: ObjectHandle,
+        /// Which folder.
+        id: FolderId,
+    },
+}
 
 /// The properties of one object, ready to be read or written.
 ///
@@ -23,12 +43,42 @@ use crate::error::{Error, Result};
 #[derive(Debug)]
 pub struct Properties<'a> {
     connection: &'a mut Connection,
-    object: ObjectHandle,
+    target: Target,
 }
 
 impl<'a> Properties<'a> {
     pub(crate) fn new(connection: &'a mut Connection, object: ObjectHandle) -> Self {
-        Self { connection, object }
+        Self {
+            connection,
+            target: Target::Open(object),
+        }
+    }
+
+    pub(crate) fn for_folder(
+        connection: &'a mut Connection,
+        logon: ObjectHandle,
+        id: FolderId,
+    ) -> Self {
+        Self {
+            connection,
+            target: Target::Folder { logon, id },
+        }
+    }
+
+    /// Starts a batch with the object in it, and says whether it has to be released afterwards.
+    fn begin(&self) -> (RopBatch, HandleSlot, bool) {
+        let mut batch = RopBatch::new();
+        match self.target {
+            Target::Open(handle) => {
+                let slot = batch.bind(handle);
+                (batch, slot, false)
+            }
+            Target::Folder { logon, id } => {
+                let logon = batch.bind(logon);
+                let folder = batch.open_folder(logon, id);
+                (batch, folder, true)
+            }
+        }
     }
 
     /// Reads every property the object has.
@@ -48,9 +98,9 @@ impl<'a> Properties<'a> {
     ///
     /// [MS-OXCROPS] §2.2.8.4 — `RopGetPropertiesAll`
     pub async fn read_all(self) -> Result<PropertySet> {
-        let mut batch = RopBatch::new();
-        let object = batch.bind(self.object);
+        let (mut batch, object, release) = self.begin();
         batch.get_all_properties(object);
+        finish(&mut batch, object, release);
         self.fetch(batch).await
     }
 
@@ -72,9 +122,9 @@ impl<'a> Properties<'a> {
         I::Item: Borrow<PropertyTag>,
     {
         let tags: Vec<PropertyTag> = tags.into_iter().map(|tag| *tag.borrow()).collect();
-        let mut batch = RopBatch::new();
-        let object = batch.bind(self.object);
+        let (mut batch, object, release) = self.begin();
         batch.get_properties(object, &tags);
+        finish(&mut batch, object, release);
         self.fetch(batch).await
     }
 
@@ -96,9 +146,9 @@ impl<'a> Properties<'a> {
     ///
     /// [MS-OXCROPS] §2.2.8.6 — `RopSetProperties`
     pub async fn write(self, values: &[TaggedValue]) -> Result<Vec<PropertyProblem>> {
-        let mut batch = RopBatch::new();
-        let object = batch.bind(self.object);
+        let (mut batch, object, release) = self.begin();
         batch.set_properties(object, values);
+        finish(&mut batch, object, release);
         self.report(batch, "setting properties").await
     }
 
@@ -120,9 +170,9 @@ impl<'a> Properties<'a> {
         I::Item: Borrow<PropertyTag>,
     {
         let tags: Vec<PropertyTag> = tags.into_iter().map(|tag| *tag.borrow()).collect();
-        let mut batch = RopBatch::new();
-        let object = batch.bind(self.object);
+        let (mut batch, object, release) = self.begin();
         batch.delete_properties(object, &tags);
+        finish(&mut batch, object, release);
         self.report(batch, "deleting properties").await
     }
 
@@ -150,5 +200,18 @@ impl<'a> Properties<'a> {
                 expected: "a property write response",
                 found: "no property problems report in the batch's responses",
             })
+    }
+}
+
+/// Releases a folder handle the batch opened for itself.
+///
+/// A handle opened and not released lives for the rest of the Session Context, and a caller
+/// reading one property of each of a hundred folders would leave a hundred behind. The release
+/// travels in the same buffer, so it costs no round trip.
+///
+/// [MS-OXCROPS] §2.2.15.3 — `RopRelease`
+fn finish(batch: &mut RopBatch, object: HandleSlot, release: bool) {
+    if release {
+        batch.release(object);
     }
 }

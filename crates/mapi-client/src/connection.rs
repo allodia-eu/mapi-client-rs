@@ -137,6 +137,26 @@ impl Connection {
         batch: RopBatch,
         during: &'static str,
     ) -> Result<Execution> {
+        let execution = self.execute_allowing_refusals(batch).await?;
+
+        for response in execution.responses() {
+            if let Some(error) = refusal(response, during) {
+                return Err(error);
+            }
+        }
+        Ok(execution)
+    }
+
+    /// Runs a batch and hands back every response, refusals included.
+    ///
+    /// For the case where a refusal is an answer rather than a failure. Resolving the special
+    /// folders asks the server to convert up to eight entry ids in one batch, and a mailbox whose
+    /// Archive folder has been removed answers for that one and not the others — failing the whole
+    /// enumeration over it would report seven folders that exist as none at all.
+    ///
+    /// Everything below the ROP layer is still an error here: a refused `Execute`, a poisoned
+    /// connection and a response that is not an `Execute` at all all come back as one.
+    pub(crate) async fn execute_allowing_refusals(&mut self, batch: RopBatch) -> Result<Execution> {
         self.usable()?;
         let request = self.session.execute(batch)?;
         let outcome = self.round_trip(request).await?;
@@ -147,12 +167,6 @@ impl Connection {
                 found: describe(&outcome),
             });
         };
-
-        for response in execution.responses() {
-            if let Some(error) = refusal(response, during) {
-                return Err(error);
-            }
-        }
         Ok(execution)
     }
 

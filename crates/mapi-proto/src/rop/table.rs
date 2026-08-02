@@ -12,12 +12,46 @@ use crate::rop::RopId;
 use crate::rop::batch::LOGON_ID;
 use crate::wire::{Reader, Writer};
 
-/// `TableFlags`: no `Depth`, no `Associated`, no `DeferredErrors` — the immediate children, and
-/// answer only once the table really exists.
+/// `TableFlags`: no `Associated`, no `DeferredErrors` — answer only once the table really exists,
+/// and list ordinary messages rather than folder associated information.
 ///
 /// [MS-OXCFOLD] §2.2.1.13.1 — hierarchy table flags
 /// [MS-OXCFOLD] §2.2.1.14.1 — contents table flags
-const TABLE_FLAGS_NONE: u8 = 0x00;
+pub(crate) const TABLE_FLAGS_NONE: u8 = 0x00;
+
+/// How far below a folder a hierarchy table reaches.
+///
+/// One bit of the `TableFlags` field, given a name because the two answers are different
+/// questions and a `bool` at the call site says neither of them.
+///
+/// [MS-OXCFOLD] §2.2.1.13.1 — `Depth`
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum FolderDepth {
+    /// The folder's immediate children, and nothing below them.
+    Immediate,
+    /// Every folder below this one, at every level.
+    ///
+    /// One round trip in place of one per folder — but the rows arrive as a flat list with
+    /// nothing in them saying where each sits, so a caller wanting a tree has to ask for
+    /// [`PidTagParentFolderId`] as a column. [`HIERARCHY_COLUMNS`] does.
+    ///
+    /// [`PidTagParentFolderId`]: crate::PropertyTag::PARENT_FOLDER_ID
+    /// [`HIERARCHY_COLUMNS`]: crate::HIERARCHY_COLUMNS
+    Recursive,
+}
+
+impl FolderDepth {
+    /// The `TableFlags` bits this depth sets: `Depth` is `0x04`.
+    ///
+    /// [MS-OXCFOLD] §2.2.1.13.1 — `Depth`
+    pub(crate) const fn flags(self) -> u8 {
+        match self {
+            Self::Immediate => TABLE_FLAGS_NONE,
+            Self::Recursive => 0x04,
+        }
+    }
+}
 
 /// `SetColumnsFlags`: block until the column set has been applied rather than answering
 /// asynchronously, so the rows in the same batch are encoded against these columns.
@@ -210,13 +244,17 @@ impl QueryRowsResponse {
 
 /// Encodes `RopGetHierarchyTable` or `RopGetContentsTable`, which share a layout.
 ///
+/// The two do **not** share a `TableFlags` vocabulary — `0x04` is `Depth` on a hierarchy table and
+/// `Associated` on a contents table ([MS-OXCFOLD] §2.2.1.14.1) — so the flags are passed in by
+/// whoever knows which ROP this is rather than derived here.
+///
 /// [MS-OXCROPS] §2.2.4.13.1 — request buffer
-pub(crate) fn encode_get_table(w: &mut Writer, rop: RopId, input: u8, output: u8) {
+pub(crate) fn encode_get_table(w: &mut Writer, rop: RopId, input: u8, output: u8, flags: u8) {
     w.u8(rop.as_u8())
         .u8(LOGON_ID)
         .u8(input)
         .u8(output)
-        .u8(TABLE_FLAGS_NONE);
+        .u8(flags);
 }
 
 /// Encodes a `RopSetColumns` request.

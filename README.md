@@ -27,12 +27,14 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: `0.1.0` released, and the property layer landed since.** What works is what the corpus
-> proves: locate an endpoint by Autodiscover, connect, log on, walk the folder hierarchy, open a
-> contents table, choose columns and page rows, and read or write the Store object's own properties
-> — verified against Exchange Server SE `15.02.2562.045`. What is missing is everything about
-> messages and about folders the logon does not name, and `Negotiate`/`NTLM` authentication. The
-> gaps are stated below and in the changelog rather than left to be discovered.
+> **Status: `0.1.0` released, with the property layer and the special folders landed since.** What
+> works is what the corpus proves: locate an endpoint by Autodiscover, connect, log on, walk the
+> folder hierarchy — the whole of it in one table, tagged by container class — read or write the
+> Store object's and any folder's own properties, find the Calendar, Contacts, Drafts, Tasks, Notes
+> and Journal folders that the logon does not name, and page a contents table with the columns you
+> choose. All verified against Exchange Server SE `15.02.2562.045`. What is missing is everything
+> about messages, and `Negotiate`/`NTLM` authentication. The gaps are stated below and in the
+> changelog rather than left to be discovered.
 
 ## Install
 
@@ -131,10 +133,17 @@ because a default-configured Exchange offers only those two. Both are multi-leg 
 handshakes bound to the connection, which a "compute one header" credential cannot express; see
 `mapi-client`'s documentation for the ways round it.
 
-**One correctness trap encoded in the types, not the docs.** Exchange silently truncates table
-string values at 255 characters with a literal `...` and no error flag. A `row.str()` that hands
-back a corrupted subject is a data-loss bug in the consumer's index, so the row API surfaces
-truncation explicitly rather than letting it be ignored by accident.
+**Two correctness traps encoded in the types, not the docs.**
+
+Exchange silently truncates table string values at 255 characters with a literal `...` and no error
+flag. A `row.str()` that hands back a corrupted subject is a data-loss bug in the consumer's index,
+so the row API surfaces truncation explicitly rather than letting it be ignored by accident.
+
+And a folder id is only meaningful inside the logon that produced it — which sounds like a rule
+until you measure two mailboxes and find the *same* number naming each one's Calendar. An id
+carried across mailboxes opens a real folder and reports nothing wrong, so the entry ids that
+resolve to those folders keep the mailbox GUID that issued them and `FolderEntryId::belongs_to`
+answers the question before a conversion is asked for.
 
 **Failures name what to do about them.** A 401 reports the schemes the server offered alongside the
 one that was sent, because "the password is wrong" and "this client cannot speak any scheme this

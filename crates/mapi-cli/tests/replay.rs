@@ -31,20 +31,30 @@
 )]
 
 mod corpus;
+mod replayed;
 
 use std::sync::{Arc, Mutex};
 
 use mapi_client::{
-    Credentials, Lcid, MAILBOX_PROPERTIES, MapiClient, PropertyProblem, PropertySet, PropertyTag,
-    PropertyValue, TableString, TaggedValue, WellKnownFolder,
+    Credentials, FOLDER_PROPERTIES, FolderId, Lcid, Logon, MAILBOX_PROPERTIES, MapiClient,
+    PropertyRow, PropertySet, PropertyTag, PropertyValue, SpecialFolder, SpecialFolders,
+    TableString, TaggedValue, WellKnownFolder,
 };
 
 use crate::corpus::{assert_requests_match, fixtures, scenario, server, user_dn};
+use crate::replayed::Replayed;
 
 /// The page sizes `mapi-cli capture` used, and therefore the ones a replay has to use for the
 /// requests to match byte for byte.
 const HIERARCHY_PAGE: u16 = 8;
 const CONTENTS_PAGE: u16 = 2;
+const DEEP_PAGE: u16 = 20;
+
+/// How many exchanges one captured session holds: `PING`, `Connect`, the logon, two property
+/// exchanges, two hierarchy pages and a release, two deep pages and a release, the two halves of
+/// the entry-id chain, the Calendar's properties, four contents pages and a release, and the
+/// `Disconnect` — which is `01-ping` through `20-disconnect` in either session directory.
+const SESSION_EXCHANGES: usize = 20;
 
 /// The comment `mapi-cli capture` tried to set on the Store object, and which Exchange refused.
 /// Same reason as the page sizes: the request bodies only match if the replay sends the same
@@ -115,6 +125,8 @@ async fn replay(name: &str, locale: Lcid) -> Replayed {
     let folder_count = rows.row_count();
     rows.close().await.expect("releasing the hierarchy table");
 
+    let (descendants, special, calendar_properties) = folder_tree(&mut logon, subtree).await;
+
     let mut rows = logon
         .well_known(WellKnownFolder::Inbox)
         .expect("the Inbox")
@@ -143,122 +155,53 @@ async fn replay(name: &str, locale: Lcid) -> Replayed {
         display_name,
         folder_ids,
         inbox,
+        subtree,
         mailbox,
         refused,
         folders,
         folder_count,
+        descendants,
+        special,
+        calendar_properties,
         messages,
         message_count,
     }
 }
 
-/// Everything one replay observed.
-struct Replayed {
-    display_name: String,
-    folder_ids: Vec<mapi_client::FolderId>,
-    inbox: mapi_client::FolderId,
-    mailbox: PropertySet,
-    refused: Vec<PropertyProblem>,
-    folders: Vec<(mapi_client::FolderId, String)>,
-    folder_count: Option<u32>,
-    messages: Vec<(String, bool)>,
-    message_count: Option<u32>,
-}
-
-impl Replayed {
-    /// What every mailbox has, whatever language it speaks.
-    ///
-    /// The message count is a parameter because the two lab mailboxes hold different numbers of
-    /// them, which is rather the point: what is being tested is the paging, not the seed data.
-    fn assert_shape_is_a_mailbox(&self, messages: u32) {
-        assert_eq!(self.folder_ids.len(), 13, "a private logon names thirteen");
-        assert_eq!(self.folder_count, Some(15));
-        assert_eq!(self.folders.len(), 15, "read across two pages of eight");
-        assert_eq!(self.message_count, Some(messages));
-        assert_eq!(
-            u32::try_from(self.messages.len()).unwrap(),
-            messages,
-            "every row the server reported arrived, across pages of two"
-        );
-
-        // The Inbox is found by the id the logon gave, not by its name — which is the whole point
-        // of having a second mailbox in a second language.
-        assert!(
-            self.folders.iter().any(|(id, _)| *id == self.inbox),
-            "the Inbox is not in the hierarchy: {:?}",
-            self.folders
-        );
-
-        // Exactly one seeded subject is long enough for the table to cut it at 255 characters, and
-        // the table says so nowhere except in the value's own length.
-        let truncated: Vec<&String> = self
-            .messages
-            .iter()
-            .filter(|(_, truncated)| *truncated)
-            .map(|(subject, _)| subject)
-            .collect();
-        assert_eq!(truncated.len(), 1, "{:?}", self.messages);
-        assert_eq!(truncated[0].chars().count(), 255);
-
-        self.assert_shape_of_the_store_object();
+/// The special-folder half of a captured session: the recursive read, the entry-id chain, and the
+/// properties of the folder that chain found.
+async fn folder_tree(
+    logon: &mut Logon,
+    subtree: FolderId,
+) -> (Vec<PropertyRow>, SpecialFolders, PropertySet) {
+    // The same folder as the read above, with the `Depth` bit set: every folder below the subtree,
+    // at every level, in one table.
+    let mut rows = logon
+        .folder(subtree)
+        .descendants()
+        .page_size(DEEP_PAGE)
+        .rows();
+    let mut descendants = Vec::new();
+    while let Some(row) = rows.try_next().await.expect("a page of descendants") {
+        descendants.push(row);
     }
+    rows.close().await.expect("releasing the deep table");
 
-    /// What a real Store object answered, and what it refused.
-    ///
-    /// Both halves are claims about bytes Exchange actually sent: a `RopGetPropertiesSpecific`
-    /// answering for every tag it was given, two of them with an error in place of a value, and a
-    /// `RopSetProperties` that succeeded while the property inside it did not.
-    fn assert_shape_of_the_store_object(&self) {
-        assert_eq!(
-            self.mailbox.len(),
-            MAILBOX_PROPERTIES.len(),
-            "a property fetch answers for every tag it was given, present or not"
-        );
+    let special = logon
+        .special_folders()
+        .await
+        .expect("the entry-id chain on the Inbox");
+    let calendar = special
+        .get(SpecialFolder::Calendar)
+        .expect("a Calendar folder");
+    let calendar_properties = logon
+        .folder(calendar)
+        .properties()
+        .read(FOLDER_PROPERTIES)
+        .await
+        .expect("the Calendar's own properties");
 
-        // A binary value, which is the corpus's only evidence that a `PtypBinary` COUNT is 16 bits
-        // wide inside a ROP buffer. Read it as 32 and the two bytes that follow are swallowed, so
-        // this decoding at all is the assertion.
-        let owner = self
-            .mailbox
-            .get(PropertyTag::MAILBOX_OWNER_ENTRY_ID)
-            .and_then(PropertyValue::as_binary)
-            .expect("the owner's address book EntryID");
-        assert!(owner.len() > 100, "{} bytes", owner.len());
-
-        // Documented as read-only properties of every private mailbox logon, and answered with
-        // `ecNotFound` by the server that produced this corpus. Recorded rather than smoothed
-        // over: "not set" and "the server would not say" are different facts.
-        //
-        // [MS-OXCSTOR] §2.2.2.1.1.5, §2.2.2.1.1.12
-        for absent in [PropertyTag::STORE_STATE, PropertyTag::LOCALE_ID] {
-            assert_eq!(
-                self.mailbox.error(absent),
-                Some(mapi_client::ErrorCode::NOT_FOUND),
-                "{absent}"
-            );
-        }
-
-        // The write that succeeded as a ROP and failed as a property. A caller that only looked at
-        // the ROP's return value would report this as a completed write.
-        //
-        // [MS-OXCSTOR] §7 note 14 — Exchange 2013 SP1 and later refuse this one
-        assert_eq!(
-            self.refused
-                .iter()
-                .map(|problem| (problem.tag(), problem.code()))
-                .collect::<Vec<_>>(),
-            vec![(PropertyTag::COMMENT, mapi_client::ErrorCode::ACCESS_DENIED)]
-        );
-    }
-
-    /// The name of the folder with a given id.
-    fn folder(&self, id: mapi_client::FolderId) -> &str {
-        self.folders
-            .iter()
-            .find(|(candidate, _)| *candidate == id)
-            .map(|(_, name)| &**name)
-            .unwrap_or_default()
-    }
+    (descendants, special, calendar_properties)
 }
 
 /// The en-US mailbox: the corpus everything else is compared against.
@@ -379,10 +322,10 @@ fn every_committed_fixture_is_in_the_manifest() {
         }
     }
 
-    // Three files per exchange, and every one of them accounted for. Both sessions run to fourteen
-    // because both mailboxes are seeded from the same list, so they page identically; the only
-    // thing that differs between them is what the folders are called.
-    assert_eq!(counted, (14 + 14 + 1) * 3);
+    // Three files per exchange, and every one of them accounted for. Both sessions run to the same
+    // number because both mailboxes are seeded from the same list and hold the same folders, so
+    // they page identically; the only thing that differs between them is what things are called.
+    assert_eq!(counted, (SESSION_EXCHANGES * 2 + 1) * 3);
 }
 
 /// A shared observer sees the same bytes the fixtures hold, which is the assumption the whole

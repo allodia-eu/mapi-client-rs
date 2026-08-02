@@ -14,10 +14,11 @@
 //! [MS-OXCROPS] §2.2.1 — ROP output buffers
 
 use crate::error::{Error, ErrorCode, Result};
-use crate::oxcdata::{PropertySet, PropertyTag};
+use crate::oxcdata::{LongTermId, PropertySet, PropertyTag, ShortTermId};
 use crate::rop::{
-    GetPropertiesResponse, GetTableResponse, LogonResponse, OpenFolderResponse,
-    PropertyProblemsResponse, QueryRowsResponse, RopId, SetColumnsResponse,
+    GetPropertiesResponse, GetTableResponse, IdFromLongTermIdResponse, LogonResponse,
+    LongTermIdFromIdResponse, OpenFolderResponse, PropertyProblemsResponse, QueryRowsResponse,
+    RopId, SetColumnsResponse,
 };
 use crate::wire::Reader;
 
@@ -42,6 +43,10 @@ pub enum RopResponse {
     /// Success here is about the ROP, not about the properties: individual ones can have been
     /// refused and are named in the response.
     PropertyProblems(PropertyProblemsResponse),
+    /// A successful `RopIdFromLongTermId`.
+    IdFromLongTermId(IdFromLongTermIdResponse),
+    /// A successful `RopLongTermIdFromId`.
+    LongTermIdFromId(LongTermIdFromIdResponse),
     /// A ROP the server refused. Its body stopped after `ReturnValue`.
     Failed {
         /// Which ROP failed.
@@ -114,6 +119,24 @@ impl RopResponse {
     pub const fn as_property_problems(&self) -> Option<&PropertyProblemsResponse> {
         match self {
             Self::PropertyProblems(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    /// The converted identifier, if this is a `RopIdFromLongTermId` response.
+    #[must_use]
+    pub const fn as_short_term_id(&self) -> Option<ShortTermId> {
+        match self {
+            Self::IdFromLongTermId(response) => Some(response.id()),
+            _ => None,
+        }
+    }
+
+    /// The converted identifier, if this is a `RopLongTermIdFromId` response.
+    #[must_use]
+    pub const fn as_long_term_id(&self) -> Option<LongTermId> {
+        match self {
+            Self::LongTermIdFromId(response) => Some(response.id()),
             _ => None,
         }
     }
@@ -225,6 +248,12 @@ pub(crate) fn decode_all(rops: &[u8], context: Decoding<'_>) -> Result<Vec<RopRe
             }
             RopId::SET_PROPERTIES | RopId::DELETE_PROPERTIES => {
                 RopResponse::PropertyProblems(PropertyProblemsResponse::read(&mut r, rop)?)
+            }
+            RopId::ID_FROM_LONG_TERM_ID => {
+                RopResponse::IdFromLongTermId(IdFromLongTermIdResponse::read(&mut r)?)
+            }
+            RopId::LONG_TERM_ID_FROM_ID => {
+                RopResponse::LongTermIdFromId(LongTermIdFromIdResponse::read(&mut r)?)
             }
             // Every response is variable-length and none is self-describing, so there is no
             // honest way to skip one whose layout is unknown.

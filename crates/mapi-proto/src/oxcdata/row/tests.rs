@@ -16,11 +16,13 @@ fn read(buf: &[u8], columns: &[PropertyTag]) -> Result<PropertyRow> {
     PropertyRow::read(&mut Reader::new(buf), columns, ValueContext::TableRow)
 }
 
-/// A hierarchy row exactly as the live Exchange lab sends one: standard form, four columns.
+/// A hierarchy row exactly as the live Exchange lab sends one: standard form, the six columns of
+/// [`HIERARCHY_COLUMNS`] in order.
 fn standard_hierarchy_row(folder_id: u64, name: &str) -> Vec<u8> {
     let mut w = Writer::new();
-    w.u8(0x00).u64(folder_id);
+    w.u8(0x00).u64(folder_id).u64(0x0D00_0000_0000_0001);
     utf16_z(&mut w, name);
+    utf16_z(&mut w, "IPF.Note");
     w.u32(7).u8(1);
     w.finish()
 }
@@ -61,7 +63,9 @@ fn a_flagged_row_handles_present_absent_and_error() {
     let mut w = Writer::new();
     w.u8(0x01);
     w.u8(0x00).u64(0x1234);
+    w.u8(0x00).u64(0x0D00_0000_0000_0001);
     w.u8(0x0A).u32(ErrorCode::TOO_BIG.as_u32());
+    w.u8(0x01);
     w.u8(0x01);
     w.u8(0x00).u8(0);
     let buf = w.finish();
@@ -71,8 +75,17 @@ fn a_flagged_row_handles_present_absent_and_error() {
     assert_eq!(row.form(), RowForm::Flagged);
     assert_eq!(row.folder_id(), Some(FolderId::new(0x1234)));
     assert_eq!(
+        row.get(PropertyTag::PARENT_FOLDER_ID)
+            .and_then(PropertyValue::as_u64),
+        Some(0x0D00_0000_0000_0001)
+    );
+    assert_eq!(
         row.get(PropertyTag::DISPLAY_NAME),
         Some(&PropertyValue::Error(ErrorCode::TOO_BIG))
+    );
+    assert_eq!(
+        row.get(PropertyTag::CONTAINER_CLASS),
+        Some(&PropertyValue::Absent)
     );
     assert_eq!(
         row.get(PropertyTag::CONTENT_COUNT),
@@ -85,7 +98,7 @@ fn a_flagged_row_handles_present_absent_and_error() {
 }
 
 /// The form is the server's choice per row, so the decoder reports it instead of normalising it
-/// away. Both rows below carry the same four values.
+/// away. Both rows below carry the same six values.
 #[test]
 fn the_row_form_is_reported_not_normalised_away() {
     let standard = standard_hierarchy_row(1, "");
@@ -94,8 +107,11 @@ fn the_row_form_is_reported_not_normalised_away() {
     let mut w = Writer::new();
     w.u8(0x01);
     w.u8(0x00).u64(1);
+    w.u8(0x00).u64(0x0D00_0000_0000_0001);
     w.u8(0x00);
     utf16_z(&mut w, "");
+    w.u8(0x00);
+    utf16_z(&mut w, "IPF.Note");
     w.u8(0x00).u32(7);
     w.u8(0x00).u8(1);
     let flagged = read(&w.finish(), &HIERARCHY_COLUMNS).unwrap();

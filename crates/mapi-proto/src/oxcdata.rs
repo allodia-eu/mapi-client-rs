@@ -6,17 +6,25 @@
 //!
 //! [MS-OXCDATA] — data structures
 
+mod class;
+mod entryid;
 mod ids;
 mod kind;
 mod properties;
 mod row;
+mod special;
 mod tag;
 mod value;
 
+pub use class::ContainerClass;
+pub use entryid::{FolderEntryId, LongTermId, ShortTermId, StoreObjectType};
 pub use ids::{FileTime, FolderId, Guid, LegacyDn, MessageId, ReplicaId};
 pub use kind::PropertyType;
 pub(crate) use kind::ValueContext;
 pub use properties::{PropertyProblem, PropertySet, PropertySetIter, TaggedValue};
 pub use row::{Cell, PropertyRow, RowForm};
-pub use tag::{CONTENTS_COLUMNS, HIERARCHY_COLUMNS, MAILBOX_PROPERTIES, PropertyTag};
+pub use special::{SPECIAL_FOLDER_PROPERTIES, SpecialFolder};
+pub use tag::{
+    CONTENTS_COLUMNS, FOLDER_PROPERTIES, HIERARCHY_COLUMNS, MAILBOX_PROPERTIES, PropertyTag,
+};
 pub use value::{Floating64, PropertyValue, TableString};

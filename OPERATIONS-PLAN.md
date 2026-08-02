@@ -27,14 +27,14 @@ discovering it in Phase 6.
 |---|---|---|
 | List mailboxes the user can access | **No such operation.** Autodiscover's `AlternativeMailbox` elements, plus a second `Connect` per mailbox | Not MAPI — see Phase 7 |
 | Get mailbox metadata | `RopLogon` response (have it) + `RopGetPropertiesSpecific` on the Store object | Phase 1 |
-| List folders in mailbox | `RopGetHierarchyTable` with the `Depth` flag + `PidTagContainerClass` | Phase 2 |
+| List folders in mailbox | `RopGetHierarchyTable` with the `Depth` flag + `PidTagContainerClass` | **Done in Phase 2** |
 | List messages in folder | `RopGetContentsTable` | **Done in v0.1.0**; sorting and filtering in Phase 4 |
 | Draft a new message | `RopCreateMessage` → `RopSetProperties` → `RopModifyRecipients` → `RopSaveChangesMessage` | Phase 5 |
 | Send a message | `RopSubmitMessage` | Phase 6 |
 | Archive / delete a message | `RopMoveCopyMessages` / `RopDeleteMessages` | Phase 6 |
 | Flag a message | Two different things — read state is `RopSetReadFlags`, follow-up is `RopSetProperties` | Phase 6 |
-| List calendars | Folder hierarchy filtered on `PidTagContainerClass = "IPF.Appointment"` | Phase 2 |
-| Get calendar details | `RopGetPropertiesSpecific` on the folder | Phase 2 |
+| List calendars | Folder hierarchy filtered on `PidTagContainerClass = "IPF.Appointment"` | **Done in Phase 2** |
+| Get calendar details | `RopGetPropertiesSpecific` on the folder | **Done in Phase 2** |
 | List calendar events | Contents table, but the useful columns are **named properties** | Phase 4 |
 | Create / update calendar event | `RopCreateMessage` / `RopOpenMessage` with `IPM.Appointment` | Phase 5–6 |
 | Delete calendar event | `RopDeleteMessages` | Phase 6 |
@@ -64,8 +64,9 @@ Shortcuts — [MS-OXCSTOR] §2.2.1.1.3. `WellKnownFolder` already models all thi
 which is correct and is also the whole problem: **twelve of the eighteen requested operations are
 about folders the logon never names.**
 
-Those folders are located by entry-id properties described in [MS-OXOSFLD], which is not currently
-pinned. Reaching them therefore needs, in order:
+Those folders are located by entry-id properties described in [MS-OXOSFLD] §2.2.3, **on the Inbox**
+for a mailbox's owner and on the Root folder for a delegate — measured in Phase 2 and matching the
+document. Reaching them therefore needs, in order:
 
 1. `PtypBinary` decoding, because an entry id is binary and the codec currently *stops* on it;
 2. `RopGetPropertiesSpecific`, to read the property at all;
@@ -231,13 +232,38 @@ the phase turned up, none of which changes the plan:
 - **A write can succeed as a ROP and fail as a property**, which the `PropertyProblem` list is for.
   [MS-OXCSTOR]'s own notes 14–16 predict it for three of the five read/write Store properties.
 
-**Phase 2 — Folders the logon does not name.** F5's entry-id chain, `RopIdFromLongTermId`, the
-`Depth` flag on `RopGetHierarchyTable`, `PidTagContainerClass` as a column. Ends with a full
-recursive folder listing tagged by class, which delivers *"list folders"*, *"list calendars"*,
-*"list contacts folders"* and *"get calendar details"* at once. **This is the phase with a genuine
-unknown in it** — [MS-OXOSFLD] has to settle which object carries the entry-id properties, and it
-has to be measured on both lab mailboxes, because a client that finds Calendar in the en-US mailbox
-and not the nl-NL one is exactly the trap AGENTS.md already warns about.
+**Phase 2 — Folders the logon does not name. Done.** The entry-id chain,
+`RopIdFromLongTermId`/`RopLongTermIdFromId`, the `Depth` flag on `RopGetHierarchyTable` and
+`PidTagContainerClass` as a column. `mapi-cli folders --recursive --class IPF.Appointment` and
+`mapi-cli special --details` between them deliver *"list folders"*, *"list calendars"*, *"list
+contacts folders"* and *"get calendar details"*.
+
+**The genuine unknown is settled**: [MS-OXOSFLD] §2.2.3 puts the entry-id properties on the
+**Inbox** for a mailbox's owner and on the Root folder for a delegate, and the Inbox is what a
+mailbox this client can authenticate as always has. Six things the phase turned up, none of which
+changes the plan:
+
+- **Two mailboxes report the same folder ids.** Calendar is `0x0D01000000000001` in *both* lab
+  mailboxes, Contacts `0x0E01000000000001`, and so on for six of seven. A short-term id is only
+  meaningful inside the logon that produced it and here the numbers are equal, so an id cached
+  across mailboxes opens a real folder and reports nothing. The entry ids differ because their
+  `Provider UID` is the mailbox GUID — which is why `FolderEntryId::belongs_to` exists and why the
+  Phase 3 named-property ids deserve the same treatment rather than a weaker one.
+- **Reminders is not in the IPM subtree.** [MS-OXOSFLD] §3.1.1.1 puts it directly under the Root
+  folder, and the lab agrees. A client that located special folders by walking the user-visible
+  tree would never find it — the second reason the chain exists, after localisation.
+- **`PidTagContainerClass` does not always begin with `IPF.`**, though [MS-OXCFOLD] §2.2.2.2.2.3
+  says it must: `Outlook.Reminder` is in [MS-OXOSFLD]'s own table, and the lab carries a folder
+  whose class is the bare string `IPF`. Seventeen distinct classes in a mailbox holding no user
+  data, eight of them refinements of `IPF.Contact` — so class matching is on the dotted prefix.
+- **The `Depth` flag is honoured**, and every row carries `PidTagParentFolderId`. A recursive read
+  found the same 26 folders as walking the hierarchy one ROP at a time, in both mailboxes.
+- **A search folder answers like a real one.** Reminders reports a container class and a message
+  count and holds neither, so `PidTagFolderType` is in `FOLDER_PROPERTIES` rather than left to a
+  doc comment.
+- **`HIERARCHY_COLUMNS` had to grow.** Without `PidTagParentFolderId` a `Depth` read is a flat bag,
+  and without `PidTagContainerClass` a listing is names in a language the reader may not have. That
+  is a breaking change to a public const, recorded in the changelog.
 
 **Phase 3 — Named properties.** F3, with the per-logon cache and the id-binding type. Ends with the
 `PSETID_Appointment` and `PSETID_Address` ids resolved and printed for both mailboxes.

@@ -1,5 +1,5 @@
 use super::*;
-use crate::oxcdata::HIERARCHY_COLUMNS;
+use crate::oxcdata::{Guid, HIERARCHY_COLUMNS};
 
 fn dn() -> LegacyDn {
     LegacyDn::new("/o=First/ou=Exchange Administrative Group/cn=alice").unwrap()
@@ -41,7 +41,7 @@ fn the_handle_table_is_sized_by_slots_and_starts_unowned() {
     let mut batch = RopBatch::new();
     let logon = batch.bind(ObjectHandle::new(0x2A));
     let folder = batch.open_folder(logon, FolderId::new(1));
-    let _table = batch.hierarchy_table(folder);
+    let _table = batch.hierarchy_table(folder, FolderDepth::Immediate);
 
     let built = batch.build().unwrap();
     assert_eq!(
@@ -70,7 +70,7 @@ fn columns_are_recorded_against_the_slot_that_will_carry_the_rows() {
     let mut batch = RopBatch::new();
     let logon = batch.bind(ObjectHandle::new(1));
     let folder = batch.open_folder(logon, FolderId::new(1));
-    let table = batch.hierarchy_table(folder);
+    let table = batch.hierarchy_table(folder, FolderDepth::Immediate);
     batch.set_columns(table, &HIERARCHY_COLUMNS);
 
     let built = batch.build().unwrap();
@@ -166,6 +166,31 @@ fn an_empty_batch_is_still_a_valid_buffer() {
     let built = RopBatch::default().build().unwrap();
     assert_eq!(built.bytes.len(), 10, "just the framing");
     assert!(built.columns.is_empty());
+}
+
+/// A conversion ROP answers *for the store the logon named*, so one addressed at a handle from
+/// another batch would return a plausible folder id for the wrong mailbox — an answer that looks
+/// entirely right. The slot is checked before the ROP is written rather than after the id comes
+/// back, because by then there is nothing left to check it against.
+#[test]
+fn a_conversion_refuses_a_slot_from_another_batch() {
+    let mut other = RopBatch::new();
+    let stranger = other.bind(ObjectHandle::new(7));
+    let long_term = LongTermId::new(Guid::from_bytes([0; 16]), [1, 0, 0, 0, 0, 0]);
+
+    let mut from_long = RopBatch::new();
+    from_long.id_from_long_term_id(stranger, &long_term);
+    assert_eq!(
+        from_long.build().unwrap_err(),
+        Error::UnknownHandleSlot { index: 0 }
+    );
+
+    let mut from_short = RopBatch::new();
+    from_short.long_term_id_from_id(stranger, ShortTermId::new(1));
+    assert_eq!(
+        from_short.build().unwrap_err(),
+        Error::UnknownHandleSlot { index: 0 }
+    );
 }
 
 #[test]

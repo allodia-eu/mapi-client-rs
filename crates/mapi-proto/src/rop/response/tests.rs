@@ -392,7 +392,26 @@ fn accessors_answer_only_for_their_own_response() {
     assert!(logon.as_query_rows().is_none());
     assert!(logon.as_properties().is_none());
     assert!(logon.as_property_problems().is_none());
+    assert!(logon.as_short_term_id().is_none());
+    assert!(logon.as_long_term_id().is_none());
     assert!(logon.failure().is_none());
+
+    // The two conversions answer for themselves and not for each other. They are the one pair here
+    // whose payloads are both bare identifiers, so a caller reaching for the wrong accessor would
+    // otherwise get a plausible number rather than nothing.
+    let mut w = Writer::new();
+    w.u8(RopId::ID_FROM_LONG_TERM_ID.as_u8())
+        .u8(0)
+        .u32(0)
+        .u64(0x0001_0000_0000_1234);
+    let short = decode_all(&w.finish(), against(&no_columns())).unwrap();
+    let short = short.first().unwrap();
+    assert_eq!(
+        short.as_short_term_id().map(ShortTermId::as_u64),
+        Some(0x0001_0000_0000_1234)
+    );
+    assert!(short.as_long_term_id().is_none());
+    assert!(short.as_logon().is_none());
 }
 
 #[test]

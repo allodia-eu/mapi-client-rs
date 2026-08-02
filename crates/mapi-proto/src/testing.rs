@@ -34,6 +34,9 @@ pub(crate) fn logon_response(handle_index: u8) -> Vec<u8> {
 }
 
 /// A `RopQueryRows` response carrying `rows` hierarchy-table rows.
+///
+/// The row layout is [`HIERARCHY_COLUMNS`](crate::HIERARCHY_COLUMNS) in order: folder id, parent
+/// folder id, display name, container class, message count, has-children.
 pub(crate) fn query_rows_response(handle_index: u8, rows: &[(u64, &str)]) -> Vec<u8> {
     let mut w = Writer::new();
     w.u8(RopId::QUERY_ROWS.as_u8()).u8(handle_index).u32(0);
@@ -41,11 +44,9 @@ pub(crate) fn query_rows_response(handle_index: u8, rows: &[(u64, &str)]) -> Vec
     w.u8(0x00)
         .u16(u16::try_from(rows.len()).unwrap_or(u16::MAX));
     for (folder_id, name) in rows {
-        w.u8(0x00).u64(*folder_id);
-        for unit in name.encode_utf16() {
-            w.u16(unit);
-        }
-        w.u16(0);
+        w.u8(0x00).u64(*folder_id).u64(0x0D00_0000_0000_0001);
+        w.utf16_z(name);
+        w.utf16_z("IPF.Note");
         w.u32(1).u8(0);
     }
     w.finish()

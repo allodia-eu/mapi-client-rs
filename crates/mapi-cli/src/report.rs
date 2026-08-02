@@ -5,7 +5,9 @@
 
 use core::fmt::Write as _;
 
-use mapi_client::{Cell, Exchange, Observer, PropertyRow, PropertySet, PropertyTag, PropertyValue};
+use mapi_client::{
+    Cell, Exchange, Observer, PropertyRow, PropertySet, PropertyTag, PropertyValue, TableString,
+};
 
 /// Bytes per line of a hex dump, which is what fits an eighty-column terminal alongside the ASCII.
 const PER_LINE: usize = 16;
@@ -67,13 +69,73 @@ pub(crate) fn string_cell(row: &PropertyRow, tag: PropertyTag) -> String {
     }
 }
 
-/// A one-line summary of a hierarchy-table row.
-pub(crate) fn folder_line(row: &PropertyRow) -> String {
+/// A one-line summary of a hierarchy-table row, indented by how deep the folder sits.
+///
+/// The class is shown because it is the whole of what makes a folder a calendar rather than a mail
+/// folder, and because a recursive listing without it is a list of names in a language the reader
+/// may not have.
+pub(crate) fn folder_line(row: &PropertyRow, depth: usize) -> String {
     let name = string_cell(row, PropertyTag::DISPLAY_NAME);
+    let class = row
+        .string(PropertyTag::CONTAINER_CLASS)
+        .map(TableString::as_str)
+        .filter(|value| !value.is_empty())
+        .map_or_else(String::new, |value| format!("  [{value}]"));
+    let indent = "  ".repeat(depth);
+
     match row.folder_id() {
-        Some(id) => format!("  {:#018x}  {name}", id.as_u64()),
-        None => format!("  {:18}  {name}", "(no id)"),
+        Some(id) => format!("  {:#018x}  {indent}{name}{class}", id.as_u64()),
+        None => format!("  {:18}  {indent}{name}{class}", "(no id)"),
     }
+}
+
+/// A one-line summary of a folder's own properties.
+///
+/// `PidTagFolderType` is called out because a search folder answers every other property exactly
+/// as a real folder does: the To-Do list reports a container class and a message count and holds
+/// none of them.
+///
+/// [MS-OXCFOLD] §2.2.2.2.2.7 — Root (0), Generic (1), Search (2)
+pub(crate) fn folder_summary(properties: &PropertySet) -> String {
+    let text = |tag| {
+        properties
+            .string(tag)
+            .map_or_else(|| "(absent)".to_owned(), |value| value.as_str().to_owned())
+    };
+    let number = |tag| {
+        properties
+            .get(tag)
+            .and_then(PropertyValue::as_u32)
+            .map_or_else(|| "(absent)".to_owned(), |value| value.to_string())
+    };
+
+    let kind = match properties
+        .get(PropertyTag::FOLDER_TYPE)
+        .and_then(PropertyValue::as_u32)
+    {
+        Some(0) => "root".to_owned(),
+        Some(1) => "generic".to_owned(),
+        Some(2) => "search folder — its contents are a query, not items it holds".to_owned(),
+        Some(other) => format!("type {other}, which [MS-OXCFOLD] §2.2.2.2.2.7 does not list"),
+        None => "(absent)".to_owned(),
+    };
+
+    let size = properties
+        .get(PropertyTag::MESSAGE_SIZE_EXTENDED)
+        .and_then(PropertyValue::as_u64)
+        .map_or_else(|| "(absent)".to_owned(), |value| format!("{value} bytes"));
+
+    [
+        format!("  display name     {}", text(PropertyTag::DISPLAY_NAME)),
+        format!("  container class  {}", text(PropertyTag::CONTAINER_CLASS)),
+        format!(
+            "  content          {} item(s), {} unread, {size}",
+            number(PropertyTag::CONTENT_COUNT),
+            number(PropertyTag::CONTENT_UNREAD_COUNT)
+        ),
+        format!("  kind             {kind}"),
+    ]
+    .join("\n")
 }
 
 /// A one-line summary of a contents-table row.

@@ -15,7 +15,8 @@ use std::sync::Arc;
 
 use clap::Args;
 use mapi_client::{
-    MAILBOX_PROPERTIES, MapiClient, PropertyTag, PropertyValue, TaggedValue, WellKnownFolder,
+    FOLDER_PROPERTIES, FolderId, Logon, MAILBOX_PROPERTIES, MapiClient, PropertyTag, PropertyValue,
+    SpecialFolder, TaggedValue, WellKnownFolder,
 };
 
 use crate::capture::{Recorder, scenario_directory, write_scenario};
@@ -28,6 +29,14 @@ const HIERARCHY_PAGE: u16 = 8;
 
 /// Messages per round trip, chosen so that a five-message inbox needs three of them.
 const CONTENTS_PAGE: u16 = 2;
+
+/// Folders per round trip for the recursive read, chosen so that a lab mailbox's twenty-six needs
+/// two of them.
+///
+/// Larger than [`HIERARCHY_PAGE`] on purpose: what the recursive capture is evidence *for* is the
+/// `Depth` flag and the parent ids that make its flat rows a tree, and four pages of that would
+/// treble the corpus to re-prove paging the immediate read already proves.
+const DEEP_PAGE: u16 = 20;
 
 /// The comment the capture tries to set on the Store object, and never does.
 ///
@@ -215,11 +224,37 @@ async fn session(client: &MapiClient, recorder: &Recorder) -> Result<(), Failure
     let mut logon = connection.logon().await?;
     let subtree = logon.folder_id(WellKnownFolder::IpmSubtree)?;
 
-    // The Store object's own properties, by name. `RopGetPropertiesAll` is deliberately *not*
-    // captured: its answer on the lab carries a dozen server clocks that move on every logon, so a
-    // fixture of it would make `Verify-Fixtures.ps1` report a difference every single run and the
-    // one difference that mattered would be lost in the noise. Normalising a tagged property list
-    // is its own piece of work, and it belongs with the rest of the write-fixture harness.
+    store_object(&mut logon, recorder).await?;
+    hierarchy(&mut logon, recorder, subtree).await?;
+    special_folders(&mut logon, recorder).await?;
+
+    recorder.label("contents");
+    let mut rows = logon
+        .well_known(WellKnownFolder::Inbox)?
+        .contents()
+        .page_size(CONTENTS_PAGE)
+        .rows();
+    let mut messages = 0_usize;
+    while rows.try_next().await?.is_some() {
+        messages = messages.saturating_add(1);
+    }
+    recorder.label("contents-release");
+    rows.close().await?;
+    println!("  {messages} message(s) in the Inbox");
+
+    recorder.label("");
+    logon.disconnect().await?;
+    Ok(())
+}
+
+/// The Store object read, and the write the server refuses.
+///
+/// `RopGetPropertiesAll` is deliberately *not* captured: its answer on the lab carries a dozen
+/// server clocks that move on every logon, so a fixture of it would make `Verify-Fixtures.ps1`
+/// report a difference every single run and the one difference that mattered would be lost in the
+/// noise. Normalising a tagged property list is its own piece of work, and it belongs with the
+/// rest of the write-fixture harness.
+async fn store_object(logon: &mut Logon, recorder: &Recorder) -> Result<(), Failure> {
     recorder.label("properties");
     let mailbox = logon.store().read(MAILBOX_PROPERTIES).await?;
     println!(
@@ -252,10 +287,21 @@ async fn session(client: &MapiClient, recorder: &Recorder) -> Result<(), Failure
                 .to_owned(),
         ));
     }
+    Ok(())
+}
 
-    // The hierarchy, paged: the first round trip opens the folder, opens the table, sets the
-    // columns and reads a page; every later one is a bare `RopQueryRows` against a handle that
-    // still remembers its column set. Both halves of that claim are in the corpus.
+/// Both hierarchy reads: the immediate children, paged, and then everything below at every level.
+///
+/// The first is where the paging evidence lives — the opening round trip sets the columns and every
+/// later one is a bare `RopQueryRows` against a handle that still remembers them. The second is the
+/// `Depth` flag, captured because the flat rows it produces are only a tree by way of
+/// `PidTagParentFolderId`, and a corpus with no recursive read in it would prove nothing about
+/// either.
+async fn hierarchy(
+    logon: &mut Logon,
+    recorder: &Recorder,
+    subtree: FolderId,
+) -> Result<(), Failure> {
     recorder.label("hierarchy");
     let mut rows = logon
         .folder(subtree)
@@ -270,22 +316,56 @@ async fn session(client: &MapiClient, recorder: &Recorder) -> Result<(), Failure
     rows.close().await?;
     println!("  {folders} subfolder(s)");
 
-    recorder.label("contents");
+    recorder.label("hierarchy-deep");
     let mut rows = logon
-        .well_known(WellKnownFolder::Inbox)?
-        .contents()
-        .page_size(CONTENTS_PAGE)
+        .folder(subtree)
+        .descendants()
+        .page_size(DEEP_PAGE)
         .rows();
-    let mut messages = 0_usize;
+    let mut descendants = 0_usize;
     while rows.try_next().await?.is_some() {
-        messages = messages.saturating_add(1);
+        descendants = descendants.saturating_add(1);
     }
-    recorder.label("contents-release");
+    recorder.label("hierarchy-deep-release");
     rows.close().await?;
-    println!("  {messages} message(s) in the Inbox");
+    println!("  {descendants} folder(s) below the IPM subtree, at every level");
+    Ok(())
+}
 
-    recorder.label("");
-    logon.disconnect().await?;
+/// The entry-id chain, and then the Calendar's own properties.
+///
+/// Three exchanges: the Inbox's binary properties, the conversion of every one of them that parsed,
+/// and a property read on the folder that conversion found. The middle one is the corpus's only
+/// evidence of what a `RopIdFromLongTermId` request and response look like, and the last is its
+/// only `RopGetPropertiesSpecific` against something other than the Logon object.
+async fn special_folders(logon: &mut Logon, recorder: &Recorder) -> Result<(), Failure> {
+    recorder.label("special-folders");
+    let special = logon.special_folders().await?;
+    println!(
+        "  {} of {} special folder(s) present",
+        special.found(),
+        SpecialFolder::ALL.len()
+    );
+
+    let Some(calendar) = special.get(SpecialFolder::Calendar) else {
+        return Err(Failure::from(
+            "this mailbox has no Calendar folder, so the capture would carry no evidence that the \
+             entry-id chain reaches one. Open the mailbox in Outlook or OWA once and re-run."
+                .to_owned(),
+        ));
+    };
+
+    recorder.label("folder-properties");
+    let details = logon
+        .folder(calendar)
+        .properties()
+        .read(FOLDER_PROPERTIES)
+        .await?;
+    println!(
+        "  the Calendar at {:#018x} answered with {} propert(y/ies)",
+        calendar.as_u64(),
+        details.len()
+    );
     Ok(())
 }
 
@@ -385,5 +465,11 @@ mod tests {
     fn the_page_sizes_are_small_enough_to_force_paging() {
         const { assert!(HIERARCHY_PAGE < 15, "a lab mailbox has fifteen folders") }
         const { assert!(CONTENTS_PAGE < 5, "a seeded inbox has five messages") }
+        const {
+            assert!(
+                DEEP_PAGE < 26,
+                "a lab mailbox has twenty-six folders below the IPM subtree"
+            );
+        }
     }
 }

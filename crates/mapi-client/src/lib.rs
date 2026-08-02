@@ -38,10 +38,16 @@
 //!
 //! # Three round trips to the first row
 //!
-//! `Connect` establishes the Session Context, `RopLogon` returns every special folder's id, and
-//! one more `Execute` opens the folder, opens its table, sets the columns and reads the first page
-//! — because ROPs chained in a single buffer consume the handles that earlier ROPs in the same
-//! buffer produced. Later pages are one round trip each.
+//! `Connect` establishes the Session Context, `RopLogon` returns thirteen folder ids, and one more
+//! `Execute` opens the folder, opens its table, sets the columns and reads the first page — because
+//! ROPs chained in a single buffer consume the handles that earlier ROPs in the same buffer
+//! produced. Later pages are one round trip each.
+//!
+//! **The Calendar is two more.** `RopLogon` does not name it, or Contacts, or Drafts, or Tasks, or
+//! Notes, or Journal: those live behind binary entry-id properties on the Inbox, and an entry id is
+//! long-term while `RopOpenFolder` takes a short-term id. [`Logon::special_folders`] reads all
+//! eight properties in one `Execute` and converts all eight in the next, so finding every one of
+//! them costs what finding one would.
 //!
 //! # What the types enforce
 //!
@@ -88,6 +94,7 @@ mod credentials;
 mod logon;
 mod observer;
 mod properties;
+mod special;
 mod table;
 mod transport;
 
@@ -107,10 +114,12 @@ pub use mapi_proto;
 /// The types from [`mapi-proto`](mapi_proto) that appear in this crate's own API, re-exported
 /// so that the common path needs one dependency rather than two.
 pub use mapi_proto::{
-    Bookmark, CONTENTS_COLUMNS, Cell, Connected, ErrorCode, FileTime, Floating64, FolderId, Guid,
-    HIERARCHY_COLUMNS, Headers, Lcid, LegacyDn, LogonResponse, MAILBOX_PROPERTIES, MessageId,
-    PropertyProblem, PropertyRow, PropertySet, PropertySetIter, PropertyTag, PropertyType,
-    PropertyValue, ReplicaId, RequestType, RowForm, TableString, TaggedValue, WellKnownFolder,
+    Bookmark, CONTENTS_COLUMNS, Cell, Connected, ContainerClass, ErrorCode, FOLDER_PROPERTIES,
+    FileTime, Floating64, FolderDepth, FolderEntryId, FolderId, Guid, HIERARCHY_COLUMNS, Headers,
+    Lcid, LegacyDn, LogonResponse, LongTermId, MAILBOX_PROPERTIES, MessageId, PropertyProblem,
+    PropertyRow, PropertySet, PropertySetIter, PropertyTag, PropertyType, PropertyValue, ReplicaId,
+    RequestType, RowForm, ShortTermId, SpecialFolder, StoreObjectType, TableString, TaggedValue,
+    WellKnownFolder,
 };
 
 pub use crate::builder::MapiClientBuilder;
@@ -121,6 +130,9 @@ pub use crate::error::{Error, Result};
 pub use crate::logon::{Folder, Logon};
 pub use crate::observer::{Exchange, Observer};
 pub use crate::properties::Properties;
+pub use crate::special::{
+    SpecialFolderEntry, SpecialFolderState, SpecialFolders, SpecialFoldersIter,
+};
 pub use crate::table::{Rows, TableRead};
 
 /// Names an outcome for an error message, when the one that arrived is not the one expected.
@@ -156,6 +168,10 @@ mod tests {
         assert::<TableRead<'_>>();
         assert::<Rows<'_>>();
         assert::<Exchange<'_>>();
+        assert::<SpecialFolders>();
+        assert::<SpecialFolderEntry>();
+        assert::<SpecialFolderState>();
+        assert::<SpecialFoldersIter<'_>>();
     }
 
     #[test]

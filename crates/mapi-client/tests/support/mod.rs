@@ -306,8 +306,12 @@ pub(crate) fn query_rows_response(slot: u8, bookmark: u8, rows: &[Vec<u8>]) -> V
     out.done()
 }
 
-/// One row of a hierarchy table read with [`mapi_client::HIERARCHY_COLUMNS`]: folder id, display
-/// name, message count, has-children.
+/// One row of a hierarchy table read with [`mapi_client::HIERARCHY_COLUMNS`]: folder id, parent
+/// folder id, display name, container class, message count, has-children.
+///
+/// The parent is a constant here because nothing in this file tests nesting — the recursive read
+/// is exercised against the captured corpus, where the ids are a real mailbox's rather than made
+/// up.
 pub(crate) fn hierarchy_row(
     folder_id: u64,
     name: &str,
@@ -316,7 +320,9 @@ pub(crate) fn hierarchy_row(
 ) -> Vec<u8> {
     Bytes::new()
         .u64(folder_id)
+        .u64(0x0D00_0000_0000_0001)
         .utf16_z(name)
+        .utf16_z("IPF.Note")
         .u32(content_count)
         .u8(u8::from(subfolders))
         .done()
@@ -464,9 +470,15 @@ pub(crate) fn rop_list(rops: &[u8]) -> Vec<(u8, &[u8])> {
             0x01 => 3,                      // RopRelease
             0x02 => 13,                     // RopOpenFolder: FolderId is 8 of them
             0x04 | 0x05 => 5,               // RopGetHierarchyTable / RopGetContentsTable
+            0x07 => 9 + 4 * u16_at(at + 7), // RopGetPropertiesSpecific: limit, unicode, then tags
+            0x0B => 5 + 4 * u16_at(at + 3), // RopDeleteProperties: PropertyTagCount, then the tags
             0x12 => 6 + 4 * u16_at(at + 4), // RopSetColumns: PropertyTagCount, then the tags
-            0x15 => 7,                      // RopQueryRows
-            0xFE => 14 + u16_at(at + 12),   // RopLogon: EssdnSize counts the NUL
+            // RopGetPropertiesAll (limit and unicode) and RopQueryRows (flags, direction, count)
+            // are the same length by coincidence rather than by kinship.
+            0x08 | 0x15 => 7,
+            0x43 => 11,                   // RopLongTermIdFromId: an 8-byte ObjectId
+            0x44 => 27,                   // RopIdFromLongTermId: a 24-byte LongTermID
+            0xFE => 14 + u16_at(at + 12), // RopLogon: EssdnSize counts the NUL
             other => panic!("ROP 0x{other:02X} is not one this crate sends"),
         };
         out.push((opcode, &rops[at..at + length]));

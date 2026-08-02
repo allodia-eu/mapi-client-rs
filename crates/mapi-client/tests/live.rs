@@ -26,6 +26,11 @@ use mapi_client::{
     TaggedValue, WellKnownFolder,
 };
 
+/// The entry-id chain, the `Depth` flag and the identifier conversions — the folders `RopLogon`
+/// never names. Its own file because it is its own question, and because this one is at the
+/// workspace's 500-line limit.
+mod folders;
+
 /// Reads one of the variables that describe the lab, failing with the name of the missing one.
 ///
 /// Deliberately a hard failure rather than a skip: this test only runs when somebody asked for it
@@ -401,9 +406,6 @@ async fn an_accepted_store_write_persists_without_a_save_rop() {
 #[tokio::test]
 #[ignore = "needs a live Exchange Server; run scripts\\Test-Live.ps1"]
 async fn a_multivalued_column_decodes_at_the_documented_count_width() {
-    /// `PidTagAdditionalRenEntryIds`, `PtypMultipleBinary`.
-    const ADDITIONAL_REN_ENTRY_IDS: u32 = 0x36D8_1102;
-
     let client = client();
     let mut logon = client
         .connect()
@@ -437,7 +439,7 @@ async fn a_multivalued_column_decodes_at_the_documented_count_width() {
     // The same again, with the variable-length multivalued column in front. If its COUNT were
     // read at the wrong width, the two columns after it would start at the wrong offset and the
     // ids and names below would not match the control.
-    let multivalued = PropertyTag::new(ADDITIONAL_REN_ENTRY_IDS);
+    let multivalued = PropertyTag::ADDITIONAL_REN_ENTRY_IDS;
     let rows = logon
         .folder(subtree)
         .subfolders()

@@ -15,6 +15,22 @@ use crate::oxcdata::PropertyType;
 pub struct PropertyTag(u32);
 
 impl PropertyTag {
+    /// `PidTagAdditionalRenEntryIds`, `0x36D81102` — entry ids of five more special folders.
+    ///
+    /// A `PtypMultipleBinary` on the Inbox, indexed rather than named: `0x0000` Conflicts,
+    /// `0x0001` Sync Issues, `0x0002` Local Failures, `0x0003` Server Failures, `0x0004` Junk
+    /// E-mail. The indexed mechanism is not modelled here — [`SpecialFolder`] covers the folders
+    /// that get a property each — but the tag is named because the value is this crate's evidence
+    /// for the COUNT-width measurement, and because a caller can index it themselves.
+    ///
+    /// [MS-OXOSFLD] §2.2.4
+    ///
+    /// [`SpecialFolder`]: crate::SpecialFolder
+    pub const ADDITIONAL_REN_ENTRY_IDS: Self = Self(0x36D8_1102);
+    /// `PidTagAttributeHidden`, `0x10F4000B` — whether a client hides this folder from the user.
+    ///
+    /// [MS-OXCFOLD] §2.2.2.2.2.1
+    pub const ATTRIBUTE_HIDDEN: Self = Self(0x10F4_000B);
     /// `PidTagCodePageId`, `0x66C30003` — the code page `PtypString8` values are encoded in.
     ///
     /// [MS-OXCSTOR] §2.2.2.1.1.15
@@ -30,10 +46,23 @@ impl PropertyTag {
     ///
     /// [MS-OXCSTOR] §2.2.2.1.2.1, and §7 note 14
     pub const COMMENT: Self = Self(0x3004_001F);
+    /// `PidTagContainerClass`, `0x3613001F` — the kind of item a folder holds.
+    ///
+    /// The whole of what makes a folder a calendar rather than a mailbox: there is no calendar
+    /// object in MAPI, only a folder whose class is `IPF.Appointment`. See [`ContainerClass`].
+    ///
+    /// [MS-OXCFOLD] §2.2.2.2.2.3
+    ///
+    /// [`ContainerClass`]: crate::ContainerClass
+    pub const CONTAINER_CLASS: Self = Self(0x3613_001F);
     /// `PidTagContentCount`, `0x36020003` — messages in a folder, excluding FAI entries.
     ///
     /// [MS-OXCFOLD] §2.2.2.2.1.1
     pub const CONTENT_COUNT: Self = Self(0x3602_0003);
+    /// `PidTagContentUnreadCount`, `0x36030003` — unread messages in a folder.
+    ///
+    /// [MS-OXCFOLD] §2.2.2.2.1.2
+    pub const CONTENT_UNREAD_COUNT: Self = Self(0x3603_0003);
     /// `PidTagDeleteAfterSubmit`, `0x0E01000B` — whether transport deletes submitted mail.
     ///
     /// [MS-OXCSTOR] §2.2.2.1.2.2
@@ -46,10 +75,51 @@ impl PropertyTag {
     ///
     /// [MS-OXCSTOR] §2.2.2.1.1.1
     pub const EXTENDED_RULE_SIZE_LIMIT: Self = Self(0x0E9B_0003);
+    /// `PidTagFolderFlags`, `0x66A80003` — a computed bitfield describing the folder.
+    ///
+    /// `IPM` (1), `SEARCH` (2), `NORMAL` (4), `RULES` (8). The `SEARCH` bit is the one that
+    /// matters to a listing: the To-Do and Reminders folders carry a container class like any
+    /// other folder and hold nothing of their own, so a caller enumerating calendars or task
+    /// folders by class alone will find search folders among them.
+    ///
+    /// [MS-OXCFOLD] §2.2.2.2.1.5
+    pub const FOLDER_FLAGS: Self = Self(0x66A8_0003);
     /// `PidTagFolderId`, `0x67480014` — the folder id of a row in a hierarchy table.
     ///
     /// [MS-OXCFOLD] §2.2.2.2.1.6
     pub const FOLDER_ID: Self = Self(0x6748_0014);
+    /// `PidTagFolderType`, `0x36010003` — Root (0), Generic (1) or Search (2).
+    ///
+    /// [MS-OXCFOLD] §2.2.2.2.2.7
+    pub const FOLDER_TYPE: Self = Self(0x3601_0003);
+    /// `PidTagIpmAppointmentEntryId`, `0x36D00102` — the Calendar folder's entry id.
+    ///
+    /// [MS-OXOSFLD] §2.2.3
+    pub const IPM_APPOINTMENT_ENTRY_ID: Self = Self(0x36D0_0102);
+    /// `PidTagIpmArchiveEntryId`, `0x35FF0102` — the Archive folder's entry id.
+    ///
+    /// [MS-OXOSFLD] §2.2.3
+    pub const IPM_ARCHIVE_ENTRY_ID: Self = Self(0x35FF_0102);
+    /// `PidTagIpmContactEntryId`, `0x36D10102` — the Contacts folder's entry id.
+    ///
+    /// [MS-OXOSFLD] §2.2.3
+    pub const IPM_CONTACT_ENTRY_ID: Self = Self(0x36D1_0102);
+    /// `PidTagIpmDraftsEntryId`, `0x36D70102` — the Drafts folder's entry id.
+    ///
+    /// [MS-OXOSFLD] §2.2.3
+    pub const IPM_DRAFTS_ENTRY_ID: Self = Self(0x36D7_0102);
+    /// `PidTagIpmJournalEntryId`, `0x36D20102` — the Journal folder's entry id.
+    ///
+    /// [MS-OXOSFLD] §2.2.3
+    pub const IPM_JOURNAL_ENTRY_ID: Self = Self(0x36D2_0102);
+    /// `PidTagIpmNoteEntryId`, `0x36D30102` — the Notes folder's entry id.
+    ///
+    /// [MS-OXOSFLD] §2.2.3
+    pub const IPM_NOTE_ENTRY_ID: Self = Self(0x36D3_0102);
+    /// `PidTagIpmTaskEntryId`, `0x36D40102` — the Tasks folder's entry id.
+    ///
+    /// [MS-OXOSFLD] §2.2.3
+    pub const IPM_TASK_ENTRY_ID: Self = Self(0x36D4_0102);
     /// `PidTagLocaleId`, `0x66A10003` — the locale system-generated messages are written in.
     ///
     /// Documented as a read-only property of every private mailbox logon; observed answering
@@ -99,6 +169,14 @@ impl PropertyTag {
     ///
     /// [MS-OXCSTOR] §2.2.2.1.2.4
     pub const OUT_OF_OFFICE_STATE: Self = Self(0x661D_000B);
+    /// `PidTagParentFolderId`, `0x67490014` — the folder id of a row's parent.
+    ///
+    /// The column that turns a `Depth` hierarchy read into a tree: with `Depth` set the table
+    /// lists every folder below the one asked about, at every level, and nothing else in the row
+    /// says where each sits.
+    ///
+    /// [MS-OXPROPS] §2.861
+    pub const PARENT_FOLDER_ID: Self = Self(0x6749_0014);
     /// `PidTagProhibitReceiveQuota`, `0x666A0003` — kilobytes before delivery stops.
     ///
     /// [MS-OXCSTOR] §2.2.2.1.1.3
@@ -107,6 +185,10 @@ impl PropertyTag {
     ///
     /// [MS-OXCSTOR] §2.2.2.1.1.4
     pub const PROHIBIT_SEND_QUOTA: Self = Self(0x666E_0003);
+    /// `PidTagRemindersOnlineEntryId`, `0x36D50102` — the Reminders folder's entry id.
+    ///
+    /// [MS-OXOSFLD] §2.2.3
+    pub const REMINDERS_ONLINE_ENTRY_ID: Self = Self(0x36D5_0102);
     /// `PidTagSerializedReplidGuidMap`, `0x66380102` — 18-byte REPLID/REPLGUID pairs.
     ///
     /// Whatever part of the mapping the server chose to send, which is not required to be all of
@@ -193,13 +275,26 @@ impl PropertyTag {
     #[must_use]
     pub const fn name(self) -> Option<&'static str> {
         Some(match self {
+            Self::ADDITIONAL_REN_ENTRY_IDS => "PidTagAdditionalRenEntryIds",
+            Self::ATTRIBUTE_HIDDEN => "PidTagAttributeHidden",
             Self::CODE_PAGE_ID => "PidTagCodePageId",
             Self::COMMENT => "PidTagComment",
+            Self::CONTAINER_CLASS => "PidTagContainerClass",
             Self::CONTENT_COUNT => "PidTagContentCount",
+            Self::CONTENT_UNREAD_COUNT => "PidTagContentUnreadCount",
             Self::DELETE_AFTER_SUBMIT => "PidTagDeleteAfterSubmit",
             Self::DISPLAY_NAME => "PidTagDisplayName",
             Self::EXTENDED_RULE_SIZE_LIMIT => "PidTagExtendedRuleSizeLimit",
+            Self::FOLDER_FLAGS => "PidTagFolderFlags",
             Self::FOLDER_ID => "PidTagFolderId",
+            Self::FOLDER_TYPE => "PidTagFolderType",
+            Self::IPM_APPOINTMENT_ENTRY_ID => "PidTagIpmAppointmentEntryId",
+            Self::IPM_ARCHIVE_ENTRY_ID => "PidTagIpmArchiveEntryId",
+            Self::IPM_CONTACT_ENTRY_ID => "PidTagIpmContactEntryId",
+            Self::IPM_DRAFTS_ENTRY_ID => "PidTagIpmDraftsEntryId",
+            Self::IPM_JOURNAL_ENTRY_ID => "PidTagIpmJournalEntryId",
+            Self::IPM_NOTE_ENTRY_ID => "PidTagIpmNoteEntryId",
+            Self::IPM_TASK_ENTRY_ID => "PidTagIpmTaskEntryId",
             Self::LOCALE_ID => "PidTagLocaleId",
             Self::MAILBOX_OWNER_ENTRY_ID => "PidTagMailboxOwnerEntryId",
             Self::MAILBOX_OWNER_NAME => "PidTagMailboxOwnerName",
@@ -209,8 +304,10 @@ impl PropertyTag {
             Self::MESSAGE_SIZE_EXTENDED => "PidTagMessageSizeExtended",
             Self::MID => "PidTagMid",
             Self::OUT_OF_OFFICE_STATE => "PidTagOutOfOfficeState",
+            Self::PARENT_FOLDER_ID => "PidTagParentFolderId",
             Self::PROHIBIT_RECEIVE_QUOTA => "PidTagProhibitReceiveQuota",
             Self::PROHIBIT_SEND_QUOTA => "PidTagProhibitSendQuota",
+            Self::REMINDERS_ONLINE_ENTRY_ID => "PidTagRemindersOnlineEntryId",
             Self::SERIALIZED_REPLID_GUID_MAP => "PidTagSerializedReplidGuidMap",
             Self::SORT_LOCALE_ID => "PidTagSortLocaleId",
             Self::STORE_STATE => "PidTagStoreState",
@@ -231,10 +328,17 @@ impl core::fmt::Display for PropertyTag {
     }
 }
 
-/// The columns a hierarchy table is read with here: folder id, name, message count, has-children.
-pub const HIERARCHY_COLUMNS: [PropertyTag; 4] = [
+/// The columns a hierarchy table is read with here.
+///
+/// `PidTagParentFolderId` and `PidTagContainerClass` are what make a listing useful rather than
+/// merely present: with the `Depth` flag set a hierarchy table lists every folder below the one
+/// asked about and says nothing about where each sits, so without the parent id the answer is a
+/// flat bag; and the class is the only thing that distinguishes a calendar from a mail folder.
+pub const HIERARCHY_COLUMNS: [PropertyTag; 6] = [
     PropertyTag::FOLDER_ID,
+    PropertyTag::PARENT_FOLDER_ID,
     PropertyTag::DISPLAY_NAME,
+    PropertyTag::CONTAINER_CLASS,
     PropertyTag::CONTENT_COUNT,
     PropertyTag::SUBFOLDERS,
 ];
@@ -245,6 +349,26 @@ pub const CONTENTS_COLUMNS: [PropertyTag; 4] = [
     PropertyTag::SUBJECT,
     PropertyTag::MESSAGE_DELIVERY_TIME,
     PropertyTag::MESSAGE_FLAGS,
+];
+
+/// The Folder object properties that answer "tell me about this folder".
+///
+/// This is *"get calendar details"* and *"get folder details"*: a calendar is a folder, so the two
+/// are one question. `PidTagFolderType` and `PidTagFolderFlags` are in the set because a search
+/// folder answers every other property exactly as a real folder does — the To-Do list reports a
+/// container class of `IPF.Task` and a message count, and holds none of them.
+///
+/// [MS-OXCFOLD] §2.2.2.2 — Folder object properties
+pub const FOLDER_PROPERTIES: [PropertyTag; 9] = [
+    PropertyTag::DISPLAY_NAME,
+    PropertyTag::CONTAINER_CLASS,
+    PropertyTag::PARENT_FOLDER_ID,
+    PropertyTag::CONTENT_COUNT,
+    PropertyTag::CONTENT_UNREAD_COUNT,
+    PropertyTag::MESSAGE_SIZE_EXTENDED,
+    PropertyTag::SUBFOLDERS,
+    PropertyTag::FOLDER_TYPE,
+    PropertyTag::FOLDER_FLAGS,
 ];
 
 /// The Store object properties that answer "tell me about this mailbox".
