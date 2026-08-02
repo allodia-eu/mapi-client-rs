@@ -9,7 +9,8 @@
 //! [MS-OXCDATA] §2.8 — `PropertyRow` structures
 
 use crate::error::{Error, Result};
-use crate::oxcdata::{FolderId, MessageId, PropertyTag, PropertyValue, TableString};
+use crate::oxcdata::kind::ValueContext;
+use crate::oxcdata::{FolderId, MessageId, PropertySet, PropertyTag, PropertyValue, TableString};
 use crate::wire::Reader;
 
 /// Which of the two row encodings the server chose.
@@ -50,6 +51,16 @@ impl Cell {
     #[must_use]
     pub const fn value(&self) -> &PropertyValue {
         &self.value
+    }
+
+    pub(crate) const fn new(tag: PropertyTag, value: PropertyValue) -> Self {
+        Self { tag, value }
+    }
+}
+
+impl core::fmt::Display for Cell {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{} = {}", self.tag, self.value)
     }
 }
 
@@ -106,15 +117,34 @@ impl PropertyRow {
             .map(MessageId::new)
     }
 
+    /// The row as a bag of tag/value pairs.
+    ///
+    /// What `RopGetPropertiesSpecific` answers with is a row like any other; a caller reading one
+    /// object's properties wants it in the same shape `RopGetPropertiesAll` produces, so that the
+    /// two ROPs are interchangeable at the call site.
+    #[must_use]
+    pub fn into_property_set(self) -> PropertySet {
+        PropertySet::from_cells(self.cells)
+    }
+
     /// Reads one row against the column set it was requested with.
     ///
     /// The leading byte picks the form. In a flagged row each value carries `0x00` (the value
     /// follows), `0x01` (absent, and **no bytes are consumed** — the mistake that desynchronises
     /// every later column) or `0x0A` (a 4-byte error code follows).
     ///
+    /// `context` is not discoverable from the bytes and decides two things: how wide the COUNT
+    /// fields inside a variable-length value are, and whether a 255-character string is to be
+    /// reported as truncated. A `RopGetPropertiesSpecific` response is this same structure read
+    /// from an object rather than from a table, which is why it is a parameter.
+    ///
     /// [MS-OXCDATA] §2.8.1.1 — `StandardPropertyRow`
     /// [MS-OXCDATA] §2.8.1.2 — `FlaggedPropertyRow`
-    pub(crate) fn read(r: &mut Reader<'_>, columns: &[PropertyTag]) -> Result<Self> {
+    pub(crate) fn read(
+        r: &mut Reader<'_>,
+        columns: &[PropertyTag],
+        context: ValueContext,
+    ) -> Result<Self> {
         let form = match r.u8()? {
             0x00 => RowForm::Standard,
             _ => RowForm::Flagged,
@@ -123,18 +153,22 @@ impl PropertyRow {
         let mut cells = Vec::with_capacity(columns.len());
         for &tag in columns {
             let value = match form {
-                RowForm::Standard => PropertyValue::read(r, tag.property_type())?,
-                RowForm::Flagged => Self::read_flagged_value(r, tag)?,
+                RowForm::Standard => PropertyValue::read(r, tag.property_type(), context)?,
+                RowForm::Flagged => Self::read_flagged_value(r, tag, context)?,
             };
             cells.push(Cell { tag, value });
         }
         Ok(Self { form, cells })
     }
 
-    fn read_flagged_value(r: &mut Reader<'_>, tag: PropertyTag) -> Result<PropertyValue> {
+    fn read_flagged_value(
+        r: &mut Reader<'_>,
+        tag: PropertyTag,
+        context: ValueContext,
+    ) -> Result<PropertyValue> {
         let at = r.position();
         match r.u8()? {
-            0x00 => PropertyValue::read(r, tag.property_type()),
+            0x00 => PropertyValue::read(r, tag.property_type(), context),
             0x01 => Ok(PropertyValue::Absent),
             0x0A => Ok(PropertyValue::Error(r.u32()?.into())),
             flag => Err(Error::InvalidValueFlag { flag, at }),

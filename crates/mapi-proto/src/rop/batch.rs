@@ -12,11 +12,15 @@
 //! [MS-OXCROPS] §3.1.4.1 — creating a ROP input buffer
 
 use crate::error::{Error, Result};
-use crate::oxcdata::{FolderId, LegacyDn, PropertyTag};
+use crate::oxcdata::{FolderId, LegacyDn, PropertyTag, TaggedValue};
 use crate::rop::RopId;
 use crate::rop::buffer::RopBuffer;
 use crate::rop::folder::encode_open_folder;
 use crate::rop::logon::encode_logon;
+use crate::rop::property::{
+    encode_delete_properties, encode_get_properties_all, encode_get_properties_specific,
+    encode_set_properties,
+};
 use crate::rop::table::{encode_get_table, encode_query_rows, encode_set_columns};
 use crate::wire::Writer;
 
@@ -114,6 +118,7 @@ pub struct RopBatch {
     rops: Writer,
     handles: Vec<ObjectHandle>,
     columns: Vec<Option<Vec<PropertyTag>>>,
+    property_tags: Vec<Vec<PropertyTag>>,
     released: Vec<u8>,
     error: Option<Error>,
     count: usize,
@@ -133,6 +138,7 @@ impl RopBatch {
             rops: Writer::new(),
             handles: Vec::new(),
             columns: Vec::new(),
+            property_tags: Vec::new(),
             released: Vec::new(),
             error: None,
             count: 0,
@@ -222,6 +228,80 @@ impl RopBatch {
         self
     }
 
+    /// Reads the named properties of an object — a logon, a folder, a message, an attachment.
+    ///
+    /// The response carries values and no tags, exactly as a table row does, so the tags are
+    /// remembered here and handed to the decoder when the answer arrives. They are remembered
+    /// **per ROP rather than per handle**: two fetches on one object in one batch are two
+    /// different questions, and answering the second against the first's tags would decode a
+    /// plausible-looking wrong value rather than fail.
+    ///
+    /// [MS-OXCROPS] §2.2.8.3 — `RopGetPropertiesSpecific`
+    pub fn get_properties(&mut self, object: HandleSlot, tags: &[PropertyTag]) -> &mut Self {
+        if self.check(object) {
+            self.push(|w| encode_get_properties_specific(w, object.index(), tags));
+            self.property_tags.push(tags.to_vec());
+        }
+        self
+    }
+
+    /// Reads every property an object has.
+    ///
+    /// Each value arrives beside its own tag, so nothing has to be known in advance — which is
+    /// what makes this the ROP that answers "tell me about this mailbox".
+    ///
+    /// **"All" is not every readable property.** The server returns the values for all properties
+    /// *on* the object ([MS-OXCPRPT] §3.2.5.2), while an explicit `RopGetPropertiesSpecific`
+    /// returns computed properties as well ([MS-OXCPRPT] §3.2.5.1) — so a computed property is
+    /// simply absent here. Measured on Exchange Server SE `15.02.2562.045`, where a private
+    /// mailbox logon answered with 113 properties and `PidTagMailboxOwnerEntryId` was not among
+    /// them, yet was 151 bytes long when asked for by name.
+    ///
+    /// A value too large for the response buffer comes back under its own id with the type
+    /// changed to `PtypErrorCode`, carrying `NotEnoughMemory`; [`PropertySet::get`] is written to
+    /// hand that back rather than report the property as unset.
+    ///
+    /// [MS-OXCROPS] §2.2.8.4 — `RopGetPropertiesAll`
+    /// [MS-OXCPRPT] §2.2.3.2 — an oversized value becomes `NotEnoughMemory`
+    ///
+    /// [`PropertySet::get`]: crate::PropertySet::get
+    pub fn get_all_properties(&mut self, object: HandleSlot) -> &mut Self {
+        if self.check(object) {
+            self.push(|w| encode_get_properties_all(w, object.index()));
+        }
+        self
+    }
+
+    /// Writes properties to an object.
+    ///
+    /// **This persists immediately on a Folder or Logon object**, with no save ROP to follow; on a
+    /// Message or Attachment object it does not, and needs `RopSaveChangesMessage`. Individual
+    /// properties can fail while the ROP as a whole succeeds — see
+    /// [`PropertyProblemsResponse`](crate::PropertyProblemsResponse).
+    ///
+    /// [MS-OXCROPS] §2.2.8.6 — `RopSetProperties`
+    /// [MS-OXCPRPT] §3.2.5.4 — when the change is persisted
+    pub fn set_properties(&mut self, object: HandleSlot, values: &[TaggedValue]) -> &mut Self {
+        if self.check(object) {
+            self.try_push(|w| encode_set_properties(w, object.index(), values));
+        }
+        self
+    }
+
+    /// Deletes properties from an object.
+    ///
+    /// A server that succeeds here must afterwards answer `NotFound` when asked for the value,
+    /// rather than an empty one.
+    ///
+    /// [MS-OXCROPS] §2.2.8.8 — `RopDeleteProperties`
+    /// [MS-OXCPRPT] §3.2.5.5 — `NotFound` in place of a value afterwards
+    pub fn delete_properties(&mut self, object: HandleSlot, tags: &[PropertyTag]) -> &mut Self {
+        if self.check(object) {
+            self.push(|w| encode_delete_properties(w, object.index(), tags));
+        }
+        self
+    }
+
     /// Releases a handle the server is holding.
     ///
     /// A released handle value is free for the server to hand out again, so the session forgets
@@ -283,6 +363,26 @@ impl RopBatch {
         self.count = self.count.saturating_add(1);
     }
 
+    /// Adds a ROP whose encoding can refuse, leaving the buffer untouched when it does.
+    ///
+    /// The scratch buffer is the point: an encoder that fails halfway — a string with an interior
+    /// NUL found after two values were already written — would otherwise leave a partial ROP in
+    /// the buffer, and a batch that reported an error while still holding half a request is a
+    /// worse thing to debug than one that reports the error alone.
+    fn try_push(&mut self, encode: impl FnOnce(&mut Writer) -> Result<()>) {
+        if self.error.is_some() {
+            return;
+        }
+        let mut scratch = Writer::new();
+        match encode(&mut scratch) {
+            Ok(()) => {
+                self.rops.bytes(&scratch.finish());
+                self.count = self.count.saturating_add(1);
+            }
+            Err(error) => self.fail(error),
+        }
+    }
+
     fn fail(&mut self, error: Error) {
         if self.error.is_none() {
             self.error = Some(error);
@@ -302,6 +402,7 @@ impl RopBatch {
             bytes: buffer.serialize()?,
             initial_handles: buffer.handles,
             columns: self.columns,
+            property_tags: self.property_tags,
             released: self.released,
         })
     }
@@ -316,6 +417,10 @@ pub(crate) struct Built {
     pub(crate) initial_handles: Vec<ObjectHandle>,
     /// The column set each slot's table was given, indexed by slot.
     pub(crate) columns: Vec<Option<Vec<PropertyTag>>>,
+    /// The tag list of each `RopGetPropertiesSpecific` in the batch, in the order they were
+    /// issued. A queue rather than a table indexed by slot: the same object can be asked two
+    /// different questions in one batch.
+    pub(crate) property_tags: Vec<Vec<PropertyTag>>,
     /// The slots this batch asks the server to release, so the session can forget the column sets
     /// of whichever handles they held.
     pub(crate) released: Vec<u8>,

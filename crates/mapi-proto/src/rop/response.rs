@@ -14,10 +14,10 @@
 //! [MS-OXCROPS] §2.2.1 — ROP output buffers
 
 use crate::error::{Error, ErrorCode, Result};
-use crate::oxcdata::PropertyTag;
+use crate::oxcdata::{PropertySet, PropertyTag};
 use crate::rop::{
-    GetTableResponse, LogonResponse, OpenFolderResponse, QueryRowsResponse, RopId,
-    SetColumnsResponse,
+    GetPropertiesResponse, GetTableResponse, LogonResponse, OpenFolderResponse,
+    PropertyProblemsResponse, QueryRowsResponse, RopId, SetColumnsResponse,
 };
 use crate::wire::Reader;
 
@@ -35,6 +35,13 @@ pub enum RopResponse {
     SetColumns(SetColumnsResponse),
     /// A successful `RopQueryRows`, with its rows already decoded.
     QueryRows(QueryRowsResponse),
+    /// A successful `RopGetPropertiesSpecific` or `RopGetPropertiesAll`.
+    GetProperties(GetPropertiesResponse),
+    /// A successful `RopSetProperties` or `RopDeleteProperties`.
+    ///
+    /// Success here is about the ROP, not about the properties: individual ones can have been
+    /// refused and are named in the response.
+    PropertyProblems(PropertyProblemsResponse),
     /// A ROP the server refused. Its body stopped after `ReturnValue`.
     Failed {
         /// Which ROP failed.
@@ -93,6 +100,24 @@ impl RopResponse {
         }
     }
 
+    /// The properties, if this is a response to either of the property-reading ROPs.
+    #[must_use]
+    pub const fn as_properties(&self) -> Option<&PropertySet> {
+        match self {
+            Self::GetProperties(response) => Some(response.properties()),
+            _ => None,
+        }
+    }
+
+    /// The per-property outcomes, if this is a response to either of the property-writing ROPs.
+    #[must_use]
+    pub const fn as_property_problems(&self) -> Option<&PropertyProblemsResponse> {
+        match self {
+            Self::PropertyProblems(response) => Some(response),
+            _ => None,
+        }
+    }
+
     /// The error code, if the server refused this ROP.
     ///
     /// A redirect is a refusal too: it reports [`ErrorCode::WRONG_SERVER`], so a caller that only
@@ -116,16 +141,27 @@ impl RopResponse {
     }
 }
 
-/// Decodes every response in a ROP output buffer.
+/// What a response stream cannot supply for itself.
 ///
-/// `columns` is indexed by handle slot and supplies the column set a `RopQueryRows` response is
-/// encoded against — the one piece of context the bytes themselves do not carry.
-pub(crate) fn decode_all(
-    rops: &[u8],
-    columns: &[Option<Vec<PropertyTag>>],
-) -> Result<Vec<RopResponse>> {
+/// Both of these are facts about the *request*, and neither appears anywhere in the bytes coming
+/// back. Grouping them makes it obvious that decoding a buffer in isolation is not something this
+/// layer can do.
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Decoding<'a> {
+    /// The column set each handle slot's table was given, indexed by slot. Supplies the types a
+    /// `RopQueryRows` response is encoded against.
+    pub(crate) columns: &'a [Option<Vec<PropertyTag>>],
+    /// The tag list of each `RopGetPropertiesSpecific` in the batch, in the order they were
+    /// issued. Consumed in that order, because a response says nothing about which request it
+    /// answers.
+    pub(crate) property_tags: &'a [Vec<PropertyTag>],
+}
+
+/// Decodes every response in a ROP output buffer.
+pub(crate) fn decode_all(rops: &[u8], context: Decoding<'_>) -> Result<Vec<RopResponse>> {
     let mut r = Reader::new(rops);
     let mut out = Vec::new();
+    let mut property_tags = context.property_tags.iter();
 
     while !r.is_empty() {
         let rop = RopId::new(r.u8()?);
@@ -144,6 +180,14 @@ pub(crate) fn decode_all(
             }
             _ => {}
         }
+
+        // Taken whether the ROP succeeded or not: a refused fetch consumed its request's tags all
+        // the same, and leaving them in the queue would decode the *next* fetch against them.
+        let requested = if rop == RopId::GET_PROPERTIES_SPECIFIC {
+            property_tags.next()
+        } else {
+            None
+        };
 
         let handle_index = r.u8()?;
         let code = ErrorCode::new(r.u32()?);
@@ -165,11 +209,22 @@ pub(crate) fn decode_all(
             }
             RopId::SET_COLUMNS => RopResponse::SetColumns(SetColumnsResponse::read(&mut r)?),
             RopId::QUERY_ROWS => {
-                let columns = columns
+                let columns = context
+                    .columns
                     .get(usize::from(handle_index))
                     .and_then(Option::as_deref)
                     .ok_or(Error::UnknownColumns { handle_index })?;
                 RopResponse::QueryRows(QueryRowsResponse::read(&mut r, columns)?)
+            }
+            RopId::GET_PROPERTIES_SPECIFIC => {
+                let tags = requested.ok_or(Error::UnrequestedProperties { at: r.position() })?;
+                RopResponse::GetProperties(GetPropertiesResponse::read_row(&mut r, rop, tags)?)
+            }
+            RopId::GET_PROPERTIES_ALL => {
+                RopResponse::GetProperties(GetPropertiesResponse::read_all(&mut r, rop)?)
+            }
+            RopId::SET_PROPERTIES | RopId::DELETE_PROPERTIES => {
+                RopResponse::PropertyProblems(PropertyProblemsResponse::read(&mut r, rop)?)
             }
             // Every response is variable-length and none is self-describing, so there is no
             // honest way to skip one whose layout is unknown.

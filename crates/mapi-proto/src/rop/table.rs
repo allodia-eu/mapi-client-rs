@@ -7,7 +7,7 @@
 //! [MS-OXCTABL] §2.2.2 — table semantics
 
 use crate::error::Result;
-use crate::oxcdata::{PropertyRow, PropertyTag, RowForm};
+use crate::oxcdata::{PropertyRow, PropertyTag, RowForm, ValueContext};
 use crate::rop::RopId;
 use crate::rop::batch::LOGON_ID;
 use crate::wire::{Reader, Writer};
@@ -202,7 +202,7 @@ impl QueryRowsResponse {
         let row_count = r.u16()?;
         let mut rows = Vec::new();
         for _ in 0..row_count {
-            rows.push(PropertyRow::read(r, columns)?);
+            rows.push(PropertyRow::read(r, columns, ValueContext::TableRow)?);
         }
         Ok(Self { bookmark, rows })
     }

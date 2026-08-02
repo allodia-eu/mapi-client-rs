@@ -123,11 +123,11 @@ fn buffer_and_type_errors_name_the_limit_they_hit() {
     );
     assert_eq!(
         Error::UnsupportedPropertyType {
-            property_type: 0x0102,
+            property_type: 0x0006,
             at: 9
         }
         .to_string(),
-        "unsupported property type 0x0102 at 9"
+        "unsupported property type 0x0006 at 9"
     );
     assert_eq!(
         Error::ObfuscatedRopBuffer { flags: 0x0005 }.to_string(),
@@ -135,11 +135,11 @@ fn buffer_and_type_errors_name_the_limit_they_hit() {
     );
     assert_eq!(
         Error::UnmodelledRop {
-            rop: RopId::new(0x07),
+            rop: RopId::new(0x7A),
             at: 6
         }
         .to_string(),
-        "unmodelled ROP 0x07 in the response stream at 6"
+        "unmodelled ROP 0x7A in the response stream at 6"
     );
     assert_eq!(
         Error::UnknownColumns { handle_index: 3 }.to_string(),
@@ -173,6 +173,54 @@ fn the_remaining_variants_have_messages_too() {
         }
         .to_string()
         .contains("cannot be empty")
+    );
+    assert!(
+        Error::UnrequestedProperties { at: 12 }
+            .to_string()
+            .contains("matches no request in this batch")
+    );
+}
+
+/// The errors the property encoder raises. Each names the value it refused and why, because
+/// "cannot encode" alone leaves a caller nowhere to go.
+#[test]
+fn the_property_errors_name_the_value_and_the_way_out() {
+    assert_eq!(
+        Error::ObjectPropertyValue { at: 40 }.to_string(),
+        "PtypObject at 40 is not a value: read it with RopOpenStream"
+    );
+    assert_eq!(
+        Error::UnencodableValue {
+            value: "an absent value",
+            reason: "there is nothing to write"
+        }
+        .to_string(),
+        "cannot encode an absent value: there is nothing to write"
+    );
+    assert_eq!(
+        Error::ValueTooLarge {
+            property_type: PropertyType::Binary,
+            count: 70_000,
+            limit: 65_535,
+        }
+        .to_string(),
+        "a PtypBinary value holds 70000, past the 65535 its COUNT field can express"
+    );
+    assert_eq!(
+        Error::PropertyTypeMismatch {
+            tag: PropertyTag::SUBJECT,
+            value_type: Some(PropertyType::Integer32),
+        }
+        .to_string(),
+        "PidTagSubject (0x0037001F) declares PtypString but was given PtypInteger32"
+    );
+    assert_eq!(
+        Error::PropertyTypeMismatch {
+            tag: PropertyTag::SUBJECT,
+            value_type: None,
+        }
+        .to_string(),
+        "PidTagSubject (0x0037001F) declares PtypString but was given an absent value"
     );
 }
 

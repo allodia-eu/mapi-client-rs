@@ -12,7 +12,7 @@
 //! [MS-OXCDATA] §2.4.1 — additional error codes
 
 use crate::http::ResponseCode;
-use crate::oxcdata::LegacyDn;
+use crate::oxcdata::{LegacyDn, PropertyTag, PropertyType};
 use crate::rop::RopId;
 
 /// The result of decoding or encoding MAPI wire data.
@@ -80,6 +80,65 @@ pub enum Error {
         at: usize,
     },
 
+    /// A property fetch answered with a `PtypObject`, which is not a value.
+    ///
+    /// Its content is another Server object, reached with `RopOpenStream` or
+    /// `RopOpenEmbeddedMessage`. There are no value bytes to consume, so decoding stops here
+    /// rather than reading the next property's bytes as this one's.
+    ///
+    /// [MS-OXCDATA] §2.11.1.5 — `PtypObject` and `PtypEmbeddedTable` types
+    #[error("PtypObject at {at} is not a value: read it with RopOpenStream")]
+    ObjectPropertyValue {
+        /// Byte offset where the value would have started.
+        at: usize,
+    },
+
+    /// A value this crate will not put on the wire.
+    ///
+    /// Refused rather than written approximately. Every one of these would produce a buffer the
+    /// server reads as something other than what was meant, and a silently wrong
+    /// `RopSetProperties` sets a silently wrong property — which surfaces much later, somewhere
+    /// else.
+    #[error("cannot encode {value}: {reason}")]
+    UnencodableValue {
+        /// What was offered.
+        value: &'static str,
+        /// Why it cannot be carried.
+        reason: &'static str,
+    },
+
+    /// A value was longer than its own COUNT field can describe.
+    ///
+    /// [MS-OXCDATA] §2.11.1.1 — COUNT data type values
+    #[error("a {property_type} value holds {count}, past the {limit} its COUNT field can express")]
+    ValueTooLarge {
+        /// The type being written.
+        property_type: PropertyType,
+        /// What was offered.
+        count: usize,
+        /// The largest the COUNT field can express in this context.
+        limit: usize,
+    },
+
+    /// A value was paired with a tag whose type half says something else.
+    ///
+    /// The two halves of a tag are the property's name and its layout, so a mismatch here does not
+    /// produce a wrong answer — it produces a buffer the server parses as a different shape, and
+    /// every field after it moves.
+    ///
+    /// [MS-OXCDATA] §2.9 — `PropertyTag` structure
+    #[error(
+        "{tag} declares {} but was given {}",
+        .tag.property_type(),
+        .value_type.map_or_else(|| "an absent value".to_owned(), |ptyp| ptyp.to_string())
+    )]
+    PropertyTypeMismatch {
+        /// The tag that was named.
+        tag: PropertyTag,
+        /// The type of the value offered for it, or `None` if the value was absent.
+        value_type: Option<PropertyType>,
+    },
+
     /// A `FlaggedPropertyRow` carried a value flag other than `0x00`, `0x01` or `0x0A`.
     ///
     /// [MS-OXCDATA] §2.11.5 — `FlaggedPropertyValue`
@@ -101,6 +160,20 @@ pub enum Error {
     UnknownColumns {
         /// The `InputHandleIndex` the rows came back on.
         handle_index: u8,
+    },
+
+    /// More `RopGetPropertiesSpecific` responses arrived than the batch asked for.
+    ///
+    /// Its response is a `PropertyRow`, which carries values and no tags, so it can only be
+    /// decoded against the tags of the request it answers. A response with no request behind it
+    /// has no such list, and reusing the previous one would decode plausible-looking wrong values
+    /// rather than fail.
+    ///
+    /// [MS-OXCROPS] §2.2.8.3.2 — `RowData` uses the tags from the request
+    #[error("a RopGetPropertiesSpecific response at {at} matches no request in this batch")]
+    UnrequestedProperties {
+        /// Byte offset within the ROP response stream.
+        at: usize,
     },
 
     /// A ROP buffer grew past what its own length fields can describe.

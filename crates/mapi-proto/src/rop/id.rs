@@ -15,6 +15,10 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.15.1
     pub const BUFFER_TOO_SMALL: Self = Self(0xFF);
+    /// `RopDeleteProperties`, `0x0B` — removes properties from an object.
+    ///
+    /// [MS-OXCROPS] §2.2.8.8
+    pub const DELETE_PROPERTIES: Self = Self(0x0B);
     /// `RopGetContentsTable`, `0x05` — the messages in a folder.
     ///
     /// [MS-OXCROPS] §2.2.4.14
@@ -23,6 +27,14 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.4.13
     pub const GET_HIERARCHY_TABLE: Self = Self(0x04);
+    /// `RopGetPropertiesAll`, `0x08` — every property an object has, tags included.
+    ///
+    /// [MS-OXCROPS] §2.2.8.4
+    pub const GET_PROPERTIES_ALL: Self = Self(0x08);
+    /// `RopGetPropertiesSpecific`, `0x07` — the properties that were asked for, by tag.
+    ///
+    /// [MS-OXCROPS] §2.2.8.3
+    pub const GET_PROPERTIES_SPECIFIC: Self = Self(0x07);
     /// `RopLogon`, `0xFE`.
     ///
     /// [MS-OXCROPS] §2.2.3.1
@@ -43,6 +55,10 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.5.1
     pub const SET_COLUMNS: Self = Self(0x12);
+    /// `RopSetProperties`, `0x0A` — writes property values to an object.
+    ///
+    /// [MS-OXCROPS] §2.2.8.6
+    pub const SET_PROPERTIES: Self = Self(0x0A);
 
     /// Wraps a raw opcode.
     #[must_use]
@@ -64,6 +80,10 @@ impl RopId {
             Self::OPEN_FOLDER => "RopOpenFolder",
             Self::GET_HIERARCHY_TABLE => "RopGetHierarchyTable",
             Self::GET_CONTENTS_TABLE => "RopGetContentsTable",
+            Self::GET_PROPERTIES_SPECIFIC => "RopGetPropertiesSpecific",
+            Self::GET_PROPERTIES_ALL => "RopGetPropertiesAll",
+            Self::SET_PROPERTIES => "RopSetProperties",
+            Self::DELETE_PROPERTIES => "RopDeleteProperties",
             Self::SET_COLUMNS => "RopSetColumns",
             Self::QUERY_ROWS => "RopQueryRows",
             Self::BACKOFF => "RopBackoff",
@@ -94,6 +114,14 @@ mod tests {
             (RopId::OPEN_FOLDER, 0x02, "RopOpenFolder"),
             (RopId::GET_HIERARCHY_TABLE, 0x04, "RopGetHierarchyTable"),
             (RopId::GET_CONTENTS_TABLE, 0x05, "RopGetContentsTable"),
+            (
+                RopId::GET_PROPERTIES_SPECIFIC,
+                0x07,
+                "RopGetPropertiesSpecific",
+            ),
+            (RopId::GET_PROPERTIES_ALL, 0x08, "RopGetPropertiesAll"),
+            (RopId::SET_PROPERTIES, 0x0A, "RopSetProperties"),
+            (RopId::DELETE_PROPERTIES, 0x0B, "RopDeleteProperties"),
             (RopId::SET_COLUMNS, 0x12, "RopSetColumns"),
             (RopId::QUERY_ROWS, 0x15, "RopQueryRows"),
             (RopId::BACKOFF, 0xF9, "RopBackoff"),
