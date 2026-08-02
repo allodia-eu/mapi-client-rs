@@ -75,18 +75,21 @@ impl AutodiscoverResponse {
             .and_then(text)
             .unwrap_or_default();
 
-        match action.as_str() {
-            "redirectAddr" => match account
-                .and_then(|node| child(node, "RedirectAddr"))
+        // An element that is present but blank says no more than an absent one, and a blank
+        // RedirectUrl would otherwise be handed back for the caller to GET.
+        let target = |name| {
+            account
+                .and_then(|node| child(node, name))
                 .and_then(text)
-            {
+                .filter(|value| !value.is_empty())
+        };
+
+        match action.as_str() {
+            "redirectAddr" => match target("RedirectAddr") {
                 Some(address) => Ok(Self::RedirectAddress(EmailAddress::new(address)?)),
                 None => Err(Error::IncompleteRedirect { action }),
             },
-            "redirectUrl" => match account
-                .and_then(|node| child(node, "RedirectUrl"))
-                .and_then(text)
-            {
+            "redirectUrl" => match target("RedirectUrl") {
                 Some(url) => Ok(Self::RedirectUrl(url)),
                 None => Err(Error::IncompleteRedirect { action }),
             },

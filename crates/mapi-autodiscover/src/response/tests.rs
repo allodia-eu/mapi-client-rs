@@ -168,13 +168,24 @@ fn a_redirect_to_another_url_is_reported_as_one() {
 #[test]
 fn a_redirect_that_does_not_say_where_to_is_an_error() {
     for action in ["redirectAddr", "redirectUrl"] {
-        let xml = response(&format!("<Account><Action>{action}</Action></Account>"));
-        assert_eq!(
-            AutodiscoverResponse::parse(&xml),
-            Err(Error::IncompleteRedirect {
-                action: action.to_owned()
-            })
-        );
+        // Absent, empty, and whitespace-only all say the same nothing. A blank RedirectUrl that
+        // got through would be handed back for the caller to GET.
+        for inner in [
+            "",
+            "<RedirectAddr/><RedirectUrl/>",
+            "<RedirectUrl>  </RedirectUrl>",
+        ] {
+            let xml = response(&format!(
+                "<Account><Action>{action}</Action>{inner}</Account>"
+            ));
+            assert_eq!(
+                AutodiscoverResponse::parse(&xml),
+                Err(Error::IncompleteRedirect {
+                    action: action.to_owned()
+                }),
+                "{action} with {inner:?}"
+            );
+        }
     }
 }
 
