@@ -41,7 +41,7 @@ jobs:
       version: ${{ steps.check.outputs.version }}
       channel: ${{ steps.check.outputs.channel }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - id: check
         name: The tag, the manifest and the changelog must agree
@@ -104,7 +104,7 @@ jobs:
     needs: guard
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ needs.guard.outputs.channel }}
@@ -154,7 +154,7 @@ jobs:
       name: crates-io
       url: https://crates.io/crates/mapi-client
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ needs.guard.outputs.channel }}
