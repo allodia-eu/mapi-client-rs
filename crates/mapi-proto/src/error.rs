@@ -114,10 +114,11 @@ pub enum Error {
         limit: usize,
     },
 
-    /// A ROP referenced a handle slot that its batch never handed out.
+    /// A ROP referenced a handle slot index this batch never allocated.
     ///
     /// Slots belong to the batch that produced them; one from another batch would address an
-    /// unrelated handle, which is the failure this type exists to prevent.
+    /// unrelated handle. Note that this catches an index out of range, not provenance: a foreign
+    /// slot whose index happens to be in range is indistinguishable from a native one.
     #[error("handle slot {index} does not belong to this batch")]
     UnknownHandleSlot {
         /// The index that was referenced.
@@ -164,10 +165,13 @@ pub enum Error {
     /// Names the distinguished name that was sent, because the common failure is a DN the server
     /// cannot map to a mailbox, and `UnknownUser` on its own reads like a credential problem.
     ///
-    /// [MS-OXCMAPIHTTP] §2.2.4.1.2 — `ErrorCode`
-    #[error("Connect refused for {user_dn}: {code}")]
+    /// [MS-OXCMAPIHTTP] §2.2.4.1.2 — `StatusCode`, `ErrorCode`
+    #[error("Connect refused for {user_dn} (StatusCode 0x{status:08X}): {code}")]
     ConnectFailed {
-        /// What the server said.
+        /// The request-type-level status. Non-zero means the body stops right after it, so `code`
+        /// is then `Success` for want of anything else — the status is the whole verdict.
+        status: u32,
+        /// What the server said, when the status allowed one.
         code: ErrorCode,
         /// The distinguished name that was sent.
         user_dn: LegacyDn,
@@ -264,6 +268,11 @@ impl ErrorCode {
     pub const UNKNOWN_USER: Self = Self(0x0000_03EB);
     /// Client and server versions are not compatible. `0x80040110`, `ecVersionMismatch`.
     pub const VERSION_MISMATCH: Self = Self(0x8004_0110);
+    /// The mailbox is not on this server. `0x00000478`, also written `ecWrongServer`.
+    ///
+    /// Unlike every other refusal, a `RopLogon` that returns this carries a *redirect* body naming
+    /// the server to log on to instead — see [MS-OXCSTOR] §2.2.1.1.2.
+    pub const WRONG_SERVER: Self = Self(0x0000_0478);
 
     /// Wraps a raw code from the wire.
     #[must_use]
@@ -292,6 +301,7 @@ impl ErrorCode {
         Some(match self {
             Self::SUCCESS => "Success",
             Self::UNKNOWN_USER => "UnknownUser",
+            Self::WRONG_SERVER => "WrongServer",
             Self::LOGIN_PERMISSION => "LoginPermission",
             Self::GENERAL_FAILURE => "GeneralFailure",
             Self::NOT_SUPPORTED => "NotSupported",

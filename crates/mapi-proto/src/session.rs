@@ -50,8 +50,15 @@ const DEFAULT_GUID: &str = "{2EF33C39-49C8-421C-B876-CDF7F2AC3AA0}";
 enum Pending {
     /// Carries the distinguished name, so a refusal can name what failed to map.
     Connect(LegacyDn),
-    /// Carries each handle slot's column set, for decoding `RopQueryRows` responses.
-    Execute(Vec<Option<Vec<PropertyTag>>>),
+    /// Carries each handle slot's column set, for decoding `RopQueryRows` responses, and the slots
+    /// the batch released, whose column sets must not outlive them.
+    Execute {
+        columns: Vec<Option<Vec<PropertyTag>>>,
+        /// What each slot held when the batch was built, so a released slot can be resolved back
+        /// to the handle whose columns are to be forgotten.
+        handles: Vec<ObjectHandle>,
+        released: Vec<u8>,
+    },
     Disconnect,
     Ping,
 }
@@ -170,7 +177,11 @@ impl Session {
         self.recall_columns(&mut built.columns, &built.initial_handles);
 
         let request = self.request(RequestType::Execute, execute_body(&built.bytes));
-        self.pending = Some(Pending::Execute(built.columns));
+        self.pending = Some(Pending::Execute {
+            columns: built.columns,
+            handles: built.initial_handles,
+            released: built.released,
+        });
         Ok(request)
     }
 
@@ -249,7 +260,11 @@ impl Session {
 
         match pending {
             Pending::Connect(user_dn) => self.on_connect(payload.body(), user_dn),
-            Pending::Execute(columns) => self.on_execute(payload.body(), &columns),
+            Pending::Execute {
+                columns,
+                handles,
+                released,
+            } => self.on_execute(payload.body(), &columns, &handles, &released),
             Pending::Disconnect => {
                 self.connected = false;
                 self.cookies.clear();
@@ -264,6 +279,7 @@ impl Session {
         let response = ConnectResponse::parse(body)?;
         if !response.is_success() {
             return Err(Error::ConnectFailed {
+                status: response.status_code,
                 code: response.error_code,
                 user_dn,
             });
@@ -279,7 +295,13 @@ impl Session {
         }))
     }
 
-    fn on_execute(&mut self, body: &[u8], columns: &[Option<Vec<PropertyTag>>]) -> Result<Outcome> {
+    fn on_execute(
+        &mut self,
+        body: &[u8],
+        columns: &[Option<Vec<PropertyTag>>],
+        handles: &[ObjectHandle],
+        released: &[u8],
+    ) -> Result<Outcome> {
         let response = ExecuteResponse::parse(body)?;
         if !response.is_success() {
             return Err(Error::ExecuteFailed {
@@ -291,6 +313,7 @@ impl Session {
         let buffer = RopBuffer::parse(&response.rop_buffer)?;
         let responses = decode_all(&buffer.rops, columns)?;
         self.remember_columns(columns, &buffer.handles);
+        self.forget_columns(released, handles, &buffer.handles);
 
         Ok(Outcome::Executed(Execution {
             responses,
@@ -331,6 +354,25 @@ impl Session {
                 Some(known) => known.1.clone_from(tags),
                 None => self.table_columns.push((handle, tags.clone())),
             }
+        }
+    }
+
+    /// Drops the column sets of the handles this batch released.
+    ///
+    /// A released handle value is the server's to hand out again. Keeping its column set would
+    /// mean a later table given that same value decodes its rows against the *previous* table's
+    /// columns — silently, and as plausible-looking wrong values rather than as an error. It also
+    /// bounds this list, which paging through many tables would otherwise grow without limit.
+    ///
+    /// Both handle tables are consulted: a slot bound from an earlier round trip carries its
+    /// handle in `before`, while `after` holds whatever the server left in the released slot —
+    /// which is not required to be the empty handle, and would otherwise be recorded as though it
+    /// were a table in its own right.
+    fn forget_columns(&mut self, released: &[u8], before: &[ObjectHandle], after: &[ObjectHandle]) {
+        for slot in released.iter().map(|&slot| usize::from(slot)) {
+            let gone = [before.get(slot), after.get(slot)];
+            self.table_columns
+                .retain(|(handle, _)| !gone.contains(&Some(handle)));
         }
     }
 
