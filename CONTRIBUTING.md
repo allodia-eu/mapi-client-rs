@@ -97,6 +97,28 @@ All of the above are relaxed inside `#[cfg(test)]` (see `clippy.toml`). A test t
 fixture at a known offset is saying something true about that fixture; the same code in the parser
 would be a panic waiting for a malformed packet.
 
+## Live verification
+
+CI never sees an Exchange server, so nothing CI does can prove the protocol. That proof is a
+separate, deliberate act:
+
+```powershell
+powershell.exe -File scripts\Test-Live.ps1
+```
+
+It runs the `#[ignore]`d tests in `crates/mapi-client/tests/live.rs` — `Connect`, `RopLogon`, both
+kinds of table, paging and `Disconnect` — against a real server. Everything that identifies a
+deployment is passed in through environment variables (`MAPI_LIVE_ENDPOINT`, `MAPI_LIVE_USER_DN`,
+`MAPI_LIVE_USERNAME`, `MAPI_LIVE_PASSWORD`), so no lab's details are ever committed. The script's
+comment-based help explains each one.
+
+Two things a lab needs: **Basic** enabled on the MAPI virtual directory, because that is the only
+scheme `mapi-client` implements, and the endpoint URL used **verbatim from Autodiscover**,
+including its `?MailboxId=` parameter.
+
+**When a version-tied claim is re-measured, re-measure it — do not renumber it.** A doc comment
+naming a server version asserts that somebody measured it on that build.
+
 ## Fixtures
 
 CI never sees the Exchange server, so **the fixtures are the only thing standing between CI and a

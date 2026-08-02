@@ -12,9 +12,45 @@ authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+default = ["autodiscover"]
+# Locating an endpoint from an email address. Additive: it adds `MapiClientBuilder::discover`
+# and nothing anywhere else changes. Turn it off if you already know the endpoint URL and the
+# distinguished name, and would rather not compile an XML parser.
+autodiscover = ["dep:mapi-autodiscover"]
+
 [dependencies]
 mapi-proto.workspace = true
+mapi-autodiscover = { workspace = true, optional = true }
 thiserror.workspace = true
+
+# TLS is rustls with the *platform* verifier rather than a bundled root list, which is the whole
+# reason this default is worth stating: an on-premises Exchange is routinely fronted by a
+# certificate from the organisation's own CA, and that CA is in the operating system's trust
+# store and nowhere else. A bundled Mozilla root list would reject exactly the deployments this
+# crate exists for.
+#
+# Three features reqwest offers that are deliberately *not* enabled:
+#   `cookies`  — the Session Context's cookies belong to `mapi_proto::Session`, which sets the
+#                `Cookie` header itself. A second cookie store would duplicate them.
+#   `gzip`/`brotli`/`zstd` — without them reqwest sends no `Accept-Encoding`, so the server does
+#                not compress, so a ROP buffer never arrives in an encoding this crate would have
+#                to undo before parsing.
+#   `charset`  — response bodies are read as bytes. A ROP buffer is not text and must never be
+#                run through a lossy character-set conversion.
+reqwest = { version = "0.13", default-features = false, features = [
+    "rustls",
+    "http2",
+    "system-proxy",
+] }
+
+# `X-RequestId` and `X-ClientInfo` carry a GUID that [MS-OXCMAPIHTTP] §2.2.3.3.2 requires to be
+# unique per client instance. A sans-io crate cannot obtain randomness; this one can.
+uuid = { version = "1", features = ["v4"] }
+
+[dev-dependencies]
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+wiremock = "0.6"
 
 [lints]
 workspace = true
