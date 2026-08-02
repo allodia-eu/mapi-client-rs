@@ -213,9 +213,23 @@ one.
 `Check-SpecVersion.ps1` both took them unchanged, and all seventeen documents verify against the
 table.
 
-**Phase 1 — The property layer.** F1 and F2. Ends with `mapi-cli` able to dump every property of
-the Store object, which is *"get mailbox metadata"* delivered: display name, owner, mailbox size,
-quotas.
+**Phase 1 — The property layer. Done.** F1 and F2. `mapi-cli properties` dumps the Store object,
+which is *"get mailbox metadata"* delivered: display name, owner, mailbox size, quotas. Four things
+the phase turned up, none of which changes the plan:
+
+- **The COUNT-width contradiction is real and is now settled.** [MS-OXCDATA] §2.11.1.1 says a
+  `PtypMultiple` value count is 32 bits inside a ROP buffer and §2.11.2.1, about the same buffers,
+  says 16. §2.11.1.1 is what Exchange does, measured by placing a multivalued column before two
+  whose correct values were already known.
+- **"This crate touches two of those three contexts" was optimistic.** The third context is the
+  address book endpoint ([MS-OXCMAPIHTTP] §2.2.5), which this workspace does not implement — so it
+  touches one, and the width is carried by the type system anyway so that adding the second is a
+  variant rather than a hunt.
+- **`RopGetPropertiesAll` is not "every property".** It returns what is *on* the object; computed
+  properties need an explicit fetch. `PidTagMailboxOwnerEntryId` is absent from all 113 and 151
+  bytes long when named. Phase 2 depends on entry-id properties, so this matters there.
+- **A write can succeed as a ROP and fail as a property**, which the `PropertyProblem` list is for.
+  [MS-OXCSTOR]'s own notes 14–16 predict it for three of the five read/write Store properties.
 
 **Phase 2 — Folders the logon does not name.** F5's entry-id chain, `RopIdFromLongTermId`, the
 `Depth` flag on `RopGetHierarchyTable`, `PidTagContainerClass` as a column. Ends with a full

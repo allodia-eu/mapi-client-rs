@@ -27,11 +27,12 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: `0.1.0`, the first release.** What works is what the corpus proves: locate an endpoint
-> by Autodiscover, connect, log on, walk the folder hierarchy, open a contents table, choose
-> columns and page rows — verified against Exchange Server SE `15.02.2562.045`. What is missing is
-> writing anything, and `Negotiate`/`NTLM` authentication. Both gaps are stated below rather than
-> left to be discovered.
+> **Status: `0.1.0` released, and the property layer landed since.** What works is what the corpus
+> proves: locate an endpoint by Autodiscover, connect, log on, walk the folder hierarchy, open a
+> contents table, choose columns and page rows, and read or write the Store object's own properties
+> — verified against Exchange Server SE `15.02.2562.045`. What is missing is everything about
+> messages and about folders the logon does not name, and `Negotiate`/`NTLM` authentication. The
+> gaps are stated below and in the changelog rather than left to be discovered.
 
 ## Install
 

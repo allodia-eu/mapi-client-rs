@@ -13,6 +13,7 @@
 //! mapi-cli discover alice@example.test   what does Autodiscover say about this mailbox?
 //! mapi-cli folders                    walk the hierarchy table
 //! mapi-cli messages --folder inbox    read a contents table
+//! mapi-cli properties                 dump every property of the Store object
 //! mapi-cli capture session --out fixtures/exchange-se/session-en-us --scrub rules.tsv
 //! ```
 //!
@@ -104,6 +105,17 @@ enum Command {
         limit: usize,
     },
 
+    /// Dump the Store object's properties: display name, owner, size and quotas.
+    ///
+    /// With no `--tag`, this asks for everything the object holds, which is the only way to see
+    /// what a deployment actually carries as against what [MS-OXCSTOR] §2.2.2.1 documents.
+    Properties {
+        /// A property tag to read, written id-first as `0x3001001F`. Repeatable. Without any,
+        /// every property the Store object has is read.
+        #[arg(long, value_name = "TAG")]
+        tag: Vec<String>,
+    },
+
     /// Locate a mailbox with Autodiscover.
     ///
     /// Needs no endpoint and no distinguished name — finding those is what it does.
@@ -150,6 +162,7 @@ async fn run(cli: Cli) -> Result<(), Failure> {
             page_size,
             limit,
         } => command::messages(&connection, &folder, page_size, limit).await,
+        Command::Properties { tag } => command::properties(&connection, &tag).await,
         Command::Discover { address } => command::discover(&connection, &address).await,
         Command::Capture(arguments) => scenario::capture(&connection, &arguments).await,
     }

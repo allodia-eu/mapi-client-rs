@@ -4,6 +4,7 @@ use mapi_proto::{Connected, FolderId, LogonResponse, ObjectHandle, WellKnownFold
 
 use crate::connection::Connection;
 use crate::error::{Error, Result};
+use crate::properties::Properties;
 use crate::table::{TableKind, TableRead};
 
 /// A mailbox, logged on and ready to be read.
@@ -61,6 +62,32 @@ impl Logon {
         self.response
             .folder(folder)
             .ok_or(Error::MissingFolder { folder })
+    }
+
+    /// The Store object's own properties: what the mailbox knows about itself.
+    ///
+    /// [`mailbox`](Self::mailbox) reports what the logon *response* carried, which is folder ids
+    /// and identifiers and nothing else. Display name, owner, size and quotas are properties of
+    /// the Store object and take a round trip to read.
+    ///
+    /// ```no_run
+    /// # use mapi_client::{Logon, MAILBOX_PROPERTIES, PropertyTag, TableString};
+    /// # async fn example(logon: &mut Logon) -> Result<(), mapi_client::Error> {
+    /// let mailbox = logon.store().read(MAILBOX_PROPERTIES).await?;
+    /// println!(
+    ///     "{:?}",
+    ///     mailbox
+    ///         .string(PropertyTag::MAILBOX_OWNER_NAME)
+    ///         .map(TableString::as_str)
+    /// );
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [MS-OXCSTOR] §2.2.2.1 — private mailbox logon properties
+    #[must_use]
+    pub fn store(&mut self) -> Properties<'_> {
+        Properties::new(&mut self.connection, self.handle)
     }
 
     /// A folder to read, by id.

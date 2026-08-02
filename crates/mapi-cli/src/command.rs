@@ -121,6 +121,56 @@ pub(crate) async fn messages(
     Ok(())
 }
 
+/// Dump the Store object's properties — what the mailbox knows about itself.
+///
+/// With no tags this is `RopGetPropertiesAll`, which names nothing and gets everything. That is
+/// also the useful diagnostic: it is the only way to see what a deployment actually holds, as
+/// against what [MS-OXCSTOR] §2.2.2.1 says it should.
+pub(crate) async fn properties(connection: &Connection, tags: &[String]) -> Result<(), Failure> {
+    let client = connection.client()?;
+    let mut logon = client.connect().await?.logon().await?;
+
+    let properties = if tags.is_empty() {
+        logon.store().read_all().await?
+    } else {
+        let wanted = tags
+            .iter()
+            .map(|tag| parse_tag(tag))
+            .collect::<Result<Vec<_>, Failure>>()?;
+        logon.store().read(wanted).await?
+    };
+
+    println!("mailbox");
+    println!("{}", report::mailbox_summary(&properties));
+
+    println!();
+    println!("{} properties on the Store object", properties.len());
+    for cell in &properties {
+        println!("{}", report::property_line(cell));
+    }
+
+    let refused = properties
+        .iter()
+        .filter(|cell| cell.value().as_error().is_some())
+        .count();
+    let named = properties
+        .iter()
+        .filter(|cell| cell.tag().is_named())
+        .count();
+    if refused > 0 {
+        println!("  {refused} of them came back as an error rather than a value");
+    }
+    if named > 0 {
+        println!(
+            "  {named} named-property id(s), which are allocated per store and mean nothing in \
+             another mailbox"
+        );
+    }
+
+    logon.disconnect().await?;
+    Ok(())
+}
+
 /// Ask Autodiscover where a mailbox lives.
 pub(crate) async fn discover(connection: &Connection, address: &str) -> Result<(), Failure> {
     let address = EmailAddress::new(address)?;
@@ -173,6 +223,24 @@ fn resolve(logon: &Logon, folder: &str) -> Result<FolderId, Failure> {
     )))
 }
 
+/// Turns a `0x3001001F` argument into a tag.
+///
+/// Written the way the documents write it — id first, type second — because that is the form every
+/// specification, every property list and every other tool uses, and reversing it here would be a
+/// trap laid for whoever copies a constant out of [MS-OXPROPS].
+fn parse_tag(tag: &str) -> Result<PropertyTag, Failure> {
+    let hexadecimal = tag
+        .strip_prefix("0x")
+        .or_else(|| tag.strip_prefix("0X"))
+        .ok_or_else(|| {
+            Failure::from(format!("`{tag}` is not a property tag; write it as 0x..."))
+        })?;
+
+    u32::from_str_radix(hexadecimal, 16)
+        .map(PropertyTag::new)
+        .map_err(|_| Failure::from(format!("`{tag}` is not a property tag; write it as 0x...")))
+}
+
 /// `IPM subtree` becomes `ipm-subtree`, so a folder can be named on a command line.
 fn slug(name: &str) -> String {
     name.to_ascii_lowercase().replace(' ', "-")
@@ -197,6 +265,21 @@ fn summarise(seen: usize, reported: Option<u32>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Tags are written id-first, as every specification writes them. The little-endian encoding
+    /// of that `u32` is the wire form, which is the opposite order — and getting the two confused
+    /// asks the server for a property nobody meant.
+    #[test]
+    fn a_property_tag_is_parsed_the_way_the_documents_write_it() {
+        let tag = parse_tag("0x3001001F").expect("a display-name tag");
+        assert_eq!(tag, PropertyTag::DISPLAY_NAME);
+        assert_eq!(tag.id(), 0x3001);
+        assert_eq!(parse_tag("0X3001001f").unwrap(), PropertyTag::DISPLAY_NAME);
+
+        for bad in ["3001001F", "0xZZ", "0x1_2", ""] {
+            assert!(parse_tag(bad).is_err(), "{bad} was accepted");
+        }
+    }
 
     #[test]
     fn well_known_folders_have_command_line_names() {

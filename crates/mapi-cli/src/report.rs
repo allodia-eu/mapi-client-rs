@@ -5,7 +5,7 @@
 
 use core::fmt::Write as _;
 
-use mapi_client::{Exchange, Observer, PropertyRow, PropertyTag};
+use mapi_client::{Cell, Exchange, Observer, PropertyRow, PropertySet, PropertyTag, PropertyValue};
 
 /// Bytes per line of a hex dump, which is what fits an eighty-column terminal alongside the ASCII.
 const PER_LINE: usize = 16;
@@ -82,6 +82,87 @@ pub(crate) fn message_line(row: &PropertyRow) -> String {
     match row.message_id() {
         Some(id) => format!("  {:#018x}  {subject}", id.as_u64()),
         None => format!("  {:18}  {subject}", "(no id)"),
+    }
+}
+
+/// One property, as the tag it arrived under, the type that tag declares, and the value.
+///
+/// Two things are called out rather than printed flat, because both are the kind of number that
+/// reads as a fact and is not one:
+///
+/// * **A named-property id.** Ids from `0x8000` up are allocated per store, so the same number
+///   means a different property in a different mailbox.
+/// * **An error in place of a value.** A property too large for the response buffer comes back
+///   under its own id with the type changed to `PtypErrorCode`, which is a different statement from
+///   "not set".
+pub(crate) fn property_line(cell: &Cell) -> String {
+    let tag = cell.tag().to_string();
+    let property_type = cell.tag().property_type().to_string();
+    let note = if cell.tag().is_named() {
+        "   <- named property; this id means nothing in another mailbox"
+    } else if cell.value().as_error().is_some() {
+        "   <- the server declined to return the value, not an empty value"
+    } else {
+        ""
+    };
+
+    format!("  {tag:<40} {property_type:<22} {}{note}", cell.value())
+}
+
+/// The half-dozen properties that answer "tell me about this mailbox".
+///
+/// [MS-OXCSTOR] §2.2.2.1 — private mailbox logon properties
+pub(crate) fn mailbox_summary(properties: &PropertySet) -> String {
+    let text = |tag| {
+        properties
+            .string(tag)
+            .map_or_else(|| "(absent)".to_owned(), |value| value.as_str().to_owned())
+    };
+
+    let count = properties
+        .get(PropertyTag::CONTENT_COUNT)
+        .and_then(PropertyValue::as_u32)
+        .map_or_else(|| "(absent)".to_owned(), |count| count.to_string());
+
+    let size = properties
+        .get(PropertyTag::MESSAGE_SIZE_EXTENDED)
+        .and_then(PropertyValue::as_u64)
+        .map_or_else(|| "(absent)".to_owned(), |bytes| format!("{bytes} bytes"));
+
+    [
+        format!("  display name     {}", text(PropertyTag::DISPLAY_NAME)),
+        format!(
+            "  owner            {}",
+            text(PropertyTag::MAILBOX_OWNER_NAME)
+        ),
+        format!("  content          {count} message(s), {size}"),
+        format!(
+            "  send quota       {}",
+            quota(properties, PropertyTag::PROHIBIT_SEND_QUOTA)
+        ),
+        format!(
+            "  receive quota    {}",
+            quota(properties, PropertyTag::PROHIBIT_RECEIVE_QUOTA)
+        ),
+        format!(
+            "  submit limit     {}",
+            quota(properties, PropertyTag::MAXIMUM_SUBMIT_MESSAGE_SIZE)
+        ),
+    ]
+    .join("\n")
+}
+
+/// A quota in kilobytes, where an unset value **and** `-1` both mean "no limit".
+///
+/// The sentinel is why this is not a plain integer: the field is `PtypInteger32`, so `-1` arrives
+/// as `0xFFFFFFFF` and printing it unsigned would report a four-terabyte quota.
+///
+/// [MS-OXCSTOR] §2.2.2.1.1.3 — "An unset value or a value of -1 indicates that there is no limit"
+fn quota(properties: &PropertySet, tag: PropertyTag) -> String {
+    match properties.get(tag).and_then(PropertyValue::as_i32) {
+        None => "(absent, so no limit)".to_owned(),
+        Some(-1) => "no limit".to_owned(),
+        Some(kilobytes) => format!("{kilobytes} KB"),
     }
 }
 

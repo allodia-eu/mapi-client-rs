@@ -30,184 +30,26 @@
     reason = "a test that walks a captured layout by offset is asserting something true about it"
 )]
 
-use std::collections::VecDeque;
-use std::path::{Path, PathBuf};
+mod corpus;
+
 use std::sync::{Arc, Mutex};
 
 use mapi_client::{
-    Credentials, Lcid, LegacyDn, MapiClient, PropertyTag, TableString, WellKnownFolder,
+    Credentials, Lcid, MAILBOX_PROPERTIES, MapiClient, PropertyProblem, PropertySet, PropertyTag,
+    PropertyValue, TableString, TaggedValue, WellKnownFolder,
 };
-use wiremock::matchers::method;
-use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
+
+use crate::corpus::{assert_requests_match, fixtures, scenario, server, user_dn};
 
 /// The page sizes `mapi-cli capture` used, and therefore the ones a replay has to use for the
 /// requests to match byte for byte.
 const HIERARCHY_PAGE: u16 = 8;
 const CONTENTS_PAGE: u16 = 2;
 
-/// One captured exchange.
-#[derive(Clone, Debug)]
-struct Exchange {
-    stem: String,
-    status: u16,
-    response_headers: Vec<(String, String)>,
-    request_body: Vec<u8>,
-    response_body: Vec<u8>,
-}
-
-/// The workspace's `fixtures/` directory.
-fn fixtures() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .join("..")
-        .join("..")
-        .join("fixtures")
-}
-
-/// Reads one scenario, in exchange order.
-fn scenario(name: &str) -> Vec<Exchange> {
-    let directory = fixtures().join("exchange-se").join(name);
-    assert!(
-        directory.is_dir(),
-        "no fixtures at {}. Capture them with scripts\\Capture-Fixtures.ps1.",
-        directory.display()
-    );
-
-    let mut stems: Vec<String> = std::fs::read_dir(&directory)
-        .expect("a readable scenario directory")
-        .filter_map(Result::ok)
-        .filter_map(|entry| {
-            entry
-                .file_name()
-                .to_str()?
-                .strip_suffix(".meta.txt")
-                .map(str::to_owned)
-        })
-        .collect();
-    stems.sort();
-    assert!(
-        !stems.is_empty(),
-        "{} holds no exchanges",
-        directory.display()
-    );
-
-    stems
-        .into_iter()
-        .map(|stem| {
-            let meta = std::fs::read_to_string(directory.join(format!("{stem}.meta.txt")))
-                .expect("a meta file");
-            Exchange {
-                status: value(&meta, "status").parse().expect("an HTTP status"),
-                response_headers: headers(&meta, "[response-headers]"),
-                request_body: std::fs::read(directory.join(format!("{stem}.request.bin")))
-                    .expect("a request body"),
-                response_body: std::fs::read(directory.join(format!("{stem}.response.bin")))
-                    .expect("a response body"),
-                stem,
-            }
-        })
-        .collect()
-}
-
-/// A `key = value` from the `[exchange]` section.
-fn value(meta: &str, key: &str) -> String {
-    meta.lines()
-        .find_map(|line| line.strip_prefix(&format!("{key} = ")))
-        .unwrap_or_else(|| panic!("no `{key}` in the meta file"))
-        .trim()
-        .to_owned()
-}
-
-/// The `Name: value` lines of one section.
-fn headers(meta: &str, section: &str) -> Vec<(String, String)> {
-    meta.lines()
-        .skip_while(|line| line.trim() != section)
-        .skip(1)
-        .take_while(|line| !line.trim_start().starts_with('['))
-        .filter_map(|line| line.split_once(": "))
-        .map(|(name, value)| (name.trim().to_owned(), value.to_owned()))
-        .collect()
-}
-
-/// Answers each request with the next recorded response, and keeps what it was sent.
-struct Recording {
-    queued: Mutex<VecDeque<ResponseTemplate>>,
-}
-
-impl Respond for Recording {
-    fn respond(&self, _request: &Request) -> ResponseTemplate {
-        self.queued.lock().unwrap().pop_front().unwrap_or_else(|| {
-            ResponseTemplate::new(500).set_body_string("the corpus has no further response")
-        })
-    }
-}
-
-/// A fake endpoint that answers exactly what Exchange answered, in order.
-async fn server(exchanges: &[Exchange]) -> MockServer {
-    let mut queued = VecDeque::new();
-    for exchange in exchanges {
-        let mut template = ResponseTemplate::new(exchange.status);
-        for (name, value) in &exchange.response_headers {
-            // `Set-Cookie` appears more than once and every one of them matters: a Session Context
-            // that has silently lost a cookie is reported several requests later as
-            // `X-ResponseCode` 13, pointing nowhere near the cause.
-            template = template.append_header(name.as_str(), value.as_str());
-        }
-        queued.push_back(template.set_body_bytes(exchange.response_body.clone()));
-    }
-
-    let server = MockServer::start().await;
-    Mock::given(method("POST"))
-        .respond_with(Recording {
-            queued: Mutex::new(queued),
-        })
-        .mount(&server)
-        .await;
-    server
-}
-
-/// The distinguished name the capture used, read back out of its `Connect` request body.
-///
-/// Taken from the corpus rather than written here, because the committed name is the redacted one
-/// and the request bodies only match byte for byte if the replay logs on as exactly that.
-///
-/// [MS-OXCMAPIHTTP] §2.2.4.1.1 — `UserDn`, 8-bit and null-terminated
-fn user_dn(exchanges: &[Exchange]) -> LegacyDn {
-    // `-connect`, not `connect`: the latter also matches `11-disconnect`, whose body is four bytes
-    // with no name in it, and which would be picked the moment a scenario stopped starting with a
-    // `Connect`.
-    let connect = exchanges
-        .iter()
-        .find(|exchange| exchange.stem.ends_with("-connect"))
-        .expect("every scenario starts by connecting");
-    let end = connect
-        .request_body
-        .iter()
-        .position(|&byte| byte == 0)
-        .expect("a null-terminated name");
-    LegacyDn::new(String::from_utf8_lossy(&connect.request_body[..end]).into_owned())
-        .expect("a usable name")
-}
-
-/// Compares what the client sent against what was captured, one exchange at a time.
-async fn assert_requests_match(server: &MockServer, exchanges: &[Exchange]) {
-    let sent = server.received_requests().await.unwrap_or_default();
-
-    assert_eq!(
-        sent.len(),
-        exchanges.len(),
-        "the replay made {} request(s), the corpus holds {}",
-        sent.len(),
-        exchanges.len()
-    );
-
-    for (request, exchange) in sent.iter().zip(exchanges) {
-        assert_eq!(
-            request.body, exchange.request_body,
-            "{} differs from what a real server was sent",
-            exchange.stem
-        );
-    }
-}
+/// The comment `mapi-cli capture` tried to set on the Store object, and which Exchange refused.
+/// Same reason as the page sizes: the request bodies only match if the replay sends the same
+/// value.
+const COMMENT_PROBE: &str = "mapi-client-rs probe";
 
 /// Drives one captured session, then checks every request body against the corpus.
 ///
@@ -238,6 +80,22 @@ async fn replay(name: &str, locale: Lcid) -> Replayed {
     let subtree = logon
         .folder_id(WellKnownFolder::IpmSubtree)
         .expect("the IPM subtree");
+
+    let mailbox = logon
+        .store()
+        .read(MAILBOX_PROPERTIES)
+        .await
+        .expect("the Store object's properties");
+
+    let refused = logon
+        .store()
+        .write(&[TaggedValue::new(
+            PropertyTag::COMMENT,
+            PropertyValue::String(COMMENT_PROBE.into()),
+        )
+        .expect("a string tag carrying a string")])
+        .await
+        .expect("RopSetProperties itself succeeds");
 
     let mut rows = logon
         .folder(subtree)
@@ -285,6 +143,8 @@ async fn replay(name: &str, locale: Lcid) -> Replayed {
         display_name,
         folder_ids,
         inbox,
+        mailbox,
+        refused,
         folders,
         folder_count,
         messages,
@@ -297,6 +157,8 @@ struct Replayed {
     display_name: String,
     folder_ids: Vec<mapi_client::FolderId>,
     inbox: mapi_client::FolderId,
+    mailbox: PropertySet,
+    refused: Vec<PropertyProblem>,
     folders: Vec<(mapi_client::FolderId, String)>,
     folder_count: Option<u32>,
     messages: Vec<(String, bool)>,
@@ -337,6 +199,56 @@ impl Replayed {
             .collect();
         assert_eq!(truncated.len(), 1, "{:?}", self.messages);
         assert_eq!(truncated[0].chars().count(), 255);
+
+        self.assert_shape_of_the_store_object();
+    }
+
+    /// What a real Store object answered, and what it refused.
+    ///
+    /// Both halves are claims about bytes Exchange actually sent: a `RopGetPropertiesSpecific`
+    /// answering for every tag it was given, two of them with an error in place of a value, and a
+    /// `RopSetProperties` that succeeded while the property inside it did not.
+    fn assert_shape_of_the_store_object(&self) {
+        assert_eq!(
+            self.mailbox.len(),
+            MAILBOX_PROPERTIES.len(),
+            "a property fetch answers for every tag it was given, present or not"
+        );
+
+        // A binary value, which is the corpus's only evidence that a `PtypBinary` COUNT is 16 bits
+        // wide inside a ROP buffer. Read it as 32 and the two bytes that follow are swallowed, so
+        // this decoding at all is the assertion.
+        let owner = self
+            .mailbox
+            .get(PropertyTag::MAILBOX_OWNER_ENTRY_ID)
+            .and_then(PropertyValue::as_binary)
+            .expect("the owner's address book EntryID");
+        assert!(owner.len() > 100, "{} bytes", owner.len());
+
+        // Documented as read-only properties of every private mailbox logon, and answered with
+        // `ecNotFound` by the server that produced this corpus. Recorded rather than smoothed
+        // over: "not set" and "the server would not say" are different facts.
+        //
+        // [MS-OXCSTOR] §2.2.2.1.1.5, §2.2.2.1.1.12
+        for absent in [PropertyTag::STORE_STATE, PropertyTag::LOCALE_ID] {
+            assert_eq!(
+                self.mailbox.error(absent),
+                Some(mapi_client::ErrorCode::NOT_FOUND),
+                "{absent}"
+            );
+        }
+
+        // The write that succeeded as a ROP and failed as a property. A caller that only looked at
+        // the ROP's return value would report this as a completed write.
+        //
+        // [MS-OXCSTOR] §7 note 14 — Exchange 2013 SP1 and later refuse this one
+        assert_eq!(
+            self.refused
+                .iter()
+                .map(|problem| (problem.tag(), problem.code()))
+                .collect::<Vec<_>>(),
+            vec![(PropertyTag::COMMENT, mapi_client::ErrorCode::ACCESS_DENIED)]
+        );
     }
 
     /// The name of the folder with a given id.
@@ -467,10 +379,10 @@ fn every_committed_fixture_is_in_the_manifest() {
         }
     }
 
-    // Three files per exchange, and every one of them accounted for. Both sessions run to twelve
+    // Three files per exchange, and every one of them accounted for. Both sessions run to fourteen
     // because both mailboxes are seeded from the same list, so they page identically; the only
     // thing that differs between them is what the folders are called.
-    assert_eq!(counted, (12 + 12 + 1) * 3);
+    assert_eq!(counted, (14 + 14 + 1) * 3);
 }
 
 /// A shared observer sees the same bytes the fixtures hold, which is the assumption the whole

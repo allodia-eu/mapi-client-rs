@@ -15,7 +15,51 @@ Two conventions specific to this project:
 
 ## [Unreleased]
 
-Nothing yet.
+### Added
+
+- **Nine more property types**, taking `PropertyType` from six to fifteen: `PtypInteger16`,
+  `PtypFloating64`, `PtypObject`, `PtypString8`, `PtypGuid`, `PtypBinary`, `PtypMultipleInteger32`,
+  `PtypMultipleString` and `PtypMultipleBinary`. Seven of them arrive from a real Store object and
+  one more from a real folder; the rest are unit-tested only, and the crate says which is which.
+- **The COUNT width is a parameter of the decoder, not a constant.** A `PtypBinary` byte count is 16
+  bits inside a ROP buffer and a `PtypMultiple` value count is 32, and reading either at the wrong
+  width does not fail — it consumes the wrong number of bytes and silently misreads every property
+  after it. [MS-OXCDATA] contradicts itself about the second one (§2.11.1.1 says 32 bits, §2.11.2.1
+  says 16); §2.11.1.1 is what Exchange Server SE `15.02.2562.045` does, measured by putting a
+  multivalued column in front of two whose correct values were already known.
+- **The property ROPs**: `RopGetPropertiesSpecific`, `RopGetPropertiesAll`, `RopSetProperties` and
+  `RopDeleteProperties`, with `PropertySet`, `TaggedValue` and `PropertyProblem`. `Logon::store()`
+  reads and writes the Store object, and `mapi-cli properties` dumps it — which is *get mailbox
+  metadata* delivered: display name, owner, size and quotas.
+- **The codec can now write a property value**, and refuses what the wire cannot carry rather than
+  truncating it: a string holding an interior NUL, a binary longer than its own COUNT can express, a
+  value paired with a tag that declares a different type.
+- **Two more captured exchanges per session**, so CI holds byte-exact evidence of a property fetch
+  and of a refused property write.
+
+### Measured against Exchange Server SE `15.02.2562.045`
+
+- **`RopGetPropertiesAll` does not return every readable property.** It returns the properties *on*
+  the object ([MS-OXCPRPT] §3.2.5.2); computed ones need an explicit fetch (§3.2.5.1). A private
+  mailbox logon answered with 113 properties, and `PidTagMailboxOwnerEntryId` was not among them —
+  yet was 151 bytes long when asked for by name.
+- **A write can succeed as a ROP and fail as a property.** [MS-OXCSTOR] lists five read/write Store
+  properties and its own notes 14–16 then say Exchange 2013 SP1 and later refuse three of them with
+  `ecAccessDenied`. Confirmed for `PidTagComment`, and `RopDeleteProperties` refuses it the same way
+  — which the notes do not cover.
+- **`PidTagStoreState` and `PidTagLocaleId` answer `ecNotFound`** on both lab mailboxes, though
+  [MS-OXCSTOR] §2.2.2.1.1 lists them as read-only properties of every private mailbox logon.
+
+### Known gaps
+
+- **`RopGetPropertiesAll` is not in the fixture corpus.** Its answer carries a dozen server clocks
+  that move on every logon, so a capture of it would make `Verify-Fixtures.ps1` report a difference
+  on every run and lose the one that mattered. Normalising a tagged property list is its own piece of
+  work and belongs with the rest of the write-fixture harness.
+- **Only the Store object's properties are reachable.** Folders, messages and attachments come later.
+- **`PtypFloating64`, `PtypObject`, `PtypString8`, `PtypGuid`, `PtypMultipleInteger32` and
+  `PtypMultipleString` have not been seen from a real server.** They are decoded per [MS-OXCDATA]
+  §2.11.1 and unit-tested; no live measurement backs them yet.
 
 ## [0.1.0] - 2026-08-02
 
