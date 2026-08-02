@@ -3,8 +3,8 @@
 //! The auxiliary buffer is sent **empty** throughout. [MS-OXCRPC] §3.1.4.1 fails a request only
 //! when the auxiliary length is between 1 and 7 — "you claimed a buffer too short to hold an
 //! `RPC_HEADER_EXT`". Zero is outside that band, which defers the whole auxiliary-block layer.
-//! Measured against Exchange Server SE `15.02.2562.000`: accepted on `Connect`, `Execute` and
-//! `Disconnect` alike.
+//! Measured against Exchange Server SE `15.02.2562.045`: accepted on `Connect`, `Execute` and
+//! `Disconnect` alike, `X-ResponseCode: 0` from all three.
 //!
 //! [MS-OXCMAPIHTTP] §2.2.2.1 — common request format
 //! [MS-OXCMAPIHTTP] §2.2.4 — request types for the mailbox server endpoint
