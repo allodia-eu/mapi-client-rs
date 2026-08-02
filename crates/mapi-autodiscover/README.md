@@ -41,9 +41,11 @@ Part of [`mapi-client-rs`](https://github.com/allodia-eu/mapi-client-rs). Every 
 cites its Microsoft Open Specification section; see `SPEC.md` in the repository root for the pinned
 document versions.
 
-**Status:** pre-release. Request building, the candidate-URL sequence, response parsing, redirects
-and server errors are implemented. SRV lookup and HTTP redirect probing need DNS and HTTP, so this
-crate names them and the caller performs them.
+**Status:** `0.1.0` released, and unchanged since. Request building, the candidate-URL sequence,
+response parsing, redirects and server errors are implemented. SRV lookup and HTTP redirect probing
+need DNS and HTTP, so this crate names them and the caller performs them. `AlternativeMailbox`
+elements — the only way MAPI/HTTP has of saying which other mailboxes a user can open — are not
+parsed yet.
 
 ## Licence
 
