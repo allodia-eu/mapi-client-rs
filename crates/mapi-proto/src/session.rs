@@ -215,9 +215,13 @@ impl Session {
 
     /// Builds a `PING` request.
     ///
-    /// `PING` validates an *existing* Session Context, so on a fresh session the honest answer is
-    /// a non-zero `X-ResponseCode` rather than success. That still proves the endpoint exists,
-    /// that authentication works and that the server speaks MAPI/HTTP.
+    /// `PING` asks whether the endpoint is "reachable and operational" and needs no Session
+    /// Context: it has no request body, no response body, and nothing in it refers to a session.
+    /// Measured against Exchange Server SE `15.02.2562.045`, which answers `X-ResponseCode: 0`
+    /// both before a `Connect` and after a `Disconnect`.
+    ///
+    /// So it is the cheapest available proof that the URL is right, that authentication works and
+    /// that whatever answers speaks MAPI/HTTP.
     ///
     /// # Errors
     ///

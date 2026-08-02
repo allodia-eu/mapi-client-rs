@@ -371,8 +371,10 @@ fn disconnecting_ends_the_session_context() {
     assert!(session.cookies().is_empty());
 }
 
-/// `PING` validates an existing Session Context, so on a fresh session the honest answer is a
-/// transport refusal — which still proves the endpoint speaks MAPI/HTTP.
+/// `PING` is an endpoint reachability check, not a session one: [MS-OXCMAPIHTTP] §2.2.6 gives it
+/// no request body, no response body and no reference to a Session Context. Exchange Server SE
+/// `15.02.2562.045` answers `X-ResponseCode: 0` to a `PING` on a session that has never connected,
+/// and to one whose context has already been torn down.
 #[test]
 fn ping_works_without_a_session_context() {
     let mut session = Session::new();
