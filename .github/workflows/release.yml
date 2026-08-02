@@ -1,0 +1,204 @@
+# Publishing to crates.io.
+#
+# Cut a release by tagging: `git tag v0.1.0 && git push origin v0.1.0`. Nothing here publishes on a
+# branch push, so an ordinary merge cannot reach crates.io by accident.
+#
+# The gate is not restated here — `verify` calls ci.yml, so a release runs exactly the checks every
+# other commit runs, against the tagged commit. Three things happen on top of that: the tag is
+# checked against the version it claims to be, cargo-semver-checks is run against the last published
+# release, and the crates go out in dependency order.
+#
+# A publish cannot be undone. A version can be yanked, but the name and the number are spent
+# forever, which is why the guard below refuses rather than warns.
+
+name: release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      dry-run:
+        description: 'Package and verify everything, but do not publish'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: line-tables-only
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Everything that can be wrong about a release before a single crate is built.
+  # ---------------------------------------------------------------------------
+  guard:
+    name: guard
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.check.outputs.version }}
+      channel: ${{ steps.check.outputs.channel }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - id: check
+        name: The tag, the manifest and the changelog must agree
+        run: |
+          set -euo pipefail
+
+          # [workspace.package] version is the single source of truth; every crate inherits it.
+          version=$(grep -oP '^version\s*=\s*"\K[^"]+' Cargo.toml | head -1)
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+
+          # And rust-toolchain.toml is the single source of truth for the compiler. Publishing on
+          # anything else would verify the release with a compiler CI never used.
+          channel=$(grep -oP 'channel\s*=\s*"\K[^"]+' rust-toolchain.toml)
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+
+          if [ "${{ github.event_name }}" = 'push' ]; then
+            tag='${{ github.ref_name }}'
+            if [ "$tag" != "v$version" ]; then
+              echo "::error::Tag $tag does not match the workspace version $version (expected v$version)."
+              exit 1
+            fi
+            echo "tag $tag matches workspace version $version"
+          else
+            echo "manual run, publishing version $version from ${{ github.ref_name }}"
+          fi
+
+          # A release with no changelog entry is a release nobody can read. Cheap to check, and the
+          # omission is otherwise only noticed after the version number is spent.
+          #
+          # Compared as a string rather than matched as a pattern. Building a regex around a version
+          # number puts unescaped dots and brackets into it, and the first attempt at that matched
+          # every `## ` heading in the file — which reads exactly like a check that passed.
+          if ! awk -v v="$version" '
+            /^## / { h = $2; gsub(/[][]/, "", h); if (h == v) { found = 1; exit } }
+            END { exit !found }
+          ' CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no section for $version."
+            exit 1
+          fi
+
+          echo "version $version | changelog entry present" >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------------------------------------------------------------------
+  # The full gate, against the tagged commit. Same file CI uses, so there is no
+  # second definition of green to drift.
+  # ---------------------------------------------------------------------------
+  verify:
+    name: verify
+    needs: guard
+    uses: ./.github/workflows/ci.yml
+    secrets: inherit
+
+  # ---------------------------------------------------------------------------
+  # C-STABLE / C-SEMVER. On the very first release of a crate there is nothing to
+  # diff against, and that is reported rather than silently passed — a gate that
+  # cannot run must not look like a gate that found nothing.
+  # ---------------------------------------------------------------------------
+  semver:
+    name: semver-checks
+    needs: guard
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ needs.guard.outputs.channel }}
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: cargo-semver-checks
+
+      - name: Check each published crate against its baseline
+        run: |
+          set -euo pipefail
+
+          for pkg in mapi-proto mapi-autodiscover mapi-client; do
+            # `cargo semver-checks` needs a baseline from the registry. Asking crates.io whether one
+            # exists is the difference between "no breaking changes" and "never checked".
+            status=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H 'User-Agent: mapi-client-rs release workflow' \
+              "https://crates.io/api/v1/crates/$pkg")
+
+            if [ "$status" = '404' ]; then
+              echo "::notice::$pkg has never been published, so there is no baseline to diff. Not checked."
+              echo "- \`$pkg\` — first publish, no baseline" >> "$GITHUB_STEP_SUMMARY"
+              continue
+            fi
+
+            if [ "$status" != '200' ]; then
+              echo "::error::crates.io answered $status for $pkg; cannot tell whether a baseline exists."
+              exit 1
+            fi
+
+            cargo semver-checks check-release --package "$pkg"
+            echo "- \`$pkg\` — checked against the published baseline" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+  # ---------------------------------------------------------------------------
+  # `--workspace` rather than three invocations: cargo works out the dependency
+  # order itself and waits for each crate to appear in the index before building
+  # the one that needs it. mapi-cli carries `publish = false` and is skipped.
+  # ---------------------------------------------------------------------------
+  publish:
+    name: publish
+    needs: [guard, verify, semver]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write     # to create the GitHub release
+    environment:
+      name: crates-io
+      url: https://crates.io/crates/mapi-client
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ needs.guard.outputs.channel }}
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Publish to crates.io
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          set -euo pipefail
+          # --locked, so what goes out is verified against the dependency versions CI tested rather
+          # than against whatever resolved this morning.
+          if [ '${{ github.event_name }}' = 'workflow_dispatch' ] && \
+             [ '${{ inputs.dry-run }}' = 'true' ]; then
+            echo "Dry run: packaging and verifying, publishing nothing."
+            cargo publish --workspace --locked --dry-run
+          else
+            cargo publish --workspace --locked
+          fi
+
+      - name: Create the GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          version='${{ needs.guard.outputs.version }}'
+
+          # The section for this version, from its heading to the next one, so the release notes and
+          # the changelog are the same text rather than two accounts of one change. Headings are
+          # compared as strings for the reason given in the guard job. The link-reference
+          # definitions at the foot of the file belong to the file, not to any one release.
+          awk -v v="$version" '
+            /^## / { if (found) exit; h = $2; gsub(/[][]/, "", h); if (h == v) found = 1; next }
+            found && /^\[[^]]+\]: / { next }
+            found { print }
+          ' CHANGELOG.md > notes.md
+
+          if [ ! -s notes.md ]; then
+            echo "::error::Extracted empty release notes for $version."
+            exit 1
+          fi
+
+          gh release create "${{ github.ref_name }}" \
+            --title "${{ github.ref_name }}" \
+            --notes-file notes.md \
+            --verify-tag

@@ -176,6 +176,26 @@ length-preserving, every byte offset after it. Widen the rules and capture again
    exits 0. `Invoke-Gate.ps1` checks the BOM mechanically; `scripts\Repair-ScriptEncoding.ps1`
    fixes it.
 
+## Releasing
+
+All four crates share one version number, in `[workspace.package]`. Cutting a release is three
+steps:
+
+1. Bump `version` in the root `Cargo.toml` and move the `[Unreleased]` entries in
+   [`CHANGELOG.md`](CHANGELOG.md) under the new version, with a date and the two comparison links
+   at the foot of the file.
+2. Merge that to `main` and let CI go green.
+3. Tag it: `git tag v0.2.0 && git push origin v0.2.0`.
+
+The tag is what publishes. `.github/workflows/release.yml` refuses a tag that disagrees with the
+manifest version or has no changelog entry, runs the whole of `ci.yml` against the tagged commit,
+runs `cargo-semver-checks` against the last published release, then `cargo publish --workspace`,
+which orders the three library crates itself. `mapi-cli` carries `publish = false`.
+
+`workflow_dispatch` runs the same thing with `--dry-run` by default, which is the way to check a
+release without spending a version number. **A publish cannot be undone** — a version can be yanked,
+but the number is spent.
+
 ## Licensing of contributions
 
 This project is `MIT OR Apache-2.0`. Contributions are dual-licensed on the same terms, per the
