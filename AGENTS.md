@@ -12,11 +12,13 @@ enforced or was paid for in debugging time, and the note attached to each says w
 
 **The Microsoft Open Specification documents are the authoritative resource — always.** Not this
 repository's documentation, not a blog post, not another implementation, and not an inference from
-an observed transcript. Eight documents, pinned by version in [`SPEC.md`](SPEC.md), fetched with
+an observed transcript. Seventeen documents, pinned by version in [`SPEC.md`](SPEC.md), fetched with
 `scripts\Get-Specs.ps1` into a gitignored `spec/` and never committed.
 
-Read the `spec/*.txt` extracts, not the PDFs — 747 pages are painful to page through and instant to
-`Select-String`.
+Read the `spec/*.txt` extracts, not the PDFs — 1,969 pages are painful to page through and instant
+to `Select-String`. Start a property lookup in [MS-OXPROPS], which is an index rather than a
+narrative: it maps every `PidTag` and `PidLid` to its id, its type and the document that defines it,
+which is usually the question being asked.
 
 - **Every protocol item cites its section** in a doc comment: `[MS-OXCROPS] §2.2.4.1.1`, never just
   "the spec". In a binary protocol an uncited constant is indistinguishable from a transcription

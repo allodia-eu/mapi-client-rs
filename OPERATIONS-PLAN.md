@@ -190,21 +190,28 @@ work unchanged once the rows are added — I do not need anything from you here.
 | MS-OXOSFLD | 1.4 MB | Special Folders — how Calendar and Contacts are located |
 | MS-OXOCAL | 5.2 MB | Appointment and Meeting Object Protocol |
 | MS-OXOCNTC | 2.3 MB | Contact Object Protocol |
-| MS-OXOFLAG | 1.6 MB | Flagging Object Protocol |
+| MS-OXOFLAG | 1.6 MB | Informational Flagging Protocol |
 | MS-OXPROPS | 6.8 MB | Master property list — the lookup table for every `PidTag`/`PidLid` |
 | MS-OXCICAL | 5.2 MB | iCalendar conversion — only if iCalendar interop is wanted |
 
-That takes the corpus from eight documents to seventeen and from 747 pages to roughly 2,600.
-MS-OXPROPS is a reference table rather than a document to read through, but it is the authority for
-every property constant and the citation rule needs it.
+That takes the corpus from eight documents to seventeen and from 747 pages to **1,969** — measured
+once they were pinned, against an estimate here of roughly 2,600. MS-OXPROPS is a reference table
+rather than a document to read through, but it is the authority for every property constant and the
+citation rule needs it.
+
+Two things the pinning itself turned up, neither of which changes the plan: [MS-OXOCAL] is on the
+**19 August 2025** release rather than the 20 May one its siblings share, so the corpus now has two
+documents off the main release instead of one; and [MS-OXOFLAG] is titled *Informational Flagging
+Protocol*, corrected above.
 
 ## Phases
 
 Each ends at something that can be demonstrated against the lab, and each is a stack of PRs, not
 one.
 
-**Phase 0 — Specifications.** Nine rows in `SPEC.md`, `Get-Specs.ps1`, confirm
-`Check-SpecVersion.ps1` still passes. Half a day.
+**Phase 0 — Specifications. Done.** Nine rows in `SPEC.md`; `Get-Specs.ps1` and
+`Check-SpecVersion.ps1` both took them unchanged, and all seventeen documents verify against the
+table.
 
 **Phase 1 — The property layer.** F1 and F2. Ends with `mapi-cli` able to dump every property of
 the Store object, which is *"get mailbox metadata"* delivered: display name, owner, mailbox size,
