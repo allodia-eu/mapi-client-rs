@@ -1,6 +1,8 @@
 # `mapi-client-rs`
 
 [![CI](https://github.com/allodia-eu/mapi-client-rs/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/allodia-eu/mapi-client-rs/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/mapi-client?logo=rust&logoColor=white)](https://crates.io/crates/mapi-client)
+[![docs.rs](https://img.shields.io/docsrs/mapi-client?logo=docsdotrs&logoColor=white)](https://docs.rs/mapi-client)
 [![codecov](https://codecov.io/gh/allodia-eu/mapi-client-rs/graph/badge.svg?token=1KS19O3UH1)](https://codecov.io/gh/allodia-eu/mapi-client-rs)
 [![MSRV](https://img.shields.io/badge/MSRV-1.97.0-dea584?logo=rust&logoColor=white)](rust-toolchain.toml)
 [![Licence](https://img.shields.io/badge/licence-MIT%20OR%20Apache--2.0-blue)](#licence)
@@ -25,13 +27,22 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: pre-release.** All four crates are implemented — `mapi-proto` (the sans-io MAPI/HTTP
-> envelope, the ROP layer with type-safe handle chaining, the OXCDATA structures and the session
-> state machine), `mapi-autodiscover` (locating the endpoint in the first place, also sans-io),
-> `mapi-client` (the async client that does the I/O) and `mapi-cli` (the diagnostic binary, which
-> is also the fixture capture tool) — and the fixture corpus is captured from a real Exchange
-> Server SE. Next is driving coverage to the 95% floor and publishing `0.1.0`. No crate is
-> published yet. See `SCAFFOLD-PLAN.md` for the full plan and sequence.
+> **Status: `0.1.0`, the first release.** What works is what the corpus proves: locate an endpoint
+> by Autodiscover, connect, log on, walk the folder hierarchy, open a contents table, choose
+> columns and page rows — verified against Exchange Server SE `15.02.2562.045`. What is missing is
+> writing anything, and `Negotiate`/`NTLM` authentication. Both gaps are stated below rather than
+> left to be discovered.
+
+## Install
+
+```toml
+[dependencies]
+mapi-client = "0.1"
+```
+
+`mapi-proto` and `mapi-autodiscover` are published separately and are useful on their own — the
+first if you want the codec with your own transport, the second if you only need to find an
+endpoint. `mapi-cli` is not published; build it from this repository with `cargo build -p mapi-cli`.
 
 ## What CI does and does not prove
 
@@ -58,12 +69,12 @@ folders are addressed by the id a logon reports and the corpus proves it in both
 
 ## Crates
 
-| Crate | What it is |
-|---|---|
-| [`mapi-proto`](crates/mapi-proto) | The sans-io core: wire envelope, ROPs, OXCDATA structures. No network, no async, no I/O at all. |
-| [`mapi-autodiscover`](crates/mapi-autodiscover) | Autodiscover — a genuinely different protocol (XML over HTTPS), separately useful for locating an endpoint. |
-| [`mapi-client`](crates/mapi-client) | The async client: HTTP, TLS, auth, retry. Depends on `mapi-proto`; nothing depends on it. |
-| [`mapi-cli`](crates/mapi-cli) | Diagnostic binary, and the fixture capture tool. Not published. |
+| Crate | What it is | |
+|---|---|---|
+| [`mapi-proto`](crates/mapi-proto) | The sans-io core: wire envelope, ROPs, OXCDATA structures. No network, no async, no I/O at all. | [docs](https://docs.rs/mapi-proto) |
+| [`mapi-autodiscover`](crates/mapi-autodiscover) | Autodiscover — a genuinely different protocol (XML over HTTPS), separately useful for locating an endpoint. | [docs](https://docs.rs/mapi-autodiscover) |
+| [`mapi-client`](crates/mapi-client) | The async client: HTTP, TLS, auth, retry. Depends on `mapi-proto`; nothing depends on it. | [docs](https://docs.rs/mapi-client) |
+| [`mapi-cli`](crates/mapi-cli) | Diagnostic binary, and the fixture capture tool. Not published. | |
 
 The split is load-bearing rather than decorative: because `mapi-proto` does no I/O, captured
 request/response pairs replay straight through it with nothing stubbed. That is what makes a 95%
@@ -136,8 +147,9 @@ The Microsoft Open Specification documents are authoritative — over this repos
 any blog post, over any other implementation, and over any inference from an observed transcript.
 Every protocol item cites its section: `[MS-OXCROPS] §2.2.4.1.1`, never just "the spec".
 
-Six documents, all pinned at `v20250520`. They are **never committed**; `SPEC.md` carries the URLs
-and one command fetches them into a gitignored `spec/`:
+Eight documents — seven pinned at `v20250520`, `[MS-OXDSCLI]` at `v20250819`. They are **never
+committed**; [`SPEC.md`](SPEC.md) carries the URLs and one command fetches them into a gitignored
+`spec/`:
 
 ```powershell
 powershell.exe -File scripts\Get-Specs.ps1
@@ -154,7 +166,7 @@ observed deviation, with the server version that produced it.
 | Clippy | `all` + `pedantic` + `cargo`, plus `indexing_slicing`, `arithmetic_side_effects`, `unwrap_used`, `panic`, `as_conversions` and friends. Relaxed in `#[cfg(test)]` only |
 | rustdoc | `-D warnings`, `missing_docs` denied, every public item cites its spec section |
 | File length | 500 lines, CI-enforced |
-| Coverage | 95% floor, defined once in `codecov.yml` |
+| Coverage | 95% floor, defined once in `codecov.yml`. Currently 98% of lines, excluding `mapi-cli` and the live tests |
 | Licences | `cargo-deny` allowlist of permissive licences only |
 | API stability | `cargo-public-api` diff on every PR, `cargo-semver-checks` before publish |
 
@@ -173,7 +185,13 @@ Scripts require **Windows PowerShell 5.1 (Desktop)**, not PowerShell 7, because 
 management snapin does not exist in Core. `scripts/_Boot.ps1` hard-fails on anything else rather
 than half-working. They are local and lab tooling; CI runs pure `cargo`.
 
-See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the Rust API Guidelines checklist that gates every PR.
+See [`CONTRIBUTING.md`](CONTRIBUTING.md) for the Rust API Guidelines checklist that gates every PR,
+and [`AGENTS.md`](AGENTS.md) for the standing brief — the rules that are not negotiable and the
+traps that have already been paid for. `CLAUDE.md` is a symlink to it, so there is one copy rather
+than two that drift.
+
+Releases are cut by tagging `v<version>`; [`.github/workflows/release.yml`](.github/workflows/release.yml)
+runs `cargo-semver-checks` and publishes the three library crates in dependency order.
 
 ## Licence
 

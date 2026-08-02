@@ -11,7 +11,7 @@ without "the spec says Y" is unverifiable.
 
 ## Pinned documents
 
-Six of the eight share one release; [MS-OXDSCLI] was revised three months later, which is exactly
+Seven of the eight share one release; [MS-OXDSCLI] was revised three months later, which is exactly
 the drift the version pin exists to make visible. This table is the single source of truth:
 `scripts/Get-Specs.ps1` parses it to download, and `scripts/Check-SpecVersion.ps1` parses it to
 verify.
@@ -31,7 +31,7 @@ verify.
 
 <!-- SPEC-TABLE-END -->
 
-Six released **20 May 2025**; [MS-OXDSCLI] on **19 August 2025**.
+Seven released **20 May 2025**; [MS-OXDSCLI] on **19 August 2025**.
 
 ## URLs in the repository, PDFs never
 
