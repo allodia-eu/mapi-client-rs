@@ -13,14 +13,16 @@
 
 use crate::error::{Error, Result};
 use crate::http::{
-    ConnectResponse, CookieJar, ExecuteResponse, Headers, Payload, Request, RequestType,
+    ConnectResponse, CookieJar, ExecuteResponse, Headers, Lcid, Payload, Request, RequestType,
     ResponseCode, connect_body, disconnect_body, execute_body,
 };
 use crate::oxcdata::{LegacyDn, PropertyTag};
 use crate::rop::{ObjectHandle, RopBatch, RopBuffer, decode_all};
 
+mod builder;
 mod outcome;
 
+pub use builder::SessionBuilder;
 pub use outcome::{Connected, Execution, Outcome};
 
 /// `Content-Type` for every request. [MS-OXCMAPIHTTP] §2.2.3.2.2
@@ -85,6 +87,8 @@ pub struct Session {
     client_info: String,
     request_guid: String,
     counter: u64,
+    lcid_sort: Lcid,
+    lcid_string: Lcid,
     cookies: CookieJar,
     pending: Option<Pending>,
     connected: bool,
@@ -130,7 +134,9 @@ impl Session {
 
     /// Builds the `Connect` request that establishes a Session Context.
     ///
-    /// `user_dn` is Autodiscover's `<User><LegacyDN>`, passed through verbatim.
+    /// `user_dn` is Autodiscover's `<User><LegacyDN>`, passed through verbatim. The Session
+    /// Context's locale is fixed here and cannot be changed afterwards; set it with
+    /// [`SessionBuilder::locale`] before building the session.
     ///
     /// # Errors
     ///
@@ -147,7 +153,8 @@ impl Session {
             });
         }
 
-        let request = self.request(RequestType::Connect, connect_body(user_dn));
+        let body = connect_body(user_dn, self.lcid_sort, self.lcid_string);
+        let request = self.request(RequestType::Connect, body);
         self.pending = Some(Pending::Connect(user_dn.clone()));
         Ok(request)
     }
@@ -430,79 +437,6 @@ fn diagnostic(body: &[u8]) -> Option<String> {
         && !text.chars().any(|c| c.is_control() && !c.is_whitespace());
 
     legible.then(|| text.chars().take(200).collect())
-}
-
-/// Builds a [`Session`] with a client identity of your own.
-///
-/// [MS-OXCMAPIHTTP] §2.2.3.3 — X-header fields
-#[derive(Clone, Debug)]
-pub struct SessionBuilder {
-    client_application: String,
-    client_info: String,
-    request_guid: String,
-}
-
-impl Default for SessionBuilder {
-    fn default() -> Self {
-        Self::new()
-    }
-}
-
-impl SessionBuilder {
-    /// A builder carrying the defaults.
-    #[must_use]
-    pub fn new() -> Self {
-        Self {
-            client_application: DEFAULT_CLIENT_APPLICATION.to_owned(),
-            client_info: format!("{DEFAULT_GUID}:1"),
-            request_guid: DEFAULT_GUID.to_owned(),
-        }
-    }
-
-    /// Sets `X-ClientApplication`, whose documented format is `Outlook/15.xx.xxxx.xxxx`.
-    ///
-    /// [MS-OXCMAPIHTTP] §2.2.3.3.6
-    #[must_use]
-    pub fn client_application(mut self, value: impl Into<String>) -> Self {
-        self.client_application = value.into();
-        self
-    }
-
-    /// Sets `X-ClientInfo`, a GUID and a decimal counter such as `{GUID}:123`.
-    ///
-    /// The GUID must be unique per client instance and stable for its lifetime.
-    ///
-    /// [MS-OXCMAPIHTTP] §2.2.3.3.4
-    #[must_use]
-    pub fn client_info(mut self, value: impl Into<String>) -> Self {
-        self.client_info = value.into();
-        self
-    }
-
-    /// Sets the GUID used in `X-RequestId`, which must not change for the life of the Session
-    /// Context. The counter after it is maintained by the session.
-    ///
-    /// [MS-OXCMAPIHTTP] §2.2.3.3.2
-    #[must_use]
-    pub fn request_guid(mut self, value: impl Into<String>) -> Self {
-        self.request_guid = value.into();
-        self
-    }
-
-    /// Builds the session.
-    #[must_use]
-    pub fn build(self) -> Session {
-        Session {
-            client_application: self.client_application,
-            client_info: self.client_info,
-            request_guid: self.request_guid,
-            counter: 0,
-            cookies: CookieJar::new(),
-            pending: None,
-            connected: false,
-            table_columns: Vec::new(),
-        }
-    }
 }
 
 #[cfg(test)]

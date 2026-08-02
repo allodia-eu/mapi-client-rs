@@ -23,6 +23,6 @@ mod response;
 pub(crate) use body::{ConnectResponse, ExecuteResponse};
 pub use cookie::{CookieJar, SessionCookie};
 pub use headers::{GetAll, Headers, Iter};
-pub use request::{Request, RequestType};
+pub use request::{Lcid, Request, RequestType};
 pub(crate) use request::{connect_body, disconnect_body, execute_body};
 pub use response::{MetaTag, Payload, ResponseCode};
