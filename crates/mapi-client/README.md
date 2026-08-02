@@ -24,11 +24,25 @@ while let Some(row) = rows.try_next().await? {
 logon.disconnect().await?;
 ```
 
-Three round trips reach the first row: `Connect` establishes the Session Context, `RopLogon`
-returns every special folder's id, and one more `Execute` opens the folder, opens its table, sets
-the columns and reads the first page — because ROPs chained in a single buffer consume the handles
-that earlier ROPs in the same buffer produced. Later pages are one round trip each, and do not
-re-send the column set.
+Three round trips reach the first row: `Connect` establishes the Session Context, `RopLogon` returns
+thirteen folder ids, and one more `Execute` opens the folder, opens its table, sets the columns and
+reads the first page — because ROPs chained in a single buffer consume the handles that earlier ROPs
+in the same buffer produced. Later pages are one round trip each, and do not re-send the column set.
+
+The Calendar costs two more, and so does everything else `RopLogon` does not name — Contacts,
+Drafts, Tasks, Notes, Journal. Those live behind binary entry-id properties on the Inbox, and an
+entry id is long-term while `RopOpenFolder` takes a short-term id, so `Logon::special_folders()`
+reads all eight properties in one `Execute` and converts all eight in the next:
+
+```rust
+use mapi_client::{FOLDER_PROPERTIES, SpecialFolder};
+
+let special = logon.special_folders().await?;
+let calendar = special.get(SpecialFolder::Calendar).expect("a Calendar");
+
+// "Get calendar details" — a calendar is a folder, so the two are one question.
+let details = logon.folder(calendar).properties().read(FOLDER_PROPERTIES).await?;
+```
 
 ## What the types enforce
 
@@ -40,6 +54,11 @@ re-send the column set.
   know whether the server acted on it, so the connection refuses further use rather than sending
   the next request into an unknown state.
 - **No secret reaches a log.** `Credentials` implements `Debug` by hand and redacts.
+- **A folder id does not travel between mailboxes.** Measured: the two lab mailboxes report the
+  *same* id for each of six special folders, so an id cached from one and used against the other
+  opens a real folder and reports nothing wrong. The entry ids that resolve to them carry the
+  mailbox GUID that issued them, and `FolderEntryId::belongs_to` answers before a conversion is
+  asked for.
 
 ## Transport and authentication
 
@@ -65,9 +84,11 @@ Part of [`mapi-client-rs`](https://github.com/allodia-eu/mapi-client-rs). Every 
 cites its Microsoft Open Specification section; see `SPEC.md` in the repository root for the pinned
 document versions.
 
-**Status:** pre-release. Connect, logon, folder and table reads with paging, and disconnect are
-implemented, along with Autodiscover lookup. No message bodies, no notifications, no ICS, no
-address book.
+**Status:** `0.1.0` released; the property layer and the special-folder chain have landed since and
+are unreleased. Connect, logon, hierarchy and contents reads with paging — the hierarchy
+recursively, tagged by container class — the folders a logon does not name, property reads and
+writes on Store and Folder objects, disconnect, and Autodiscover lookup are implemented. No
+messages, no attachments, no streams, no notifications, no ICS, no address book.
 
 ## Licence
 
