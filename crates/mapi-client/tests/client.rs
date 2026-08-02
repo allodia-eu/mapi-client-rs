@@ -14,7 +14,7 @@ use mapi_client::{Credentials, FolderId, PropertyTag, WellKnownFolder};
 use support::{
     BOOKMARK_END, LOGON_HANDLE, MapiServer, OPEN_FOLDER_SLOT, TABLE_HANDLE, connect_ok,
     contents_row, disconnect_body, execute_body, get_table_response, hierarchy_row, logon_response,
-    open_folder_response, query_rows_response, set_columns_response, well_known_folder_id,
+    opcodes, open_folder_response, query_rows_response, set_columns_response, well_known_folder_id,
 };
 use wiremock::ResponseTemplate;
 
@@ -251,4 +251,98 @@ async fn a_page_size_of_zero_is_clamped_to_one() {
     let sent = server.rops(2).await;
     let query_rows = &sent[sent.len() - 10..];
     assert_eq!(&query_rows[5..7], &1_u16.to_le_bytes());
+}
+
+/// **A folder's own properties cost one round trip, not three.** A Logon object is already open;
+/// a folder is not, so the batch opens it, operates on it and releases it in a single buffer — and
+/// the release matters, because a handle opened and never released lives for the rest of the
+/// Session Context, and a caller reading one property of each of a hundred folders would leave a
+/// hundred behind.
+///
+/// Both of the shapes `read` does not exercise are here — `RopGetPropertiesAll` and
+/// `RopDeleteProperties` — because each builds its own batch and each has to remember the release.
+///
+/// [MS-OXCROPS] §2.2.4.1 — `RopOpenFolder`
+/// [MS-OXCROPS] §2.2.15.3 — `RopRelease`
+#[tokio::test]
+async fn a_folders_properties_are_opened_operated_on_and_released_in_one_buffer() {
+    let server = MapiServer::start().await;
+    server.reply(connect_ok("Alice Example"));
+    server.reply_ok(execute_body(&logon_response(0), &[LOGON_HANDLE]));
+
+    let mut read = open_folder_response(OPEN_FOLDER_SLOT);
+    read.extend(get_all_response(OPEN_FOLDER_SLOT, "Calendar"));
+    server.reply_ok(execute_body(&read, &OPENED_FOLDER));
+
+    let mut deleted = open_folder_response(OPEN_FOLDER_SLOT);
+    deleted.extend(delete_properties_response(OPEN_FOLDER_SLOT));
+    server.reply_ok(execute_body(&deleted, &OPENED_FOLDER));
+
+    let client = server.client();
+    let mut logon = client.connect().await.unwrap().logon().await.unwrap();
+    let calendar = FolderId::new(0x0D01_0000_0000_0001);
+
+    let all = logon
+        .folder(calendar)
+        .properties()
+        .read_all()
+        .await
+        .unwrap();
+    assert_eq!(
+        all.string(PropertyTag::DISPLAY_NAME)
+            .map(mapi_client::TableString::as_str),
+        Some("Calendar")
+    );
+
+    let problems = logon
+        .folder(calendar)
+        .properties()
+        .delete([PropertyTag::COMMENT])
+        .await
+        .unwrap();
+    assert_eq!(problems.len(), 1);
+    assert_eq!(problems[0].tag(), PropertyTag::COMMENT);
+
+    // Open, operate, release — in that order, in one request each.
+    for exchange in [2, 3] {
+        let sent = opcodes(&server.rops(exchange).await);
+        assert_eq!(sent.first().copied(), Some(0x02), "the folder is opened");
+        assert_eq!(
+            sent.last().copied(),
+            Some(0x01),
+            "the handle the batch opened is released in the same buffer"
+        );
+    }
+}
+
+/// The handle table a batch that opens one folder leaves behind.
+const OPENED_FOLDER: [u32; 2] = [LOGON_HANDLE, 0x0000_0001];
+
+/// A `RopGetPropertiesAll` response carrying one `TaggedPropertyValue`: a count, then the tag and
+/// the value beside it.
+///
+/// [MS-OXCROPS] §2.2.8.4.2, [MS-OXCDATA] §2.11.4
+fn get_all_response(slot: u8, name: &str) -> Vec<u8> {
+    let mut out = vec![0x08, slot, 0, 0, 0, 0];
+    out.extend(1_u16.to_le_bytes()); // PropertyValueCount
+    out.extend(PropertyTag::DISPLAY_NAME.as_u32().to_le_bytes());
+    for unit in name.encode_utf16() {
+        out.extend(unit.to_le_bytes());
+    }
+    out.extend([0, 0]);
+    out
+}
+
+/// A `RopDeleteProperties` response reporting one property the server would not delete — the ROP
+/// succeeded and the property did not, which is the case a caller reading only `ReturnValue`
+/// misreports as done.
+///
+/// [MS-OXCROPS] §2.2.8.8.2, [MS-OXCDATA] §2.7 — `PropertyProblem`
+fn delete_properties_response(slot: u8) -> Vec<u8> {
+    let mut out = vec![0x0B, slot, 0, 0, 0, 0];
+    out.extend(1_u16.to_le_bytes()); // PropertyProblemCount
+    out.extend(0_u16.to_le_bytes()); // Index
+    out.extend(PropertyTag::COMMENT.as_u32().to_le_bytes());
+    out.extend(0x8007_0005_u32.to_le_bytes()); // ecAccessDenied
+    out
 }

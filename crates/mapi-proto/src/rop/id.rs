@@ -35,10 +35,18 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.8.3
     pub const GET_PROPERTIES_SPECIFIC: Self = Self(0x07);
+    /// `RopIdFromLongTermId`, `0x44` — a long-term id into one a ROP will take.
+    ///
+    /// [MS-OXCROPS] §2.2.3.9
+    pub const ID_FROM_LONG_TERM_ID: Self = Self(0x44);
     /// `RopLogon`, `0xFE`.
     ///
     /// [MS-OXCROPS] §2.2.3.1
     pub const LOGON: Self = Self(0xFE);
+    /// `RopLongTermIdFromId`, `0x43` — a short-term id into one that survives leaving the store.
+    ///
+    /// [MS-OXCROPS] §2.2.3.8
+    pub const LONG_TERM_ID_FROM_ID: Self = Self(0x43);
     /// `RopOpenFolder`, `0x02`.
     ///
     /// [MS-OXCROPS] §2.2.4.1
@@ -86,6 +94,8 @@ impl RopId {
             Self::DELETE_PROPERTIES => "RopDeleteProperties",
             Self::SET_COLUMNS => "RopSetColumns",
             Self::QUERY_ROWS => "RopQueryRows",
+            Self::LONG_TERM_ID_FROM_ID => "RopLongTermIdFromId",
+            Self::ID_FROM_LONG_TERM_ID => "RopIdFromLongTermId",
             Self::BACKOFF => "RopBackoff",
             Self::LOGON => "RopLogon",
             Self::BUFFER_TOO_SMALL => "RopBufferTooSmall",
@@ -124,6 +134,8 @@ mod tests {
             (RopId::DELETE_PROPERTIES, 0x0B, "RopDeleteProperties"),
             (RopId::SET_COLUMNS, 0x12, "RopSetColumns"),
             (RopId::QUERY_ROWS, 0x15, "RopQueryRows"),
+            (RopId::LONG_TERM_ID_FROM_ID, 0x43, "RopLongTermIdFromId"),
+            (RopId::ID_FROM_LONG_TERM_ID, 0x44, "RopIdFromLongTermId"),
             (RopId::BACKOFF, 0xF9, "RopBackoff"),
             (RopId::LOGON, 0xFE, "RopLogon"),
             (RopId::BUFFER_TOO_SMALL, 0xFF, "RopBufferTooSmall"),

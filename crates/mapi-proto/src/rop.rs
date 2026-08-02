@@ -11,6 +11,7 @@ mod buffer;
 mod folder;
 mod id;
 mod logon;
+mod longterm;
 mod property;
 mod response;
 mod table;
@@ -20,7 +21,10 @@ pub(crate) use buffer::RopBuffer;
 pub use folder::OpenFolderResponse;
 pub use id::RopId;
 pub use logon::{LogonResponse, WellKnownFolder};
+pub use longterm::{IdFromLongTermIdResponse, LongTermIdFromIdResponse};
 pub use property::{GetPropertiesResponse, PropertyProblemsResponse};
 pub use response::RopResponse;
 pub(crate) use response::{Decoding, decode_all};
-pub use table::{Bookmark, GetTableResponse, QueryRowsResponse, SetColumnsResponse, TableStatus};
+pub use table::{
+    Bookmark, FolderDepth, GetTableResponse, QueryRowsResponse, SetColumnsResponse, TableStatus,
+};

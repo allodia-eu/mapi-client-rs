@@ -1,6 +1,6 @@
 use super::*;
 use crate::oxcdata::{FolderId, HIERARCHY_COLUMNS, PropertyTag, TableString};
-use crate::rop::WellKnownFolder;
+use crate::rop::{FolderDepth, WellKnownFolder};
 use crate::testing::{
     connect_failure_payload, connect_payload, execute_payload, logon_response, ok_headers,
     query_rows_response, with_preamble,
@@ -189,7 +189,7 @@ fn a_folder_walk_is_one_round_trip() {
     let mut batch = RopBatch::new();
     let logon = batch.bind(ObjectHandle::new(0x2A));
     let folder = batch.open_folder(logon, FolderId::new(0x0D00_0000_0000_0001));
-    let table = batch.hierarchy_table(folder);
+    let table = batch.hierarchy_table(folder, FolderDepth::Immediate);
     batch
         .set_columns(table, &HIERARCHY_COLUMNS)
         .query_rows(table, 50);

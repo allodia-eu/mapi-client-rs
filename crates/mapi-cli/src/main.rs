@@ -11,7 +11,9 @@
 //! ```text
 //! mapi-cli ping                       is the endpoint there, and do the credentials work?
 //! mapi-cli discover alice@example.test   what does Autodiscover say about this mailbox?
-//! mapi-cli folders                    walk the hierarchy table
+//! mapi-cli folders --recursive        walk the whole hierarchy, tagged by container class
+//! mapi-cli folders --class IPF.Appointment   list the calendars
+//! mapi-cli special --details          find Calendar, Contacts, Drafts and the rest
 //! mapi-cli messages --folder inbox    read a contents table
 //! mapi-cli properties                 dump every property of the Store object
 //! mapi-cli capture session --out fixtures/exchange-se/session-en-us --scrub rules.tsv
@@ -88,6 +90,32 @@ enum Command {
         /// Rows per round trip.
         #[arg(long, value_name = "ROWS", default_value_t = 50)]
         page_size: u16,
+
+        /// List every folder below this one rather than its immediate children.
+        ///
+        /// Sets the `Depth` bit of `TableFlags`, so the whole tree arrives in one table.
+        /// [MS-OXCFOLD] §2.2.1.13.1
+        #[arg(long)]
+        recursive: bool,
+
+        /// Show only folders of this container class, and its refinements.
+        ///
+        /// `IPF.Appointment` lists the calendars; `IPF.Contact` lists the contact folders, its
+        /// `IPF.Contact.MOC.QuickContacts` kind included. [MS-OXCFOLD] §2.2.2.2.2.3
+        #[arg(long, value_name = "CLASS")]
+        class: Option<String>,
+    },
+
+    /// Find the folders a logon does not name: Calendar, Contacts, Drafts and the rest.
+    ///
+    /// Two round trips: the entry ids come from binary properties on the Inbox, and only the
+    /// server can turn a long-term entry id into an id `RopOpenFolder` takes.
+    /// [MS-OXOSFLD] §2.2.3
+    Special {
+        /// Also open each one and report what it is: name, class, item count, and whether it is a
+        /// search folder rather than a real one.
+        #[arg(long)]
+        details: bool,
     },
 
     /// Read a folder's contents table.
@@ -154,9 +182,13 @@ async fn run(cli: Cli) -> Result<(), Failure> {
     match cli.command {
         Command::Ping => command::ping(&connection).await,
         Command::Connect => command::connect(&connection).await,
-        Command::Folders { folder, page_size } => {
-            command::folders(&connection, &folder, page_size).await
-        }
+        Command::Folders {
+            folder,
+            page_size,
+            recursive,
+            class,
+        } => command::folders(&connection, &folder, page_size, recursive, class.as_deref()).await,
+        Command::Special { details } => command::special(&connection, details).await,
         Command::Messages {
             folder,
             page_size,

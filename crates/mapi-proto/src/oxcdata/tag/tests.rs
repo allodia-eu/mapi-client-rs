@@ -3,7 +3,19 @@ use super::*;
 /// Every named tag, with the id and type its defining document gives it — transcribed from the
 /// specification rather than derived from the constant, so a mistyped constant is not confirmed by
 /// the test that checks it.
-const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 24] = [
+const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 39] = [
+    (
+        PropertyTag::ADDITIONAL_REN_ENTRY_IDS,
+        0x36D8,
+        PropertyType::MultipleBinary,
+        "PidTagAdditionalRenEntryIds",
+    ),
+    (
+        PropertyTag::ATTRIBUTE_HIDDEN,
+        0x10F4,
+        PropertyType::Boolean,
+        "PidTagAttributeHidden",
+    ),
     (
         PropertyTag::CODE_PAGE_ID,
         0x66C3,
@@ -17,10 +29,22 @@ const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 24] = [
         "PidTagComment",
     ),
     (
+        PropertyTag::CONTAINER_CLASS,
+        0x3613,
+        PropertyType::String,
+        "PidTagContainerClass",
+    ),
+    (
         PropertyTag::CONTENT_COUNT,
         0x3602,
         PropertyType::Integer32,
         "PidTagContentCount",
+    ),
+    (
+        PropertyTag::CONTENT_UNREAD_COUNT,
+        0x3603,
+        PropertyType::Integer32,
+        "PidTagContentUnreadCount",
     ),
     (
         PropertyTag::DELETE_AFTER_SUBMIT,
@@ -41,10 +65,64 @@ const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 24] = [
         "PidTagExtendedRuleSizeLimit",
     ),
     (
+        PropertyTag::FOLDER_FLAGS,
+        0x66A8,
+        PropertyType::Integer32,
+        "PidTagFolderFlags",
+    ),
+    (
         PropertyTag::FOLDER_ID,
         0x6748,
         PropertyType::Integer64,
         "PidTagFolderId",
+    ),
+    (
+        PropertyTag::FOLDER_TYPE,
+        0x3601,
+        PropertyType::Integer32,
+        "PidTagFolderType",
+    ),
+    (
+        PropertyTag::IPM_APPOINTMENT_ENTRY_ID,
+        0x36D0,
+        PropertyType::Binary,
+        "PidTagIpmAppointmentEntryId",
+    ),
+    (
+        PropertyTag::IPM_ARCHIVE_ENTRY_ID,
+        0x35FF,
+        PropertyType::Binary,
+        "PidTagIpmArchiveEntryId",
+    ),
+    (
+        PropertyTag::IPM_CONTACT_ENTRY_ID,
+        0x36D1,
+        PropertyType::Binary,
+        "PidTagIpmContactEntryId",
+    ),
+    (
+        PropertyTag::IPM_DRAFTS_ENTRY_ID,
+        0x36D7,
+        PropertyType::Binary,
+        "PidTagIpmDraftsEntryId",
+    ),
+    (
+        PropertyTag::IPM_JOURNAL_ENTRY_ID,
+        0x36D2,
+        PropertyType::Binary,
+        "PidTagIpmJournalEntryId",
+    ),
+    (
+        PropertyTag::IPM_NOTE_ENTRY_ID,
+        0x36D3,
+        PropertyType::Binary,
+        "PidTagIpmNoteEntryId",
+    ),
+    (
+        PropertyTag::IPM_TASK_ENTRY_ID,
+        0x36D4,
+        PropertyType::Binary,
+        "PidTagIpmTaskEntryId",
     ),
     (
         PropertyTag::LOCALE_ID,
@@ -101,6 +179,12 @@ const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 24] = [
         "PidTagOutOfOfficeState",
     ),
     (
+        PropertyTag::PARENT_FOLDER_ID,
+        0x6749,
+        PropertyType::Integer64,
+        "PidTagParentFolderId",
+    ),
+    (
         PropertyTag::PROHIBIT_RECEIVE_QUOTA,
         0x666A,
         PropertyType::Integer32,
@@ -111,6 +195,12 @@ const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 24] = [
         0x666E,
         PropertyType::Integer32,
         "PidTagProhibitSendQuota",
+    ),
+    (
+        PropertyTag::REMINDERS_ONLINE_ENTRY_ID,
+        0x36D5,
+        PropertyType::Binary,
+        "PidTagRemindersOnlineEntryId",
     ),
     (
         PropertyTag::SERIALIZED_REPLID_GUID_MAP,
@@ -198,7 +288,9 @@ fn every_tag_this_crate_sends_has_a_type_it_can_decode() {
     let sent = HIERARCHY_COLUMNS
         .iter()
         .chain(&CONTENTS_COLUMNS)
-        .chain(&MAILBOX_PROPERTIES);
+        .chain(&MAILBOX_PROPERTIES)
+        .chain(&FOLDER_PROPERTIES)
+        .chain(&crate::oxcdata::SPECIAL_FOLDER_PROPERTIES);
 
     for tag in sent {
         assert!(tag.name().is_some(), "{tag} has no name");

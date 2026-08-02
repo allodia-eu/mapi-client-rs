@@ -139,6 +139,21 @@ pub enum Error {
         value_type: Option<PropertyType>,
     },
 
+    /// A binary property value was not the Folder `EntryID` structure it was read as.
+    ///
+    /// The object-type check inside it is the one worth having: a folder's entry id and a
+    /// message's are the same 46 bytes but for that field, so without it a mistyped tag opens
+    /// something plausible rather than failing.
+    ///
+    /// [MS-OXCDATA] §2.2.4.1 — Folder `EntryID` structure
+    #[error("not a folder EntryID ({length} bytes): {reason}")]
+    InvalidEntryId {
+        /// How long the value actually was.
+        length: usize,
+        /// Which of the structure's rules it broke.
+        reason: &'static str,
+    },
+
     /// A `FlaggedPropertyRow` carried a value flag other than `0x00`, `0x01` or `0x0A`.
     ///
     /// [MS-OXCDATA] §2.11.5 — `FlaggedPropertyValue`

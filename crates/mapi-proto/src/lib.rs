@@ -23,12 +23,12 @@
 //! consume.
 //!
 //! ```
-//! use mapi_proto::{FolderId, HIERARCHY_COLUMNS, ObjectHandle, RopBatch};
+//! use mapi_proto::{FolderDepth, FolderId, HIERARCHY_COLUMNS, ObjectHandle, RopBatch};
 //!
 //! let mut batch = RopBatch::new();
 //! let logon = batch.bind(ObjectHandle::new(0x0000_002A)); // from the previous round trip
 //! let folder = batch.open_folder(logon, FolderId::new(0x0D00_0000_0000_0001));
-//! let table = batch.hierarchy_table(folder);
+//! let table = batch.hierarchy_table(folder, FolderDepth::Recursive);
 //! batch.set_columns(table, &HIERARCHY_COLUMNS).query_rows(table, 50);
 //! assert_eq!(batch.len(), 4);
 //! ```
@@ -55,8 +55,9 @@
 //!
 //! No compression (LZ77+DIRECT2), no `0xA5` obfuscation and no auxiliary buffers: every request
 //! asks the server to skip all three, and a server that ignores that is reported rather than
-//! guessed at. No Address Book endpoint, no notifications, no ICS. Table reads, folder walks and
-//! the property layer are what is covered so far.
+//! guessed at. No Address Book endpoint, no notifications, no ICS, and no Message or Attachment
+//! objects. Table reads, folder walks — including the recursive kind and the entry-id chain that
+//! reaches the folders a logon does not name — and the property layer are what is covered so far.
 //!
 //! [`mapi-client`]: https://docs.rs/mapi-client
 //! [`mapi-autodiscover`]: https://docs.rs/mapi-autodiscover
@@ -77,13 +78,15 @@ pub use crate::http::{
     CookieJar, Headers, Lcid, MetaTag, Payload, Request, RequestType, ResponseCode,
 };
 pub use crate::oxcdata::{
-    CONTENTS_COLUMNS, Cell, FileTime, Floating64, FolderId, Guid, HIERARCHY_COLUMNS, LegacyDn,
-    MAILBOX_PROPERTIES, MessageId, PropertyProblem, PropertyRow, PropertySet, PropertySetIter,
-    PropertyTag, PropertyType, PropertyValue, ReplicaId, RowForm, TableString, TaggedValue,
+    CONTENTS_COLUMNS, Cell, ContainerClass, FOLDER_PROPERTIES, FileTime, Floating64, FolderEntryId,
+    FolderId, Guid, HIERARCHY_COLUMNS, LegacyDn, LongTermId, MAILBOX_PROPERTIES, MessageId,
+    PropertyProblem, PropertyRow, PropertySet, PropertySetIter, PropertyTag, PropertyType,
+    PropertyValue, ReplicaId, RowForm, SPECIAL_FOLDER_PROPERTIES, ShortTermId, SpecialFolder,
+    StoreObjectType, TableString, TaggedValue,
 };
 pub use crate::rop::{
-    Bookmark, GetPropertiesResponse, HandleSlot, LogonResponse, ObjectHandle,
-    PropertyProblemsResponse, QueryRowsResponse, RopBatch, RopId, RopResponse, TableStatus,
-    WellKnownFolder,
+    Bookmark, FolderDepth, GetPropertiesResponse, HandleSlot, IdFromLongTermIdResponse,
+    LogonResponse, LongTermIdFromIdResponse, ObjectHandle, PropertyProblemsResponse,
+    QueryRowsResponse, RopBatch, RopId, RopResponse, TableStatus, WellKnownFolder,
 };
 pub use crate::session::{Connected, Execution, Outcome, Session, SessionBuilder};

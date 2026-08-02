@@ -12,16 +12,19 @@
 //! [MS-OXCROPS] §3.1.4.1 — creating a ROP input buffer
 
 use crate::error::{Error, Result};
-use crate::oxcdata::{FolderId, LegacyDn, PropertyTag, TaggedValue};
+use crate::oxcdata::{FolderId, LegacyDn, LongTermId, PropertyTag, ShortTermId, TaggedValue};
 use crate::rop::RopId;
 use crate::rop::buffer::RopBuffer;
 use crate::rop::folder::encode_open_folder;
 use crate::rop::logon::encode_logon;
+use crate::rop::longterm::{encode_id_from_long_term_id, encode_long_term_id_from_id};
 use crate::rop::property::{
     encode_delete_properties, encode_get_properties_all, encode_get_properties_specific,
     encode_set_properties,
 };
-use crate::rop::table::{encode_get_table, encode_query_rows, encode_set_columns};
+use crate::rop::table::{
+    FolderDepth, TABLE_FLAGS_NONE, encode_get_table, encode_query_rows, encode_set_columns,
+};
 use crate::wire::Writer;
 
 /// A ROP addresses the handle table with one byte, so a batch can hold this many slots.
@@ -103,12 +106,12 @@ impl core::fmt::Display for HandleSlot {
 /// surfaces when the batch is handed to [`Session::execute`](crate::Session::execute).
 ///
 /// ```
-/// use mapi_proto::{FolderId, HIERARCHY_COLUMNS, ObjectHandle, RopBatch};
+/// use mapi_proto::{FolderDepth, FolderId, HIERARCHY_COLUMNS, ObjectHandle, RopBatch};
 ///
 /// let mut batch = RopBatch::new();
 /// let logon = batch.bind(ObjectHandle::new(0x0000_002A));
 /// let folder = batch.open_folder(logon, FolderId::new(0x0D00_0000_0000_0001));
-/// let table = batch.hierarchy_table(folder);
+/// let table = batch.hierarchy_table(folder, FolderDepth::Immediate);
 /// batch
 ///     .set_columns(table, &HIERARCHY_COLUMNS)
 ///     .query_rows(table, 50);
@@ -192,14 +195,53 @@ impl RopBatch {
     ///
     /// [MS-OXCROPS] §2.2.4.14 — `RopGetContentsTable`
     pub fn contents_table(&mut self, folder: HandleSlot) -> HandleSlot {
-        self.get_table(RopId::GET_CONTENTS_TABLE, folder)
+        self.get_table(RopId::GET_CONTENTS_TABLE, folder, TABLE_FLAGS_NONE)
     }
 
     /// Opens the folder's hierarchy table — its subfolders.
     ///
+    /// The depth is a parameter rather than a default because the two answers are different
+    /// questions: [`FolderDepth::Recursive`] lists every folder below this one in one round trip,
+    /// and its rows say nothing about where each folder sits unless
+    /// [`PidTagParentFolderId`](crate::PropertyTag::PARENT_FOLDER_ID) is among the columns.
+    ///
     /// [MS-OXCROPS] §2.2.4.13 — `RopGetHierarchyTable`
-    pub fn hierarchy_table(&mut self, folder: HandleSlot) -> HandleSlot {
-        self.get_table(RopId::GET_HIERARCHY_TABLE, folder)
+    /// [MS-OXCFOLD] §2.2.1.13.1 — `TableFlags`, `Depth`
+    pub fn hierarchy_table(&mut self, folder: HandleSlot, depth: FolderDepth) -> HandleSlot {
+        self.get_table(RopId::GET_HIERARCHY_TABLE, folder, depth.flags())
+    }
+
+    /// Converts a long-term id into one a ROP will take.
+    ///
+    /// The step that makes the folders a logon does not name reachable: a `PidTagIpm*EntryId`
+    /// property holds a [`FolderEntryId`](crate::FolderEntryId) whose tail is a
+    /// [`LongTermId`], and `RopOpenFolder` takes a [`FolderId`]. Only the server holds the mapping
+    /// between the two, so this is a round trip rather than arithmetic.
+    ///
+    /// Operates on the Logon object, and answers **for the store that logon named** — converting
+    /// an entry id issued by a different mailbox produces a valid-looking id for the wrong folder,
+    /// which is what [`FolderEntryId::belongs_to`](crate::FolderEntryId::belongs_to) is for.
+    ///
+    /// [MS-OXCROPS] §2.2.3.9 — `RopIdFromLongTermId`
+    /// [MS-OXOSFLD] §2.2.2 — entry ids MUST be converted before use
+    pub fn id_from_long_term_id(&mut self, logon: HandleSlot, id: &LongTermId) -> &mut Self {
+        if self.check(logon) {
+            self.push(|w| encode_id_from_long_term_id(w, logon.index(), id));
+        }
+        self
+    }
+
+    /// Converts a folder or message id into one that survives leaving the store.
+    ///
+    /// The inverse of [`id_from_long_term_id`](Self::id_from_long_term_id), and what a client
+    /// needs to *write* an entry-id property rather than read one.
+    ///
+    /// [MS-OXCROPS] §2.2.3.8 — `RopLongTermIdFromId`
+    pub fn long_term_id_from_id(&mut self, logon: HandleSlot, id: ShortTermId) -> &mut Self {
+        if self.check(logon) {
+            self.push(|w| encode_long_term_id_from_id(w, logon.index(), id));
+        }
+        self
     }
 
     /// Sets the column set every row read from this table is encoded against.
@@ -319,11 +361,11 @@ impl RopBatch {
         self
     }
 
-    fn get_table(&mut self, rop: RopId, folder: HandleSlot) -> HandleSlot {
+    fn get_table(&mut self, rop: RopId, folder: HandleSlot, flags: u8) -> HandleSlot {
         let known = self.check(folder);
         let output = self.allocate(ObjectHandle::NONE);
         if known {
-            self.push(|w| encode_get_table(w, rop, folder.index(), output.index()));
+            self.push(|w| encode_get_table(w, rop, folder.index(), output.index(), flags));
         }
         output
     }

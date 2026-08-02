@@ -13,7 +13,7 @@
 
 use core::time::Duration;
 
-use mapi_proto::{ErrorCode, WellKnownFolder};
+use mapi_proto::{ErrorCode, SpecialFolder, WellKnownFolder};
 
 /// The result of anything in this crate.
 pub type Result<T> = core::result::Result<T, Error>;
@@ -180,11 +180,28 @@ pub enum Error {
         server_name: String,
     },
 
-    /// The logon response did not include one of the special folders.
+    /// The logon response did not include one of the thirteen folders it names.
     #[error("the logon response did not include the {folder} folder")]
     MissingFolder {
         /// The folder that was asked for.
         folder: WellKnownFolder,
+    },
+
+    /// This mailbox has no such special folder.
+    ///
+    /// Ordinary rather than exceptional: Exchange creates the folders of [MS-OXOSFLD] §2.2.3 on
+    /// demand, so a mailbox nobody has written a journal entry in has no Journal folder and no
+    /// property naming one. `state` carries what the mailbox actually said, which is what tells a
+    /// missing folder apart from an entry id the server would not convert.
+    ///
+    /// [`Logon::special_folders`](crate::Logon::special_folders) reports every folder's state
+    /// instead of failing, and is the call to reach for when the absence is not an error.
+    #[error("this mailbox has no {folder} folder: {state}")]
+    MissingSpecialFolder {
+        /// The folder that was asked for.
+        folder: SpecialFolder,
+        /// What the mailbox said about it.
+        state: String,
     },
 
     /// The server answered, correctly, with something other than what was asked for.

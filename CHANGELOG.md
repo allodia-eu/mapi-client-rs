@@ -36,6 +36,36 @@ Two conventions specific to this project:
   value paired with a tag that declares a different type.
 - **Two more captured exchanges per session**, so CI holds byte-exact evidence of a property fetch
   and of a refused property write.
+- **The folders a logon does not name.** `RopLogon` reports thirteen folder ids and Calendar,
+  Contacts, Drafts, Tasks, Notes and Journal are none of them. `Logon::special_folders()` follows
+  [MS-OXOSFLD] §2.2.3's chain — read the binary entry-id properties off the Inbox, parse each
+  46-byte `FolderEntryId`, and convert its long-term tail with `RopIdFromLongTermId` — in two round
+  trips, whether one folder is wanted or all eight. `mapi-cli special --details` prints the lot.
+- **`RopIdFromLongTermId` and `RopLongTermIdFromId`**, with `LongTermId`, `ShortTermId`,
+  `FolderEntryId` and `StoreObjectType`. The two identifiers are not interconvertible by arithmetic:
+  only the server holds the mapping between a 16-byte database GUID and the 2-byte replica id that
+  stands for it.
+- **Recursive folder listings.** `Folder::descendants()` sets the `Depth` bit of `TableFlags`, so a
+  whole mailbox arrives in one table instead of one round trip per folder.
+  `mapi-cli folders --recursive` renders it as a tree, and `--class IPF.Appointment` filters it —
+  which is *list folders*, *list calendars* and *list contacts folders* delivered.
+- **`ContainerClass`**, the property that is the whole of what makes a folder a calendar. Matching
+  is on the dotted prefix, so `IPF.Contact` finds `IPF.Contact.MOC.QuickContacts` too — the lab
+  mailbox has eight kinds of contacts folder and equality would have found one.
+- **A folder's own properties**, via `Folder::properties()` and `FOLDER_PROPERTIES`, in one round
+  trip that opens, reads and releases. That is *get calendar details*: a calendar is a folder, so
+  the two are one question.
+- **Six more captured exchanges per session** — a recursive hierarchy read across two pages, both
+  halves of the entry-id chain, and a property read on the Calendar it found.
+
+### Changed
+
+- **`HIERARCHY_COLUMNS` is six tags rather than four**, adding `PidTagParentFolderId` and
+  `PidTagContainerClass`. Without the first a recursive read is a flat bag of names with no way back
+  to a tree; without the second a calendar and a mail folder are two names in a language the reader
+  may not have.
+- **`RopBatch::hierarchy_table` takes a `FolderDepth`.** The immediate children and the whole
+  subtree are different questions and a default would answer one of them silently.
 
 ### Measured against Exchange Server SE `15.02.2562.045`
 
@@ -49,6 +79,26 @@ Two conventions specific to this project:
   — which the notes do not cover.
 - **`PidTagStoreState` and `PidTagLocaleId` answer `ecNotFound`** on both lab mailboxes, though
   [MS-OXCSTOR] §2.2.2.1.1 lists them as read-only properties of every private mailbox logon.
+- **Two different mailboxes report the same folder id for the same special folder.** Calendar is
+  `0x0D01000000000001` in both lab mailboxes, Contacts `0x0E01000000000001`, and so on for six of
+  the seven they have. A short-term id is only meaningful inside the logon that produced it, and
+  here the numbers are literally equal — so an id cached from one mailbox and used against another
+  opens a real folder and reports nothing at all. The entry ids differ, because their `Provider UID`
+  is the mailbox GUID; `FolderEntryId::belongs_to` is the check that uses it.
+- **The Reminders folder is not inside the IPM subtree.** It resolves to a folder a recursive walk
+  of the user-visible tree does not contain — which matches [MS-OXOSFLD] §3.1.1.1, where Reminders
+  sits directly under the Root folder as a sibling of Top of Personal Folders. A client that located
+  special folders by walking the tree Outlook shows would never find it.
+- **`PidTagContainerClass` does not always begin with `IPF.`,** though [MS-OXCFOLD] §2.2.2.2.2.3
+  says it must. [MS-OXOSFLD] §2.2.1's own table gives Reminders `Outlook.Reminder`, and a freshly
+  provisioned mailbox carries a folder whose class is the bare string `IPF`. Seventeen distinct
+  classes were observed in a mailbox holding no user data.
+- **The `Depth` flag is honoured.** A recursive read of the IPM subtree found the same 26 folders
+  as walking the hierarchy one `RopGetHierarchyTable` at a time, in both lab mailboxes, and every
+  row carried `PidTagParentFolderId`.
+- **Neither lab mailbox has an Archive folder**, so `PidTagIpmArchiveEntryId` is absent from the
+  Inbox. Reported as absent rather than as a failure: Exchange creates most special folders on
+  demand.
 
 ### Known gaps
 
@@ -56,7 +106,15 @@ Two conventions specific to this project:
   that move on every logon, so a capture of it would make `Verify-Fixtures.ps1` report a difference
   on every run and lose the one that mattered. Normalising a tagged property list is its own piece of
   work and belongs with the rest of the write-fixture harness.
-- **Only the Store object's properties are reachable.** Folders, messages and attachments come later.
+- **Messages and attachments are still unreachable as objects.** Store and Folder objects can be
+  read and written; `RopOpenMessage` and everything below it come later.
+- **The indexed special folders are not modelled.** Junk E-mail, Conflicts, Sync Issues, Local
+  Failures and Server Failures are entries inside `PidTagAdditionalRenEntryIds` ([MS-OXOSFLD]
+  §2.2.4) rather than properties of their own. A recursive hierarchy read still finds them by name
+  and by class; nothing resolves them by index yet.
+- **Delegate access reads the wrong object.** [MS-OXOSFLD] §2.2.3 says the entry-id properties come
+  from the Inbox for a mailbox's owner and from the Root folder for a delegate. This crate always
+  reads the Inbox, which is correct for the only case it can authenticate as.
 - **`PtypFloating64`, `PtypObject`, `PtypString8`, `PtypGuid`, `PtypMultipleInteger32` and
   `PtypMultipleString` have not been seen from a real server.** They are decoded per [MS-OXCDATA]
   §2.11.1 and unit-tested; no live measurement backs them yet.

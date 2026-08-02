@@ -2,24 +2,43 @@ use super::*;
 use crate::error::Error;
 use crate::oxcdata::{HIERARCHY_COLUMNS, PropertyTag, PropertyValue};
 
+/// One standard-form row of the six columns [`HIERARCHY_COLUMNS`] asks for.
 fn hierarchy_row(w: &mut Writer, folder_id: u64, name: &str) {
-    w.u8(0x00).u64(folder_id);
-    for unit in name.encode_utf16() {
-        w.u16(unit);
-    }
-    w.u16(0);
+    w.u8(0x00).u64(folder_id).u64(0x0D00_0000_0000_0001);
+    w.utf16_z(name);
+    w.utf16_z("IPF.Note");
     w.u32(3).u8(0);
 }
 
 #[test]
 fn get_table_requests_differ_only_in_their_opcode() {
     let mut hierarchy = Writer::new();
-    encode_get_table(&mut hierarchy, RopId::GET_HIERARCHY_TABLE, 1, 2);
+    encode_get_table(&mut hierarchy, RopId::GET_HIERARCHY_TABLE, 1, 2, 0x00);
     assert_eq!(hierarchy.finish(), vec![0x04, 0x00, 0x01, 0x02, 0x00]);
 
     let mut contents = Writer::new();
-    encode_get_table(&mut contents, RopId::GET_CONTENTS_TABLE, 1, 2);
+    encode_get_table(&mut contents, RopId::GET_CONTENTS_TABLE, 1, 2, 0x00);
     assert_eq!(contents.finish(), vec![0x05, 0x00, 0x01, 0x02, 0x00]);
+}
+
+/// `Depth` is bit `0x04` of `TableFlags`, and the only bit this crate ever sets there. Written out
+/// rather than taken from `FolderDepth::flags`, so a change to that constant fails here.
+///
+/// [MS-OXCFOLD] §2.2.1.13.1 — `Depth`
+#[test]
+fn a_recursive_hierarchy_read_sets_the_depth_bit_and_nothing_else() {
+    assert_eq!(FolderDepth::Immediate.flags(), 0x00);
+    assert_eq!(FolderDepth::Recursive.flags(), 0x04);
+
+    let mut w = Writer::new();
+    encode_get_table(
+        &mut w,
+        RopId::GET_HIERARCHY_TABLE,
+        1,
+        2,
+        FolderDepth::Recursive.flags(),
+    );
+    assert_eq!(w.finish(), vec![0x04, 0x00, 0x01, 0x02, 0x04]);
 }
 
 #[test]
@@ -29,8 +48,8 @@ fn set_columns_is_a_counted_array_of_tags() {
     let bytes = w.finish();
 
     assert_eq!(bytes.get(..4), Some(&[0x12, 0x00, 0x02, 0x00][..]));
-    assert_eq!(bytes.get(4..6), Some(&[0x04, 0x00][..]), "PropertyTagCount");
-    assert_eq!(bytes.len(), 4 + 2 + 4 * 4);
+    assert_eq!(bytes.get(4..6), Some(&[0x06, 0x00][..]), "PropertyTagCount");
+    assert_eq!(bytes.len(), 4 + 2 + 6 * 4);
     assert_eq!(
         bytes.get(6..10),
         Some(&PropertyTag::FOLDER_ID.as_u32().to_le_bytes()[..])
@@ -88,8 +107,11 @@ fn form_counts_report_what_the_server_chose() {
     let mut w = Writer::new();
     w.u8(Bookmark::Current.as_u8()).u16(2);
     hierarchy_row(&mut w, 0x11, "Standard");
+    // A flagged row of the same six columns, two of which the server declined to send.
     w.u8(0x01);
     w.u8(0x00).u64(0x22);
+    w.u8(0x00).u64(0x0D00_0000_0000_0001);
+    w.u8(0x01);
     w.u8(0x01);
     w.u8(0x00).u32(0);
     w.u8(0x00).u8(1);

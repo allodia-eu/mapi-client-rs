@@ -18,8 +18,8 @@ use core::borrow::Borrow;
 use std::vec;
 
 use mapi_proto::{
-    Bookmark, CONTENTS_COLUMNS, Execution, FolderId, HIERARCHY_COLUMNS, ObjectHandle, PropertyRow,
-    PropertyTag, RopBatch, RopResponse,
+    Bookmark, CONTENTS_COLUMNS, Execution, FolderDepth, FolderId, HIERARCHY_COLUMNS, ObjectHandle,
+    PropertyRow, PropertyTag, RopBatch, RopResponse,
 };
 
 use crate::connection::Connection;
@@ -35,13 +35,13 @@ use crate::logon::Folder;
 /// reported as [`Error::PageTooLarge`](crate::Error::PageTooLarge) rather than guessed at.
 const DEFAULT_PAGE_SIZE: u16 = 50;
 
-/// Which of the two tables a folder offers.
+/// Which of the two tables a folder offers, and how deep the hierarchy one reaches.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TableKind {
     /// The messages in the folder.
     Contents,
-    /// The folders directly inside it.
-    Hierarchy,
+    /// The folders inside it, to the given depth.
+    Hierarchy(FolderDepth),
 }
 
 impl TableKind {
@@ -49,7 +49,7 @@ impl TableKind {
     const fn default_columns(self) -> &'static [PropertyTag] {
         match self {
             Self::Contents => &CONTENTS_COLUMNS,
-            Self::Hierarchy => &HIERARCHY_COLUMNS,
+            Self::Hierarchy(_) => &HIERARCHY_COLUMNS,
         }
     }
 }
@@ -322,7 +322,7 @@ impl Rows<'_> {
         let folder = batch.open_folder(logon, start.folder);
         let table = match start.kind {
             TableKind::Contents => batch.contents_table(folder),
-            TableKind::Hierarchy => batch.hierarchy_table(folder),
+            TableKind::Hierarchy(depth) => batch.hierarchy_table(folder, depth),
         };
         batch
             .set_columns(table, &start.columns)
@@ -367,6 +367,20 @@ mod tests {
     #[test]
     fn each_table_has_a_sensible_default_column_set() {
         assert_eq!(TableKind::Contents.default_columns(), &CONTENTS_COLUMNS);
-        assert_eq!(TableKind::Hierarchy.default_columns(), &HIERARCHY_COLUMNS);
+        for depth in [FolderDepth::Immediate, FolderDepth::Recursive] {
+            assert_eq!(
+                TableKind::Hierarchy(depth).default_columns(),
+                &HIERARCHY_COLUMNS
+            );
+        }
+    }
+
+    /// A recursive hierarchy read has to carry the parent id, or its rows are a flat bag with no
+    /// way back to a tree — which is the one thing the `Depth` flag makes it easy to get wrong.
+    #[test]
+    fn the_default_hierarchy_columns_can_rebuild_a_tree() {
+        assert!(HIERARCHY_COLUMNS.contains(&PropertyTag::FOLDER_ID));
+        assert!(HIERARCHY_COLUMNS.contains(&PropertyTag::PARENT_FOLDER_ID));
+        assert!(HIERARCHY_COLUMNS.contains(&PropertyTag::CONTAINER_CLASS));
     }
 }
