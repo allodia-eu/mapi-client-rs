@@ -114,6 +114,7 @@ pub struct RopBatch {
     rops: Writer,
     handles: Vec<ObjectHandle>,
     columns: Vec<Option<Vec<PropertyTag>>>,
+    released: Vec<u8>,
     error: Option<Error>,
     count: usize,
 }
@@ -132,6 +133,7 @@ impl RopBatch {
             rops: Writer::new(),
             handles: Vec::new(),
             columns: Vec::new(),
+            released: Vec::new(),
             error: None,
             count: 0,
         }
@@ -222,9 +224,14 @@ impl RopBatch {
 
     /// Releases a handle the server is holding.
     ///
+    /// A released handle value is free for the server to hand out again, so the session forgets
+    /// any column set it had recorded against it. Without that, a recycled handle would silently
+    /// decode a new table's rows against the old table's columns.
+    ///
     /// [MS-OXCROPS] §2.2.15.3 — `RopRelease`
     pub fn release(&mut self, slot: HandleSlot) -> &mut Self {
         if self.check(slot) {
+            self.released.push(slot.index());
             self.push(|w| {
                 w.u8(RopId::RELEASE.as_u8()).u8(LOGON_ID).u8(slot.index());
             });
@@ -252,7 +259,12 @@ impl RopBatch {
         HandleSlot(index)
     }
 
-    /// Rejects a slot this batch never handed out, which would address an unrelated handle.
+    /// Rejects a slot index this batch has not allocated, which would address a handle-table entry
+    /// that does not exist.
+    ///
+    /// This is a range check, not proof of provenance: a slot from another batch whose index
+    /// happens to be in range passes, because a `HandleSlot` carries no batch identity. What it
+    /// does catch — and what the type exists for — is the index that was never allocated at all.
     fn check(&mut self, slot: HandleSlot) -> bool {
         if usize::from(slot.index()) < self.handles.len() {
             return true;
@@ -290,6 +302,7 @@ impl RopBatch {
             bytes: buffer.serialize()?,
             initial_handles: buffer.handles,
             columns: self.columns,
+            released: self.released,
         })
     }
 }
@@ -303,6 +316,9 @@ pub(crate) struct Built {
     pub(crate) initial_handles: Vec<ObjectHandle>,
     /// The column set each slot's table was given, indexed by slot.
     pub(crate) columns: Vec<Option<Vec<PropertyTag>>>,
+    /// The slots this batch asks the server to release, so the session can forget the column sets
+    /// of whichever handles they held.
+    pub(crate) released: Vec<u8>,
 }
 
 #[cfg(test)]

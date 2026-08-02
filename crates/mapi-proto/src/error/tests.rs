@@ -6,6 +6,7 @@ fn known_codes_carry_the_specs_own_names() {
     for (code, name, raw) in [
         (ErrorCode::SUCCESS, "Success", 0x0000_0000),
         (ErrorCode::UNKNOWN_USER, "UnknownUser", 0x0000_03EB),
+        (ErrorCode::WRONG_SERVER, "WrongServer", 0x0000_0478),
         (ErrorCode::LOGIN_PERMISSION, "LoginPermission", 0x0000_03F2),
         (ErrorCode::GENERAL_FAILURE, "GeneralFailure", 0x8000_4005),
         (ErrorCode::NOT_SUPPORTED, "NotSupported", 0x8004_0102),
@@ -67,10 +68,12 @@ fn errors_explain_themselves() {
         ),
         (
             Error::ConnectFailed {
+                status: 0,
                 code: ErrorCode::UNKNOWN_USER,
                 user_dn: dn,
             },
-            "Connect refused for /o=First/cn=alice: UnknownUser (0x000003EB)",
+            "Connect refused for /o=First/cn=alice (StatusCode 0x00000000): \
+             UnknownUser (0x000003EB)",
         ),
         (
             Error::InvalidState {

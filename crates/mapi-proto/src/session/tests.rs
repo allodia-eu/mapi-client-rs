@@ -119,12 +119,40 @@ fn a_refused_connect_names_the_distinguished_name() {
     assert_eq!(
         error,
         Error::ConnectFailed {
+            status: 0,
             code: ErrorCode::UNKNOWN_USER,
             user_dn: dn()
         }
     );
     assert!(error.to_string().contains("/o=First"));
     assert!(!session.is_connected());
+}
+
+/// A non-zero `StatusCode` means the body stops before `ErrorCode`, so the code is `Success` for
+/// want of anything else. Reporting only that would say "Connect refused: Success", which is the
+/// least useful sentence available — the status has to come along.
+///
+/// [MS-OXCMAPIHTTP] §2.2.4.1.3 — `Connect` failure response body
+#[test]
+fn a_connect_refused_before_its_body_reports_the_status_not_a_bare_success() {
+    let mut session = Session::new();
+    session.begin_connect(&dn()).unwrap();
+
+    let mut body = Writer::new();
+    body.u32(0x0000_000A);
+    let error = session
+        .on_response(&ok_headers(), &with_preamble(&body.finish()))
+        .unwrap_err();
+
+    assert_eq!(
+        error,
+        Error::ConnectFailed {
+            status: 0x0000_000A,
+            code: ErrorCode::SUCCESS,
+            user_dn: dn()
+        }
+    );
+    assert!(error.to_string().contains("0x0000000A"));
 }
 
 #[test]
@@ -249,6 +277,58 @@ fn a_tables_column_set_survives_into_the_next_round_trip() {
             .and_then(|row| row.string(PropertyTag::DISPLAY_NAME))
             .map(TableString::as_str),
         Some("Sent Items")
+    );
+}
+
+/// A released handle value is the server's to hand out again. If the session kept its column set,
+/// the next table given that same value would decode its rows against the previous table's
+/// columns — silently, as plausible-looking wrong values rather than as an error.
+#[test]
+fn releasing_a_table_forgets_the_columns_that_belonged_to_it() {
+    let mut session = connected();
+
+    // One: a table on handle 0x2C is given a column set, which the session records.
+    let mut batch = RopBatch::new();
+    let table = batch.bind(ObjectHandle::new(0x2C));
+    batch.set_columns(table, &HIERARCHY_COLUMNS);
+    session.execute(batch).unwrap();
+
+    let mut rops = Writer::new();
+    rops.u8(RopId::SET_COLUMNS.as_u8()).u8(0).u32(0).u8(0);
+    session
+        .on_response(
+            &ok_headers(),
+            &execute_payload(&rops.finish(), &[ObjectHandle::new(0x2C)]),
+        )
+        .unwrap();
+
+    // Two: the table is released. RopRelease has no response buffer, and the server empties the
+    // slot it held. [MS-OXCROPS] §2.2.15.3
+    let mut batch = RopBatch::new();
+    let table = batch.bind(ObjectHandle::new(0x2C));
+    batch.release(table);
+    session.execute(batch).unwrap();
+    session
+        .on_response(&ok_headers(), &execute_payload(&[], &[ObjectHandle::NONE]))
+        .unwrap();
+
+    // Three: the server hands 0x2C back out for a different table, and no RopSetColumns has been
+    // sent for it.
+    let mut batch = RopBatch::new();
+    let recycled = batch.bind(ObjectHandle::new(0x2C));
+    batch.query_rows(recycled, 1);
+    session.execute(batch).unwrap();
+
+    assert_eq!(
+        session.on_response(
+            &ok_headers(),
+            &execute_payload(
+                &query_rows_response(0, &[(0x11, "Inbox")]),
+                &[ObjectHandle::new(0x2C)],
+            ),
+        ),
+        Err(Error::UnknownColumns { handle_index: 0 }),
+        "a stale column set must not be reused for a recycled handle"
     );
 }
 
