@@ -73,7 +73,9 @@ mod wire;
 mod testing;
 
 pub use crate::error::{Error, ErrorCode, Result};
-pub use crate::http::{CookieJar, Headers, MetaTag, Payload, Request, RequestType, ResponseCode};
+pub use crate::http::{
+    CookieJar, Headers, Lcid, MetaTag, Payload, Request, RequestType, ResponseCode,
+};
 pub use crate::oxcdata::{
     CONTENTS_COLUMNS, Cell, FileTime, FolderId, Guid, HIERARCHY_COLUMNS, LegacyDn, MessageId,
     PropertyRow, PropertyTag, PropertyType, PropertyValue, ReplicaId, RowForm, TableString,

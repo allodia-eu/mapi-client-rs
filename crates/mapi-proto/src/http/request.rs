@@ -27,8 +27,65 @@ const CONNECT_NO_ADMIN_PRIVILEGE: u32 = 0x0000_0000;
 /// UTF-16 regardless, so this never decides an encoding in practice.
 const CONNECT_CODE_PAGE: u32 = 1252;
 
-/// `LcidSort` and `LcidString`: en-US.
-const CONNECT_LCID_EN_US: u32 = 0x0000_0409;
+/// A language code identifier: the locale a Session Context runs under.
+///
+/// `Connect` carries two of these and neither is negotiated. The success response body
+/// ([MS-OXCMAPIHTTP] §2.2.4.1.2) reports no locale back, and no ROP changes one afterwards, so
+/// whatever is sent at `Connect` is what the Session Context uses until it is torn down. That is
+/// why this is a connect-time decision rather than something read off the mailbox later.
+///
+/// This is *not* the mailbox's own configured locale, and does not become it. That one is a
+/// property of the Logon object — `PidTagLocaleId` for system-generated messages,
+/// `PidTagSortLocaleId` for table sorting — and is read after logon rather than set here.
+/// Connecting to an en-US mailbox under nl-NL was measured against Exchange Server SE
+/// `15.02.2562.045`: the hierarchy came back with its fifteen folder names byte-for-byte identical
+/// to the en-US session's, `Inbox` still `Inbox`. The locale sent here asks for the session's
+/// treatment of data; it does not translate what the mailbox already holds.
+///
+/// ```
+/// use mapi_proto::Lcid;
+///
+/// assert_eq!(Lcid::default(), Lcid::EN_US);
+/// assert_eq!(Lcid::new(0x0413).as_u32(), 0x0413); // nl-NL
+/// ```
+///
+/// [MS-LCID] — the identifier values themselves
+/// [MS-OXCMAPIHTTP] §2.2.4.1.1 — `LcidSort`, `LcidString`
+/// [MS-OXCSTOR] §2.2.2.1.1.12, §2.2.2.1.1.14 — `PidTagLocaleId`, `PidTagSortLocaleId`
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Lcid(u32);
+
+impl Lcid {
+    /// en-US, `0x0409` — this crate's default.
+    pub const EN_US: Self = Self(0x0000_0409);
+
+    /// Wraps a raw LCID as it appears on the wire.
+    ///
+    /// No validation happens here — [MS-LCID] assigns hundreds of values and which of them a
+    /// deployment supports is not a question a client can answer offline — and, measured, none
+    /// happens at the far end either: Exchange Server SE `15.02.2562.045` accepted `Connect` with
+    /// `0xDEADBEEF` and with `0` exactly as readily as with en-US, `X-ResponseCode: 0` every time.
+    ///
+    /// So a wrong identifier is not reported at connect time, and no ROP in [MS-OXCROPS] revisits
+    /// the subject. If it surfaces at all it surfaces wherever the server eventually consults it,
+    /// far from the call that set it. Send one you mean.
+    #[must_use]
+    pub const fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    /// The identifier as the little-endian `u32` the wire carries.
+    #[must_use]
+    pub const fn as_u32(self) -> u32 {
+        self.0
+    }
+}
+
+impl Default for Lcid {
+    fn default() -> Self {
+        Self::EN_US
+    }
+}
 
 /// `Execute`'s `Flags`: do not compress the response payload.
 ///
@@ -133,14 +190,18 @@ impl Request {
 
 /// Encodes a `Connect` request body.
 ///
+/// The two locales are written in the order the structure declares them: sorting first, everything
+/// else second. They are separate fields because they answer separate questions, and a client that
+/// swaps them sorts in one language and reads in another.
+///
 /// [MS-OXCMAPIHTTP] §2.2.4.1.1 — request body
-pub(crate) fn connect_body(user_dn: &LegacyDn) -> Vec<u8> {
+pub(crate) fn connect_body(user_dn: &LegacyDn, lcid_sort: Lcid, lcid_string: Lcid) -> Vec<u8> {
     let mut w = Writer::new();
     w.ascii_z(user_dn.as_str())
         .u32(CONNECT_NO_ADMIN_PRIVILEGE)
         .u32(CONNECT_CODE_PAGE)
-        .u32(CONNECT_LCID_EN_US)
-        .u32(CONNECT_LCID_EN_US)
+        .u32(lcid_sort.as_u32())
+        .u32(lcid_string.as_u32())
         .u32(EMPTY_AUXILIARY_BUFFER);
     w.finish()
 }
@@ -176,6 +237,7 @@ mod tests {
     #[test]
     fn connect_body_matches_the_spec_layout() {
         let dn = LegacyDn::new("/o=X").unwrap();
+        let body = connect_body(&dn, Lcid::EN_US, Lcid::EN_US);
 
         #[rustfmt::skip]
         let expected = vec![
@@ -186,8 +248,26 @@ mod tests {
             0x09, 0x04, 0x00, 0x00,         // LcidString = 0x0409
             0x00, 0x00, 0x00, 0x00,         // AuxiliaryBufferSize = 0
         ];
-        assert_eq!(connect_body(&dn), expected);
-        assert_eq!(connect_body(&dn).len(), 5 + 20);
+        assert_eq!(body, expected);
+        assert_eq!(body.len(), 5 + 20);
+    }
+
+    /// Two fields of the same type, side by side, is exactly the shape a swap hides in. Distinct
+    /// values on each side is what makes the order testable at all.
+    #[test]
+    fn connect_body_writes_sort_before_string() {
+        let dn = LegacyDn::new("/o=X").unwrap();
+        let body = connect_body(&dn, Lcid::new(0x0413), Lcid::new(0x0407));
+
+        assert_eq!(&body[13..17], &[0x13, 0x04, 0x00, 0x00]); // LcidSort = nl-NL
+        assert_eq!(&body[17..21], &[0x07, 0x04, 0x00, 0x00]); // LcidString = de-DE
+    }
+
+    #[test]
+    fn an_lcid_round_trips_its_raw_value() {
+        assert_eq!(Lcid::default(), Lcid::EN_US);
+        assert_eq!(Lcid::EN_US.as_u32(), 0x0000_0409);
+        assert_eq!(Lcid::new(0x0413).as_u32(), 0x0000_0413);
     }
 
     #[test]
