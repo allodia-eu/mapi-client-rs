@@ -1,7 +1,11 @@
 //! What a response turned out to be.
 
 use crate::error::ErrorCode;
-use crate::rop::{HandleSlot, LogonResponse, ObjectHandle, QueryRowsResponse, RopResponse};
+use crate::oxcdata::PropertySet;
+use crate::rop::{
+    HandleSlot, LogonResponse, ObjectHandle, PropertyProblemsResponse, QueryRowsResponse,
+    RopResponse,
+};
 
 /// What a response turned out to be.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -107,6 +111,25 @@ impl Execution {
     #[must_use]
     pub fn rows(&self) -> Option<&QueryRowsResponse> {
         self.responses.iter().find_map(RopResponse::as_query_rows)
+    }
+
+    /// The first set of properties, if the batch read any.
+    #[must_use]
+    pub fn properties(&self) -> Option<&PropertySet> {
+        self.responses.iter().find_map(RopResponse::as_properties)
+    }
+
+    /// The first per-property report, if the batch wrote or deleted any properties.
+    ///
+    /// Worth looking at even when the `Execute` and every ROP in it succeeded: a property that was
+    /// refused is reported here and nowhere else.
+    ///
+    /// [MS-OXCDATA] §2.7 — `PropertyProblem` structure
+    #[must_use]
+    pub fn property_problems(&self) -> Option<&PropertyProblemsResponse> {
+        self.responses
+            .iter()
+            .find_map(RopResponse::as_property_problems)
     }
 
     /// The first ROP the server refused, if any did.

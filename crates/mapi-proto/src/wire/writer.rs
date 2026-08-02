@@ -43,6 +43,20 @@ impl Writer {
         self.bytes(value.as_bytes()).u8(0)
     }
 
+    /// A null-terminated UTF-16LE string, as every `PtypString` value carries it.
+    ///
+    /// The terminator is two zero bytes, not one. A caller passing a string with an interior NUL
+    /// would produce a field that ends early and shifts every field after it, so the property
+    /// encoder rejects that before reaching here rather than writing it.
+    ///
+    /// [MS-OXCDATA] §2.11.1 — `PtypString`
+    pub(crate) fn utf16_z(&mut self, value: &str) -> &mut Self {
+        for unit in value.encode_utf16() {
+            self.u16(unit);
+        }
+        self.u16(0)
+    }
+
     /// The bytes written so far.
     pub(crate) fn finish(self) -> Vec<u8> {
         self.buf
@@ -74,6 +88,28 @@ mod tests {
         let mut w = Writer::new();
         w.ascii_z("/o=X");
         assert_eq!(w.finish(), b"/o=X\0");
+    }
+
+    /// A UTF-16 terminator is two zero bytes. One would leave a stray byte that shifts every
+    /// field after it — the failure that looks like a protocol bug somewhere else.
+    #[test]
+    fn utf16_z_appends_a_two_byte_terminator() {
+        let mut w = Writer::new();
+        w.utf16_z("Hi");
+        assert_eq!(w.finish(), vec![0x48, 0x00, 0x69, 0x00, 0x00, 0x00]);
+
+        let mut w = Writer::new();
+        w.utf16_z("");
+        assert_eq!(w.finish(), vec![0x00, 0x00]);
+    }
+
+    /// A character outside the basic multilingual plane is a surrogate pair, so the encoded length
+    /// is not the character count.
+    #[test]
+    fn utf16_z_encodes_a_surrogate_pair_as_two_units() {
+        let mut w = Writer::new();
+        w.utf16_z("\u{1F600}");
+        assert_eq!(w.finish(), vec![0x3D, 0xD8, 0x00, 0xDE, 0x00, 0x00]);
     }
 
     #[test]

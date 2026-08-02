@@ -1,8 +1,12 @@
 //! Property values, and the truncation a table quietly applies to strings.
 
-use crate::error::{Error, ErrorCode, Result};
-use crate::oxcdata::{FileTime, PropertyType};
-use crate::wire::Reader;
+use crate::error::ErrorCode;
+use crate::oxcdata::{FileTime, Guid, PropertyType};
+
+mod codec;
+
+#[cfg(test)]
+mod tests;
 
 /// The length at which a table string stops being trustworthy.
 ///
@@ -25,11 +29,15 @@ const TABLE_STRING_LIMIT: usize = 255;
 /// digits alone, so the ellipsis is the server's and not the sender's. The specification documents
 /// the length rule but not the ellipsis, so detection here uses the length.
 ///
+/// **Only a table truncates.** The same property read from the object itself comes back whole, or
+/// as `NotEnoughMemory` if it does not fit ([MS-OXCPRPT] §2.2.3.2), so a string that arrived that
+/// way is always [`Complete`](Self::Complete) however long it is.
+///
 /// [MS-OXCDATA] §2.8.2 — `PropertyRowSet` structures
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum TableString {
-    /// Shorter than the table limit, so this is the whole value.
+    /// Shorter than the table limit, or not read from a table at all. This is the whole value.
     Complete(String),
     /// Exactly at the table limit. The real value is likely longer; read the property from the
     /// message itself to get all of it.
@@ -81,26 +89,107 @@ impl TableString {
     }
 }
 
-/// One value from a row, of the type its column declared.
+impl From<&str> for TableString {
+    /// A string a caller built, which no server has had the chance to truncate.
+    fn from(text: &str) -> Self {
+        Self::Complete(text.to_owned())
+    }
+}
+
+impl From<String> for TableString {
+    /// A string a caller built, which no server has had the chance to truncate.
+    fn from(text: String) -> Self {
+        Self::Complete(text)
+    }
+}
+
+/// A `PtypFloating64` value, held as the eight bytes the wire carried.
+///
+/// The bits rather than an `f64` so that a [`PropertyValue`] can stay `Eq`, `Ord` and `Hash` —
+/// which the response types are compared and hashed by throughout this workspace, and which no
+/// type containing a bare `f64` can be. Two of these are equal when the server sent the same eight
+/// bytes, which is the question a wire codec is actually asked; [`as_f64`](Self::as_f64) hands back
+/// the number for arithmetic.
+///
+/// [MS-OXCDATA] §2.11.1 — `PtypFloating64`
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Floating64(u64);
+
+impl Floating64 {
+    /// Wraps the raw bit pattern as the wire carries it.
+    #[must_use]
+    pub const fn from_bits(bits: u64) -> Self {
+        Self(bits)
+    }
+
+    /// Wraps a number.
+    #[must_use]
+    pub const fn new(value: f64) -> Self {
+        Self(value.to_bits())
+    }
+
+    /// The bit pattern, which little-endian encoded is the wire form.
+    #[must_use]
+    pub const fn to_bits(self) -> u64 {
+        self.0
+    }
+
+    /// The number.
+    #[must_use]
+    pub const fn as_f64(self) -> f64 {
+        f64::from_bits(self.0)
+    }
+}
+
+impl core::fmt::Display for Floating64 {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.as_f64())
+    }
+}
+
+/// One value, of the type its tag or its column declared.
 ///
 /// [MS-OXCDATA] §2.11.2 — `PropertyValue` structure
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 #[non_exhaustive]
 pub enum PropertyValue {
+    /// A `PtypInteger16` value.
+    Integer16(u16),
     /// A `PtypInteger32` value.
     Integer32(u32),
     /// A `PtypInteger64` value.
     Integer64(u64),
+    /// A `PtypFloating64` value.
+    Floating64(Floating64),
     /// A `PtypBoolean` value.
     Boolean(bool),
     /// A `PtypString` value, with the table's truncation made visible.
     String(TableString),
+    /// A `PtypString8` value, decoded from the session's code page.
+    ///
+    /// Kept apart from [`String`](Self::String) because which one arrived is a fact about the
+    /// server's answer, and because an 8-bit value that failed to decode cleanly is worth being
+    /// able to see. [`as_string`](Self::as_string) answers for both, since a caller after a display
+    /// name has no reason to care.
+    ///
+    /// [MS-OXCDATA] §2.11.1.2 — string property values
+    String8(TableString),
     /// A `PtypTime` value.
     Time(FileTime),
+    /// A `PtypGuid` value.
+    Guid(Guid),
+    /// A `PtypBinary` value.
+    Binary(Vec<u8>),
+    /// A `PtypMultipleInteger32` value.
+    MultipleInteger32(Vec<u32>),
+    /// A `PtypMultipleString` value.
+    MultipleString(Vec<TableString>),
+    /// A `PtypMultipleBinary` value.
+    MultipleBinary(Vec<Vec<u8>>),
     /// The server returned an error code where a value was asked for.
     ///
-    /// Routine rather than exceptional in a table: it is how a value too large for a row comes
-    /// back. [MS-OXCDATA] §2.11.5 — `FlaggedPropertyValue` flag `0x0A`
+    /// Routine rather than exceptional: it is how a value too large for a row or for the response
+    /// buffer comes back. [MS-OXCDATA] §2.11.5 — `FlaggedPropertyValue` flag `0x0A`
     Error(ErrorCode),
     /// The property is not set on this row, and no value bytes were present.
     ///
@@ -109,6 +198,38 @@ pub enum PropertyValue {
 }
 
 impl PropertyValue {
+    /// The type a tag would have to declare to carry this value, or `None` for
+    /// [`Absent`](Self::Absent), which is the absence of one.
+    #[must_use]
+    pub const fn property_type(&self) -> Option<PropertyType> {
+        Some(match self {
+            Self::Integer16(_) => PropertyType::Integer16,
+            Self::Integer32(_) => PropertyType::Integer32,
+            Self::Integer64(_) => PropertyType::Integer64,
+            Self::Floating64(_) => PropertyType::Floating64,
+            Self::Boolean(_) => PropertyType::Boolean,
+            Self::String(_) => PropertyType::String,
+            Self::String8(_) => PropertyType::String8,
+            Self::Time(_) => PropertyType::Time,
+            Self::Guid(_) => PropertyType::Guid,
+            Self::Binary(_) => PropertyType::Binary,
+            Self::MultipleInteger32(_) => PropertyType::MultipleInteger32,
+            Self::MultipleString(_) => PropertyType::MultipleString,
+            Self::MultipleBinary(_) => PropertyType::MultipleBinary,
+            Self::Error(_) => PropertyType::ErrorCode,
+            Self::Absent => return None,
+        })
+    }
+
+    /// The value if it is a `PtypInteger16`.
+    #[must_use]
+    pub const fn as_u16(&self) -> Option<u16> {
+        match self {
+            Self::Integer16(value) => Some(*value),
+            _ => None,
+        }
+    }
+
     /// The value if it is a `PtypInteger32`.
     #[must_use]
     pub const fn as_u32(&self) -> Option<u32> {
@@ -127,6 +248,28 @@ impl PropertyValue {
         }
     }
 
+    /// The value if it is a `PtypInteger32`, read as the signed integer it sometimes is.
+    ///
+    /// [MS-OXCSTOR] documents a quota of `-1` as "no limit" in a field whose type is
+    /// `PtypInteger32`, so the same four bytes are a count in one property and a sentinel in
+    /// another. Both readings are offered rather than one being chosen for the caller.
+    #[must_use]
+    pub const fn as_i32(&self) -> Option<i32> {
+        match self {
+            Self::Integer32(value) => Some(value.cast_signed()),
+            _ => None,
+        }
+    }
+
+    /// The value if it is a `PtypFloating64`.
+    #[must_use]
+    pub const fn as_f64(&self) -> Option<f64> {
+        match self {
+            Self::Floating64(value) => Some(value.as_f64()),
+            _ => None,
+        }
+    }
+
     /// The value if it is a `PtypBoolean`.
     #[must_use]
     pub const fn as_bool(&self) -> Option<bool> {
@@ -136,11 +279,11 @@ impl PropertyValue {
         }
     }
 
-    /// The value if it is a `PtypString`.
+    /// The value if it is a string of either width.
     #[must_use]
     pub const fn as_string(&self) -> Option<&TableString> {
         match self {
-            Self::String(value) => Some(value),
+            Self::String(value) | Self::String8(value) => Some(value),
             _ => None,
         }
     }
@@ -154,6 +297,24 @@ impl PropertyValue {
         }
     }
 
+    /// The value if it is a `PtypGuid`.
+    #[must_use]
+    pub const fn as_guid(&self) -> Option<Guid> {
+        match self {
+            Self::Guid(value) => Some(*value),
+            _ => None,
+        }
+    }
+
+    /// The value if it is a `PtypBinary`.
+    #[must_use]
+    pub fn as_binary(&self) -> Option<&[u8]> {
+        match self {
+            Self::Binary(value) => Some(value),
+            _ => None,
+        }
+    }
+
     /// The error code, if the server sent one in place of a value.
     #[must_use]
     pub const fn as_error(&self) -> Option<ErrorCode> {
@@ -162,203 +323,45 @@ impl PropertyValue {
             _ => None,
         }
     }
-
-    /// Reads one value of the type its column declared.
-    ///
-    /// Values are not self-describing — the type comes from the column set, never from the bytes.
-    pub(crate) fn read(r: &mut Reader<'_>, property_type: PropertyType) -> Result<Self> {
-        Ok(match property_type {
-            PropertyType::Integer32 => Self::Integer32(r.u32()?),
-            PropertyType::ErrorCode => Self::Error(ErrorCode::new(r.u32()?)),
-            PropertyType::Boolean => Self::Boolean(r.u8()? != 0),
-            PropertyType::Integer64 => Self::Integer64(r.u64()?),
-            PropertyType::String => Self::String(TableString::from_table(r.utf16_z()?)),
-            PropertyType::Time => Self::Time(FileTime::new(r.u64()?)),
-            PropertyType::Unsupported(raw) => {
-                return Err(Error::UnsupportedPropertyType {
-                    property_type: raw,
-                    at: r.position(),
-                });
-            }
-        })
-    }
 }
 
 impl core::fmt::Display for PropertyValue {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
+            Self::Integer16(value) => write!(f, "{value}"),
             Self::Integer32(value) => write!(f, "{value}"),
             Self::Integer64(value) => write!(f, "0x{value:016X}"),
+            Self::Floating64(value) => write!(f, "{value}"),
             Self::Boolean(value) => write!(f, "{value}"),
-            Self::String(TableString::Complete(text)) => write!(f, "{text:?}"),
-            Self::String(TableString::Truncated(text)) => write!(f, "{text:?} (truncated)"),
+            Self::String(text) | Self::String8(text) => show_string(f, text),
             Self::Time(value) => write!(f, "FILETIME({})", value.as_u64()),
+            Self::Guid(value) => write!(f, "{value}"),
+            Self::Binary(bytes) => write!(f, "{} byte(s)", bytes.len()),
+            Self::MultipleInteger32(values) => write!(f, "{values:?}"),
+            Self::MultipleString(values) => {
+                f.write_str("[")?;
+                for (index, text) in values.iter().enumerate() {
+                    if index > 0 {
+                        f.write_str(", ")?;
+                    }
+                    show_string(f, text)?;
+                }
+                f.write_str("]")
+            }
+            Self::MultipleBinary(values) => {
+                let total: usize = values.iter().map(Vec::len).sum();
+                write!(f, "{} value(s), {total} byte(s)", values.len())
+            }
             Self::Error(code) => write!(f, "<{code}>"),
             Self::Absent => f.write_str("<absent>"),
         }
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn utf16_z(text: &str) -> Vec<u8> {
-        let mut out: Vec<u8> = text.encode_utf16().flat_map(u16::to_le_bytes).collect();
-        out.extend_from_slice(&[0x00, 0x00]);
-        out
-    }
-
-    #[test]
-    fn each_modelled_type_reads_its_own_width() {
-        let cases: [(PropertyType, &[u8], PropertyValue); 5] = [
-            (
-                PropertyType::Integer32,
-                &[0x07, 0x00, 0x00, 0x00],
-                PropertyValue::Integer32(7),
-            ),
-            (
-                PropertyType::Integer64,
-                &[0x01, 0, 0, 0, 0, 0, 0, 0x0D],
-                PropertyValue::Integer64(0x0D00_0000_0000_0001),
-            ),
-            (PropertyType::Boolean, &[0x01], PropertyValue::Boolean(true)),
-            (
-                PropertyType::Time,
-                &[0x9E, 0x71, 0x1A, 0x36, 0x5E, 0xD8, 0xDD, 0x01],
-                PropertyValue::Time(FileTime::new(0x01DD_D85E_361A_719E)),
-            ),
-            (
-                PropertyType::ErrorCode,
-                &[0x05, 0x03, 0x04, 0x80],
-                PropertyValue::Error(ErrorCode::TOO_BIG),
-            ),
-        ];
-
-        for (property_type, bytes, expected) in cases {
-            let mut r = Reader::new(bytes);
-            assert_eq!(
-                PropertyValue::read(&mut r, property_type).unwrap(),
-                expected
-            );
-            assert!(r.is_empty(), "{property_type} left bytes behind");
-        }
-    }
-
-    #[test]
-    fn accessors_answer_only_for_their_own_type() {
-        let value = PropertyValue::Integer32(7);
-        assert_eq!(value.as_u32(), Some(7));
-        assert_eq!(value.as_u64(), None);
-        assert_eq!(value.as_bool(), None);
-        assert_eq!(value.as_string(), None);
-        assert_eq!(value.as_time(), None);
-        assert_eq!(value.as_error(), None);
-
-        assert_eq!(PropertyValue::Boolean(true).as_bool(), Some(true));
-        assert_eq!(PropertyValue::Integer64(9).as_u64(), Some(9));
-        assert_eq!(
-            PropertyValue::Time(FileTime::new(4)).as_time(),
-            Some(FileTime::new(4))
-        );
-        assert_eq!(
-            PropertyValue::Error(ErrorCode::NOT_FOUND).as_error(),
-            Some(ErrorCode::NOT_FOUND)
-        );
-        assert_eq!(PropertyValue::Absent.as_u32(), None);
-    }
-
-    #[test]
-    fn a_short_string_is_complete() {
-        let bytes = utf16_z("Inbox");
-        let value = PropertyValue::read(&mut Reader::new(&bytes), PropertyType::String).unwrap();
-        let text = value.as_string().unwrap();
-        assert!(!text.is_truncated());
-        assert_eq!(text.complete(), Some("Inbox"));
-        assert_eq!(text.as_str(), "Inbox");
-        assert_eq!(value.to_string(), "\"Inbox\"");
-    }
-
-    /// Exchange truncates a table string at 255 characters and appends a literal `...`, with no
-    /// error code and no flag. The only signal is the length, so the decoder has to act on it.
-    #[test]
-    fn a_string_at_the_table_limit_is_reported_as_truncated() {
-        let long = format!("{}...", "x".repeat(252));
-        assert_eq!(long.chars().count(), 255);
-
-        let bytes = utf16_z(&long);
-        let value = PropertyValue::read(&mut Reader::new(&bytes), PropertyType::String).unwrap();
-        let text = value.as_string().unwrap();
-
-        assert!(text.is_truncated());
-        assert_eq!(text.complete(), None, "a truncated value is not the value");
-        assert_eq!(
-            text.as_str(),
-            long,
-            "the bytes received are still available"
-        );
-        assert!(value.to_string().ends_with("(truncated)"));
-    }
-
-    #[test]
-    fn one_character_short_of_the_limit_is_still_complete() {
-        let text = TableString::from_table("y".repeat(254));
-        assert!(!text.is_truncated());
-        assert_eq!(text.into_string().chars().count(), 254);
-    }
-
-    /// Counted in characters, not bytes: 255 emoji are four bytes each in UTF-8 and two units
-    /// each in UTF-16, and none of those numbers is the one the specification talks about.
-    #[test]
-    fn the_limit_counts_characters_not_bytes() {
-        assert!(TableString::from_table("é".repeat(255)).is_truncated());
-        assert!(!TableString::from_table("é".repeat(200)).is_truncated());
-    }
-
-    #[test]
-    fn an_unmodelled_type_stops_rather_than_guessing_a_length() {
-        let mut r = Reader::new(&[0u8; 8]);
-        assert_eq!(
-            PropertyValue::read(&mut r, PropertyType::new(0x0102)),
-            Err(Error::UnsupportedPropertyType {
-                property_type: 0x0102,
-                at: 0
-            })
-        );
-    }
-
-    #[test]
-    fn truncated_buffers_never_panic() {
-        for property_type in [
-            PropertyType::Integer32,
-            PropertyType::Integer64,
-            PropertyType::Boolean,
-            PropertyType::String,
-            PropertyType::Time,
-            PropertyType::ErrorCode,
-        ] {
-            for bytes in [&b""[..], &[0x01][..], &[0xFF, 0xFF, 0xFF][..]] {
-                let _ = PropertyValue::read(&mut Reader::new(bytes), property_type);
-            }
-        }
-    }
-
-    #[test]
-    fn values_render_for_humans() {
-        assert_eq!(PropertyValue::Integer32(42).to_string(), "42");
-        assert_eq!(
-            PropertyValue::Integer64(0x0D00_0000_0000_0001).to_string(),
-            "0x0D00000000000001"
-        );
-        assert_eq!(PropertyValue::Boolean(false).to_string(), "false");
-        assert_eq!(
-            PropertyValue::Time(FileTime::new(5)).to_string(),
-            "FILETIME(5)"
-        );
-        assert_eq!(
-            PropertyValue::Error(ErrorCode::TOO_BIG).to_string(),
-            "<TooBig (0x80040305)>"
-        );
-        assert_eq!(PropertyValue::Absent.to_string(), "<absent>");
+/// A string value, saying so when the table cut it short.
+fn show_string(f: &mut core::fmt::Formatter<'_>, text: &TableString) -> core::fmt::Result {
+    match text {
+        TableString::Complete(text) => write!(f, "{text:?}"),
+        TableString::Truncated(text) => write!(f, "{text:?} (truncated)"),
     }
 }

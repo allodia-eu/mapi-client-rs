@@ -17,7 +17,7 @@ use crate::http::{
     ResponseCode, connect_body, disconnect_body, execute_body,
 };
 use crate::oxcdata::{LegacyDn, PropertyTag};
-use crate::rop::{ObjectHandle, RopBatch, RopBuffer, decode_all};
+use crate::rop::{Decoding, ObjectHandle, RopBatch, RopBuffer, decode_all};
 
 mod builder;
 mod outcome;
@@ -52,10 +52,12 @@ const DEFAULT_GUID: &str = "{2EF33C39-49C8-421C-B876-CDF7F2AC3AA0}";
 enum Pending {
     /// Carries the distinguished name, so a refusal can name what failed to map.
     Connect(LegacyDn),
-    /// Carries each handle slot's column set, for decoding `RopQueryRows` responses, and the slots
-    /// the batch released, whose column sets must not outlive them.
+    /// Carries each handle slot's column set, for decoding `RopQueryRows` responses, the tag list
+    /// of each property fetch, for decoding those, and the slots the batch released, whose column
+    /// sets must not outlive them.
     Execute {
         columns: Vec<Option<Vec<PropertyTag>>>,
+        property_tags: Vec<Vec<PropertyTag>>,
         /// What each slot held when the batch was built, so a released slot can be resolved back
         /// to the handle whose columns are to be forgotten.
         handles: Vec<ObjectHandle>,
@@ -186,6 +188,7 @@ impl Session {
         let request = self.request(RequestType::Execute, execute_body(&built.bytes));
         self.pending = Some(Pending::Execute {
             columns: built.columns,
+            property_tags: built.property_tags,
             handles: built.initial_handles,
             released: built.released,
         });
@@ -273,9 +276,16 @@ impl Session {
             Pending::Connect(user_dn) => self.on_connect(payload.body(), user_dn),
             Pending::Execute {
                 columns,
+                property_tags,
                 handles,
                 released,
-            } => self.on_execute(payload.body(), &columns, &handles, &released),
+            } => self.on_execute(
+                payload.body(),
+                &columns,
+                &property_tags,
+                &handles,
+                &released,
+            ),
             Pending::Disconnect => {
                 self.connected = false;
                 self.cookies.clear();
@@ -310,6 +320,7 @@ impl Session {
         &mut self,
         body: &[u8],
         columns: &[Option<Vec<PropertyTag>>],
+        property_tags: &[Vec<PropertyTag>],
         handles: &[ObjectHandle],
         released: &[u8],
     ) -> Result<Outcome> {
@@ -322,7 +333,13 @@ impl Session {
         }
 
         let buffer = RopBuffer::parse(&response.rop_buffer)?;
-        let responses = decode_all(&buffer.rops, columns)?;
+        let responses = decode_all(
+            &buffer.rops,
+            Decoding {
+                columns,
+                property_tags,
+            },
+        )?;
         self.remember_columns(columns, &buffer.handles);
         self.forget_columns(released, handles, &buffer.handles);
 

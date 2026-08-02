@@ -55,8 +55,8 @@
 //!
 //! No compression (LZ77+DIRECT2), no `0xA5` obfuscation and no auxiliary buffers: every request
 //! asks the server to skip all three, and a server that ignores that is reported rather than
-//! guessed at. No Address Book endpoint, no notifications, no ICS. Basic table reads and folder
-//! walks are what v0.1 covers.
+//! guessed at. No Address Book endpoint, no notifications, no ICS. Table reads, folder walks and
+//! the property layer are what is covered so far.
 //!
 //! [`mapi-client`]: https://docs.rs/mapi-client
 //! [`mapi-autodiscover`]: https://docs.rs/mapi-autodiscover
@@ -77,11 +77,13 @@ pub use crate::http::{
     CookieJar, Headers, Lcid, MetaTag, Payload, Request, RequestType, ResponseCode,
 };
 pub use crate::oxcdata::{
-    CONTENTS_COLUMNS, Cell, FileTime, FolderId, Guid, HIERARCHY_COLUMNS, LegacyDn, MessageId,
-    PropertyRow, PropertyTag, PropertyType, PropertyValue, ReplicaId, RowForm, TableString,
+    CONTENTS_COLUMNS, Cell, FileTime, Floating64, FolderId, Guid, HIERARCHY_COLUMNS, LegacyDn,
+    MAILBOX_PROPERTIES, MessageId, PropertyProblem, PropertyRow, PropertySet, PropertySetIter,
+    PropertyTag, PropertyType, PropertyValue, ReplicaId, RowForm, TableString, TaggedValue,
 };
 pub use crate::rop::{
-    Bookmark, HandleSlot, LogonResponse, ObjectHandle, QueryRowsResponse, RopBatch, RopId,
-    RopResponse, TableStatus, WellKnownFolder,
+    Bookmark, GetPropertiesResponse, HandleSlot, LogonResponse, ObjectHandle,
+    PropertyProblemsResponse, QueryRowsResponse, RopBatch, RopId, RopResponse, TableStatus,
+    WellKnownFolder,
 };
 pub use crate::session::{Connected, Execution, Outcome, Session, SessionBuilder};
