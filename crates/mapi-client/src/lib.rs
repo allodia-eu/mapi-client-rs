@@ -49,6 +49,11 @@
 //! eight properties in one `Execute` and converts all eight in the next, so finding every one of
 //! them costs what finding one would.
 //!
+//! **What is *in* a calendar entry is one more still, and only once per session.** A start time, an
+//! end time and a location are named properties with no fixed ids; each store allocates its own.
+//! [`Logon::resolve_names`] asks for them all in one round trip and caches the answer, so the cost
+//! falls on the session rather than on every read.
+//!
 //! # What the types enforce
 //!
 //! * **One request in flight.** MAPI/HTTP allows exactly one per Session Context, and a violation
@@ -56,6 +61,10 @@
 //!   method that sends anything takes `&mut self`, so the borrow checker refuses the second one.
 //! * **A logon cannot outlive its session.** [`Connection::logon`] takes the connection by value,
 //!   and every folder read borrows from the [`Logon`].
+//! * **A named-property id cannot cross mailboxes.** Ids are allocated per store, and in the lab
+//!   every one of one mailbox's ids names a real, different property in the other — so the mistake
+//!   is answered with a plausible value rather than an error. [`NamedProperties`] carries the store
+//!   that issued its ids and cannot be given a foreign one.
 //! * **A failed round trip ends the connection.** When a request fails in transit there is no way
 //!   to know whether the server acted on it, so the connection reports [`Error::Poisoned`] rather
 //!   than sending the next request into an unknown state.

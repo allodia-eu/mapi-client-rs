@@ -137,6 +137,11 @@ expect the ids to differ; that expectation should be measured and recorded eithe
 A per-logon cache is needed regardless, since resolving names on every request would double the
 round trips for every calendar read.
 
+**Measured in Phase 3, and worse than the expectation above.** The ids differ in all ten places
+between the two lab mailboxes, and each of one mailbox's ids names a real, different, registered
+property in the other — so the mistake is not caught by an error, it is answered with a plausible
+value from the wrong property. The id type carries the mailbox GUID for that reason.
+
 ### F4 — Message objects, attachments and streams
 
 `RopOpenMessage` (`0x03`), `RopCreateMessage` (`0x06`), `RopSaveChangesMessage` (`0x0C`),
@@ -265,8 +270,35 @@ changes the plan:
   and without `PidTagContainerClass` a listing is names in a language the reader may not have. That
   is a breaking change to a public const, recorded in the changelog.
 
-**Phase 3 — Named properties.** F3, with the per-logon cache and the id-binding type. Ends with the
-`PSETID_Appointment` and `PSETID_Address` ids resolved and printed for both mailboxes.
+**Phase 3 — Named properties. Done.** F3, with the per-logon cache and the id-binding type.
+`mapi-cli named --verify` resolves the ten `PidLid`s the calendar and contact operations need,
+prints the id each store uses, and asks the store back what those ids are. Five things the phase
+turned up:
+
+- **The expectation that the ids differ was right, and the reason it matters is worse than
+  expected.** All ten differ between the lab mailboxes — but every one of `developer`'s ids is a
+  *real, different, registered* property in `developer2`: `PidLidLocation`'s id is
+  `PSETID_Address/IsFavorite` over there, `PidLidBusyStatus`'s is `DisplayNameFirstLast`, and
+  `PidLidEmail1EmailAddress`'s is `PS_PUBLIC_STRINGS/SkypeTeamsMeetingUrl`. Not one comes back
+  unmapped. So a cached id used against the wrong store reads a plausible value from the wrong
+  property with no error anywhere — the mirror image of Phase 2, where the folder ids collided
+  instead. `NamedPropertyId` carries the mailbox GUID and a `NamedProperties` map cannot hold a
+  foreign id at all.
+- **A `PropertyName` whose `Kind` is `0xFF` is one byte, not seventeen.** [MS-OXCDATA] §2.6.1's
+  diagram marks `GUID` as not optional; Exchange sends the `0xFF` and ends the ROP. Reading the
+  documented sixteen bytes runs off the end of the buffer, which is how it was found. Both facts are
+  recorded, and the shape is in the corpus.
+- **`RopGetNamesFromPropertyIds` was not in F3 and should have been.** The forward ROP answers a
+  bare array of numbers whose only claim to meaning is the server's ordering, so checking it against
+  itself proves nothing. The inverse is the only independent witness — and it is what turned the
+  `0xFF` deviation up on its first run.
+- **`NameSize` counts its own terminator**, which [MS-OXCPRPT] §4.1.1's worked example settles:
+  `0x14` for the nine-character `TestProp1`. It is also one byte, so a name past 126 UTF-16 units
+  cannot be carried at all — refused rather than truncated, because a truncated name resolves to a
+  different property.
+- **The LID is not the id**, in either mailbox. Obvious in retrospect and worth stating: a client
+  that skipped the lookup and used `PidLidLocation`'s documented `0x8208` would read something else
+  entirely.
 
 **Phase 4 — Reading items.** `RopOpenMessage`, property reads on messages, streams for large
 values, the attachment table and attachment reads, and `RopSortTable`/`RopRestrict` for ordered and
