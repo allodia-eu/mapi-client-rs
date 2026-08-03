@@ -91,6 +91,7 @@ mod builder;
 mod client;
 mod connection;
 mod credentials;
+mod folder;
 mod logon;
 mod observer;
 mod properties;
@@ -127,7 +128,8 @@ pub use crate::client::MapiClient;
 pub use crate::connection::Connection;
 pub use crate::credentials::Credentials;
 pub use crate::error::{Error, Result};
-pub use crate::logon::{Folder, Logon};
+pub use crate::folder::Folder;
+pub use crate::logon::Logon;
 pub use crate::observer::{Exchange, Observer};
 pub use crate::properties::Properties;
 pub use crate::special::{

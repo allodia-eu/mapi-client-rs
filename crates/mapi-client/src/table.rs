@@ -24,7 +24,7 @@ use mapi_proto::{
 
 use crate::connection::Connection;
 use crate::error::Result;
-use crate::logon::Folder;
+use crate::folder::Folder;
 
 /// Rows per round trip, unless the caller says otherwise.
 ///
