@@ -27,14 +27,15 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: `0.1.0` released, with the property layer and the special folders landed since.** What
-> works is what the corpus proves: locate an endpoint by Autodiscover, connect, log on, walk the
-> folder hierarchy — the whole of it in one table, tagged by container class — read or write the
-> Store object's and any folder's own properties, find the Calendar, Contacts, Drafts, Tasks, Notes
-> and Journal folders that the logon does not name, and page a contents table with the columns you
-> choose. All verified against Exchange Server SE `15.02.2562.045`. What is missing is everything
-> about messages, and `Negotiate`/`NTLM` authentication. The gaps are stated below and in the
-> changelog rather than left to be discovered.
+> **Status: `0.1.0` released, with the property layer, the special folders and named properties
+> landed since.** What works is what the corpus proves: locate an endpoint by Autodiscover, connect,
+> log on, walk the folder hierarchy — the whole of it in one table, tagged by container class — read
+> or write the Store object's and any folder's own properties, find the Calendar, Contacts, Drafts,
+> Tasks, Notes and Journal folders that the logon does not name, resolve the `PidLid` properties a
+> calendar entry is made of to the ids one store uses for them, and page a contents table with the
+> columns you choose. All verified against Exchange Server SE `15.02.2562.045`. What is missing is
+> everything about messages, and `Negotiate`/`NTLM` authentication. The gaps are stated below and in
+> the changelog rather than left to be discovered.
 
 ## Install
 
@@ -144,6 +145,12 @@ until you measure two mailboxes and find the *same* number naming each one's Cal
 carried across mailboxes opens a real folder and reports nothing wrong, so the entry ids that
 resolve to those folders keep the mailbox GUID that issued them and `FolderEntryId::belongs_to`
 answers the question before a conversion is asked for.
+
+The same rule bites harder for named properties, and the lab says so both ways round. Every one of
+the ten `PidLid`s a calendar entry needs is numbered differently in the two lab mailboxes — and each
+of the first mailbox's ids names a real, different, registered property in the second, so the
+mistake is answered with a plausible value rather than an error. A `NamedPropertyId` therefore
+carries the store that issued it, and the map a `Logon` hands back cannot hold a foreign one at all.
 
 **Failures name what to do about them.** A 401 reports the schemes the server offered alongside the
 one that was sent, because "the password is wrong" and "this client cannot speak any scheme this

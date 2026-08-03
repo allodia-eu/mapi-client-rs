@@ -57,7 +57,8 @@
 //! asks the server to skip all three, and a server that ignores that is reported rather than
 //! guessed at. No Address Book endpoint, no notifications, no ICS, and no Message or Attachment
 //! objects. Table reads, folder walks — including the recursive kind and the entry-id chain that
-//! reaches the folders a logon does not name — and the property layer are what is covered so far.
+//! reaches the folders a logon does not name — the property layer, and the named-property lookup
+//! every calendar read depends on are what is covered so far.
 //!
 //! [`mapi-client`]: https://docs.rs/mapi-client
 //! [`mapi-autodiscover`]: https://docs.rs/mapi-autodiscover

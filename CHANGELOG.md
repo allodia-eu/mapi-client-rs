@@ -57,6 +57,21 @@ Two conventions specific to this project:
   the two are one question.
 - **Six more captured exchanges per session** — a recursive hierarchy read across two pages, both
   halves of the entry-id chain, and a property read on the Calendar it found.
+- **Named properties.** `RopGetPropertyIdsFromNames` and `RopGetNamesFromPropertyIds`, with
+  `PropertyName`, `PropertySetId` and a catalogue of the ten `PidLid`s the calendar and contact
+  operations need. Everything about a calendar event is a named property — start, end, location,
+  busy status — and none of them has a fixed property id, so this is the step every calendar read
+  now depends on. `mapi-cli named --verify` prints what one store numbers them as and then asks the
+  store back what those numbers are.
+- **`Logon::resolve_names()` caches per session.** [MS-OXCPRPT] §3.1.2 allows it, and a calendar
+  listing that re-resolved its columns would double its round trips for ever. Asking for names
+  already known sends nothing at all.
+- **A resolved id is bound to the store that issued it.** `NamedPropertyId` carries the mailbox GUID
+  and offers `belongs_to`; a `NamedProperties` map cannot hold an id from another mailbox at all.
+  See the measurement below for what carrying one across mailboxes actually costs.
+- **Two more captured exchanges per session**, covering three response shapes nothing else in the
+  corpus carried: a name the store would not map, an id below `0x8000` answered out of `PS_MAPI`,
+  and an id with no name at all.
 
 ### Changed
 
@@ -66,8 +81,32 @@ Two conventions specific to this project:
   may not have.
 - **`RopBatch::hierarchy_table` takes a `FolderDepth`.** The immediate children and the whole
   subtree are different questions and a default would answer one of them silently.
+- **`PropertyName::read` answers an `Option`, and there is no "unnamed" kind to construct.** An id a
+  store has no name for is the absence of a name, not a name that is absent — see the measurement
+  below.
 
 ### Measured against Exchange Server SE `15.02.2562.045`
+
+- **A `PropertyName` whose `Kind` is `0xFF` is one byte, not seventeen.** [MS-OXCDATA] §2.6.1's
+  packet diagram marks `LID`, `NameSize` and `Name` optional and `GUID` not, so read literally an
+  entry for an id with no name would still carry sixteen bytes of property set. Exchange sends none:
+  asked for the name of the unregistered id `0xFFFE`, it framed a 30-byte ROP whose `RopSize` ends
+  on the `0xFF` itself. Reading the specification's sixteen bytes there consumes whatever follows —
+  which is how this was found, by running off the end of a buffer. The deviation is in the fixture
+  corpus, so CI checks it rather than the diagram.
+- **The two lab mailboxes number all ten named properties differently, and every one of one
+  mailbox's ids means a real, different property in the other.** `PidLidLocation` is `0x8178` in
+  `developer` and `0x815B` in `developer2`; `developer`'s `0x8178` is `PSETID_Address/IsFavorite`
+  over there, its `PidLidBusyStatus` id is `DisplayNameFirstLast`, and its
+  `PidLidEmail1EmailAddress` id is `PS_PUBLIC_STRINGS/SkypeTeamsMeetingUrl`. Not one of the ten is
+  unmapped in the other store. So a client that carried an id across mailboxes would read a
+  plausible value from the wrong property with no error anywhere — the exact opposite of the folder
+  ids above, where the numbers collided instead.
+- **The LID is not the id.** `PidLidLocation` has LID `0x8208` and neither lab mailbox numbers it
+  that. A client that skipped the lookup and used the LID would be reading something else.
+- **A lookup with the create flag off registers nothing.** An invented `PS_PUBLIC_STRINGS` name
+  answers `0x0000` and is still unregistered in a fresh session, which is what makes it safe for the
+  capture to ask.
 
 - **`RopGetPropertiesAll` does not return every readable property.** It returns the properties *on*
   the object ([MS-OXCPRPT] §3.2.5.2); computed ones need an explicit fetch (§3.2.5.1). A private
@@ -118,6 +157,18 @@ Two conventions specific to this project:
 - **`PtypFloating64`, `PtypObject`, `PtypString8`, `PtypGuid`, `PtypMultipleInteger32` and
   `PtypMultipleString` have not been seen from a real server.** They are decoded per [MS-OXCDATA]
   §2.11.1 and unit-tested; no live measurement backs them yet.
+- **Nothing registers a named property.** `NameRegistration::CreateIfMissing` exists and is encoded;
+  every call this workspace makes passes `Existing`, because a read that quietly writes to the
+  store's mapping table is a poor sort of read. Writing a named property nothing has written before
+  will need the other one.
+- **A string-named property in a *response* is not in the fixture corpus.** Every catalogued
+  property is named by a LID, and the string-named ones a store holds are numbered differently in
+  each mailbox, so there is no id to ask about that would be stable enough to commit. The encoder
+  for that form is checked against [MS-OXCPRPT] §4.1.1's own bytes, and the decoder was exercised
+  live against both mailboxes.
+- **Named properties are resolved but not yet read.** The ids are available and nothing uses them to
+  fetch a value: `RopOpenMessage` and the message object come later, and a calendar event's start
+  time lives on a message.
 
 ## [0.1.0] - 2026-08-02
 
