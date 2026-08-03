@@ -183,6 +183,7 @@ foreach ($identity in $Mailbox) {
         Lcid      = $lcid
         Endpoint  = "$($vdir.InternalUrl)/emsmdb/?MailboxId=$($box.ExchangeGuid)@$domain"
         Scenario  = "session-$($language.ToLowerInvariant())"
+        Items     = "items-$($language.ToLowerInvariant())"
     })
 
     Write-Host "    $identity  $language (LCID 0x$('{0:x4}' -f $lcid))  ->  session-$($language.ToLowerInvariant())"
@@ -277,14 +278,24 @@ function Invoke-Capture {
 
 try {
     foreach ($target in $targets) {
-        Write-Step "Capturing $($target.Scenario) from $($target.Identity)"
-        Invoke-Capture -Scenario 'session' -Name $target.Scenario -Environment @{
+        $environment = @{
             MAPI_LIVE_ENDPOINT = $target.Endpoint
             MAPI_LIVE_USER_DN  = $target.Dn
             MAPI_LIVE_USERNAME = $target.Smtp
             MAPI_LIVE_PASSWORD = $Password
             MAPI_LIVE_LOCALE   = "0x$('{0:x4}' -f $target.Lcid)"
         }
+
+        Write-Step "Capturing $($target.Scenario) from $($target.Identity)"
+        Invoke-Capture -Scenario 'session' -Name $target.Scenario -Environment $environment
+
+        # The items scenario needs a mailbox seeded by Add-LabItems.ps1: a calendar with events in
+        # it, a contacts folder with email addresses, and one message with a large body and one
+        # attachment of each kind. It refuses to write a capture that would carry an empty calendar
+        # or a body small enough to fit a single read, so a mailbox that has not been seeded fails
+        # here by name rather than producing a corpus that proves nothing.
+        Write-Step "Capturing $($target.Items) from $($target.Identity)"
+        Invoke-Capture -Scenario 'items' -Name $target.Items -Environment $environment
     }
 
     if (-not $SkipRefused) {

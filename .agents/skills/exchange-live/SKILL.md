@@ -92,10 +92,22 @@ When it reports a difference, in rough order of likelihood:
 ```powershell
 powershell.exe -File scripts\Initialize-ExchangeLab.ps1 `
     -Mailbox developer:en-US,developer2:nl-NL -Password '<password>' -EnableBasic -Seed
+
+powershell.exe -File scripts\Add-LabItems.ps1 -Mailbox developer,developer2 -Password '<password>'
 ```
 
 Two things a lab needs that are not the default: **Basic** on the MAPI virtual directory, because
 that is the only scheme `mapi-client` implements, and **two mailboxes in different languages**.
+
+The second command is what an *item* read needs, and the first cannot do it: `-Seed` sends mail,
+which is all a folder-and-table client ever needed. `Add-LabItems.ps1` adds four appointments, three
+contacts, and one message with a 60 KB body and one attachment of each of the two kinds — through
+EWS, deliberately, because a corpus this client built for itself would prove nothing about this
+client.
+
+**Seeding adds; it does not reset.** Both the live suite and the `items` capture assert exact
+counts, so run it against a mailbox that does not already hold them. Both say which script to run
+when they find nothing, rather than reporting an empty calendar as a passing read.
 
 ## Things that have already cost time here
 
