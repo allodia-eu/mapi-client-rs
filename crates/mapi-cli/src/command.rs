@@ -6,8 +6,9 @@
 use std::collections::HashMap;
 
 use mapi_client::{
-    ContainerClass, EmailAddress, FOLDER_PROPERTIES, FolderId, Logon, PropertyRow, PropertyTag,
-    PropertyValue, SpecialFolder, SpecialFolderState, TableString, WellKnownFolder,
+    ContainerClass, EmailAddress, FOLDER_PROPERTIES, FolderId, Logon, NamedProperty,
+    NamedPropertyEntry, NamedPropertyId, PropertyName, PropertyRow, PropertyTag, PropertyValue,
+    SpecialFolder, SpecialFolderState, TableString, WellKnownFolder,
 };
 
 use crate::settings::Connection;
@@ -200,6 +201,120 @@ pub(crate) async fn special(connection: &Connection, details: bool) -> Result<()
     }
 
     logon.disconnect().await?;
+    Ok(())
+}
+
+/// Ask what this store calls each named property, then ask it back the other way.
+///
+/// The round trip *back* is the point. A `RopGetPropertyIdsFromNames` response is a bare array of
+/// numbers whose only claim to meaning is the order the server put them in; feeding each one to
+/// `RopGetNamesFromPropertyIds` and checking that the name that comes back is the name that went in
+/// is the only independent evidence that the pairing is right.
+pub(crate) async fn named(
+    connection: &Connection,
+    verify: bool,
+    ids: &[String],
+) -> Result<(), Failure> {
+    let foreign = ids
+        .iter()
+        .map(|id| parse_property_id(id))
+        .collect::<Result<Vec<_>, Failure>>()?;
+    let client = connection.client()?;
+    let mut logon = client.connect().await?.logon().await?;
+    let mailbox_guid = logon.mailbox().mailbox_guid();
+
+    let resolved = logon.resolve_names(NamedProperty::ALL).await?;
+    let entries: Vec<NamedPropertyEntry> = resolved.iter().cloned().collect();
+    let mapped = resolved.mapped();
+
+    println!("named properties, as this store numbers them");
+    println!("  mailbox {mailbox_guid}");
+    for (property, entry) in NamedProperty::ALL.into_iter().zip(&entries) {
+        println!(
+            "  {:<28} {:<22} {}",
+            property,
+            entry
+                .id()
+                .map_or_else(|| "not mapped".to_owned(), |id| id.to_string()),
+            property.property_type()
+        );
+    }
+    println!(
+        "  {mapped} of {} mapped. These ids are this mailbox's own: the same number means a \
+         different property in another store.",
+        entries.len()
+    );
+
+    if verify {
+        verify_ids(&mut logon, &entries).await?;
+    }
+
+    if !foreign.is_empty() {
+        println!();
+        println!("what this store calls the ids you named");
+        for (id, name) in foreign.iter().zip(logon.names_of(&foreign).await?) {
+            println!(
+                "  0x{id:04X} -> {}",
+                name.map_or_else(
+                    || "no name in this store".to_owned(),
+                    |name| name.to_string()
+                )
+            );
+        }
+        println!(
+            "  An id resolved against another mailbox is a number, not a property. Whatever came \
+             back above is what reading with it would actually have read."
+        );
+    }
+
+    logon.disconnect().await?;
+    Ok(())
+}
+
+/// Turns a `0x8186` argument into a property id.
+fn parse_property_id(id: &str) -> Result<u16, Failure> {
+    let hexadecimal = id
+        .strip_prefix("0x")
+        .or_else(|| id.strip_prefix("0X"))
+        .ok_or_else(|| Failure::from(format!("`{id}` is not a property id; write it as 0x...")))?;
+
+    u16::from_str_radix(hexadecimal, 16)
+        .map_err(|_| Failure::from(format!("`{id}` is not a property id; write it as 0x...")))
+}
+
+/// Asks the store what each resolved id is called, and reports any that answered something else.
+async fn verify_ids(logon: &mut Logon, entries: &[NamedPropertyEntry]) -> Result<(), Failure> {
+    let asked: Vec<(&PropertyName, NamedPropertyId)> = entries
+        .iter()
+        .filter_map(|entry| Some((entry.name(), entry.id()?)))
+        .collect();
+    let ids: Vec<u16> = asked.iter().map(|(_, id)| id.as_u16()).collect();
+    let answered = logon.names_of(&ids).await?;
+
+    println!();
+    println!("what the store says those ids are");
+    let mut disagreed = 0_usize;
+    for (index, (wanted, id)) in asked.iter().enumerate() {
+        let back = answered.get(index).and_then(Option::as_ref);
+        let agrees = back == Some(*wanted);
+        if !agrees {
+            disagreed = disagreed.saturating_add(1);
+        }
+        println!(
+            "  {id} {} {}",
+            if agrees { "->" } else { "!!" },
+            back.map_or_else(|| "no name in this store".to_owned(), ToString::to_string)
+        );
+    }
+
+    if disagreed > 0 {
+        return Err(Failure::from(format!(
+            "{disagreed} id(s) came back as a different property than the one they were resolved \
+             for. Either the response ordering is not what [MS-OXCPRPT] §2.2.12.2 requires, or \
+             this client paired them wrongly."
+        )));
+    }
+    println!("  every id round-trips to the name it was resolved for");
     Ok(())
 }
 

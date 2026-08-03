@@ -22,14 +22,18 @@
 use core::time::Duration;
 
 use mapi_client::{
-    Credentials, LegacyDn, MAILBOX_PROPERTIES, MapiClient, PropertyTag, PropertyValue, TableString,
-    TaggedValue, WellKnownFolder,
+    Credentials, LegacyDn, MAILBOX_PROPERTIES, MapiClient, MapiClientBuilder, PropertyTag,
+    PropertyValue, TableString, TaggedValue, WellKnownFolder,
 };
 
 /// The entry-id chain, the `Depth` flag and the identifier conversions — the folders `RopLogon`
 /// never names. Its own file because it is its own question, and because this one is at the
 /// workspace's 500-line limit.
 mod folders;
+
+/// The ids a store allocates for named properties, and what carrying one across mailboxes costs.
+/// Its own file for the same two reasons.
+mod named;
 
 /// Reads one of the variables that describe the lab, failing with the name of the missing one.
 ///
@@ -41,7 +45,13 @@ fn required(name: &str) -> String {
     })
 }
 
-fn client() -> MapiClient {
+/// The lab client, stopping one step short of `build` so a test can add its own.
+///
+/// Split out because an [`Observer`](mapi_client::Observer) is a builder step and not something
+/// that can be attached afterwards: a test that counts round trips has to reach the builder, and
+/// the only other way to do that is to name every lab variable a second time — which is how the
+/// two copies drift apart, and the copy that is wrong is the one nobody runs.
+fn builder() -> MapiClientBuilder {
     MapiClient::builder()
         .endpoint(required("MAPI_LIVE_ENDPOINT"))
         .user_dn(LegacyDn::new(required("MAPI_LIVE_USER_DN")).expect("a usable legacyExchangeDN"))
@@ -50,8 +60,10 @@ fn client() -> MapiClient {
             required("MAPI_LIVE_PASSWORD"),
         ))
         .timeout(Duration::from_secs(30))
-        .build()
-        .expect("a client")
+}
+
+fn client() -> MapiClient {
+    builder().build().expect("a client")
 }
 
 /// `Connect`, `RopLogon`, both kinds of table, paging, and `Disconnect` — the whole path this
