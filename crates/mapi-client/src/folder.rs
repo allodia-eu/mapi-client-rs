@@ -4,11 +4,13 @@
 //! [`Logon`](crate::Logon) it came from; the ROP that opens it travels in the same buffer as the
 //! read that follows, so naming a folder costs nothing and reading one costs a single round trip.
 
-use mapi_proto::{FolderDepth, FolderId, ObjectHandle};
+use mapi_proto::{FolderDepth, FolderId, MessageId, ObjectHandle};
 
 use crate::connection::Connection;
+use crate::message::Message;
 use crate::properties::Properties;
 use crate::table::{TableKind, TableRead};
+use crate::target::Target;
 
 /// A folder that has been named but not yet opened.
 ///
@@ -41,7 +43,37 @@ impl<'a> Folder<'a> {
     /// [MS-OXCROPS] §2.2.4.14 — `RopGetContentsTable`
     #[must_use]
     pub fn contents(self) -> TableRead<'a> {
-        TableRead::new(self, TableKind::Contents)
+        let target = self.target();
+        TableRead::new(self.connection, target, TableKind::Contents)
+    }
+
+    /// One message in this folder, ready to be opened.
+    ///
+    /// The id comes from a row of [`contents`](Self::contents) — `PidTagMid`, which
+    /// [`PropertyRow::message_id`](mapi_proto::PropertyRow::message_id) reads.
+    ///
+    /// ```no_run
+    /// # use mapi_client::{Logon, MESSAGE_PROPERTIES, PropertyRow, WellKnownFolder};
+    /// # async fn example(logon: &mut Logon) -> Result<(), mapi_client::Error> {
+    /// let inbox = logon.folder_id(WellKnownFolder::Inbox)?;
+    /// let rows = logon.folder(inbox).contents().collect().await?;
+    /// if let Some(id) = rows.first().and_then(PropertyRow::message_id) {
+    ///     let details = logon
+    ///         .folder(inbox)
+    ///         .message(id)
+    ///         .properties()
+    ///         .read(MESSAGE_PROPERTIES)
+    ///         .await?;
+    ///     println!("{} propert(y/ies)", details.len());
+    /// }
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [MS-OXCROPS] §2.2.6.1 — `RopOpenMessage`
+    #[must_use]
+    pub fn message(self, id: MessageId) -> Message<'a> {
+        Message::new(self.connection, self.logon, self.id, id)
     }
 
     /// The folders directly inside this one — its hierarchy table.
@@ -52,7 +84,12 @@ impl<'a> Folder<'a> {
     /// [MS-OXCROPS] §2.2.4.13 — `RopGetHierarchyTable`
     #[must_use]
     pub fn subfolders(self) -> TableRead<'a> {
-        TableRead::new(self, TableKind::Hierarchy(FolderDepth::Immediate))
+        let target = self.target();
+        TableRead::new(
+            self.connection,
+            target,
+            TableKind::Hierarchy(FolderDepth::Immediate),
+        )
     }
 
     /// Every folder below this one, at every level, in one table.
@@ -86,7 +123,12 @@ impl<'a> Folder<'a> {
     /// [MS-OXCFOLD] §2.2.1.13.1 — `TableFlags`, `Depth`
     #[must_use]
     pub fn descendants(self) -> TableRead<'a> {
-        TableRead::new(self, TableKind::Hierarchy(FolderDepth::Recursive))
+        let target = self.target();
+        TableRead::new(
+            self.connection,
+            target,
+            TableKind::Hierarchy(FolderDepth::Recursive),
+        )
     }
 
     /// This folder's own properties — what it is, what it holds, and where it sits.
@@ -115,5 +157,12 @@ impl<'a> Folder<'a> {
     #[must_use]
     pub fn properties(self) -> Properties<'a> {
         Properties::for_folder(self.connection, self.logon, self.id)
+    }
+
+    const fn target(&self) -> Target {
+        Target::Folder {
+            logon: self.logon,
+            id: self.id,
+        }
     }
 }

@@ -207,7 +207,7 @@ fn refusal(response: &RopResponse, during: &'static str) -> Option<Error> {
             during,
             code: *code,
         }),
-        RopResponse::BufferTooSmall { size_needed } => Some(Error::PageTooLarge {
+        RopResponse::BufferTooSmall { size_needed } => Some(Error::ResponseTooLarge {
             size_needed: *size_needed,
         }),
         RopResponse::Backoff { duration_ms } => Some(Error::Backoff {
@@ -248,7 +248,7 @@ mod tests {
         let too_big = RopResponse::BufferTooSmall { size_needed: 4096 };
         assert!(matches!(
             refusal(&too_big, "x"),
-            Some(Error::PageTooLarge { size_needed: 4096 })
+            Some(Error::ResponseTooLarge { size_needed: 4096 })
         ));
 
         let busy = RopResponse::Backoff { duration_ms: 5000 };

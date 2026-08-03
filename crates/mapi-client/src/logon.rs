@@ -3,14 +3,15 @@
 use core::borrow::Borrow;
 
 use mapi_proto::{
-    Connected, FolderEntryId, FolderId, LogonResponse, LongTermId, NameRegistration, ObjectHandle,
-    PropertyIdsResponse, PropertyName, PropertySet, PropertyValue, RopBatch, RopResponse,
-    SPECIAL_FOLDER_PROPERTIES, ShortTermId, SpecialFolder, WellKnownFolder,
+    Connected, FolderEntryId, FolderId, LogonResponse, LongTermId, MessageId, NameRegistration,
+    ObjectHandle, PropertyIdsResponse, PropertyName, PropertySet, PropertyValue, RopBatch,
+    RopResponse, SPECIAL_FOLDER_PROPERTIES, ShortTermId, SpecialFolder, WellKnownFolder,
 };
 
 use crate::connection::Connection;
 use crate::error::{Error, Result};
 use crate::folder::Folder;
+use crate::message::Message;
 use crate::named::NamedProperties;
 use crate::properties::Properties;
 use crate::special::{SpecialFolderEntry, SpecialFolderState, SpecialFolders};
@@ -107,6 +108,18 @@ impl Logon {
     #[must_use]
     pub fn folder(&mut self, id: FolderId) -> Folder<'_> {
         Folder::new(&mut self.connection, self.handle, id)
+    }
+
+    /// One message, by the folder it lives in and its id.
+    ///
+    /// Both are needed: `RopOpenMessage` takes the folder id itself, so a message id alone does not
+    /// name a message. The id comes from a contents-table row's `PidTagMid`.
+    ///
+    /// Nothing is sent yet — the message is opened by the first request the returned builder makes,
+    /// in the same round trip as the read that follows it.
+    #[must_use]
+    pub fn message(&mut self, folder: FolderId, id: MessageId) -> Message<'_> {
+        Message::new(&mut self.connection, self.handle, folder, id)
     }
 
     /// One of the thirteen special folders, ready to read.

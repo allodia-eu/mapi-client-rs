@@ -212,7 +212,7 @@ async fn a_moved_mailbox_reports_the_server_to_log_on_to_instead() {
 ///
 /// [MS-OXCROPS] §2.2.15.1
 #[tokio::test]
-async fn a_page_that_does_not_fit_says_to_read_fewer_rows() {
+async fn a_page_that_does_not_fit_says_to_ask_for_less() {
     let server = MapiServer::start().await;
     server.reply(connect_ok("Alice Example"));
     server.reply_ok(execute_body(&logon_response(0), &[LOGON_HANDLE]));
@@ -233,13 +233,17 @@ async fn a_page_that_does_not_fit_says_to_read_fewer_rows() {
     assert!(
         matches!(
             error,
-            Error::PageTooLarge {
+            Error::ResponseTooLarge {
                 size_needed: 0x4000
             }
         ),
         "{error:?}"
     );
-    assert!(error.to_string().contains("fewer rows"), "{error}");
+    // The advice has to be "ask for less", never "ask for a bigger buffer": measurement showed
+    // that raising the buffer to what the server reports does not help, and can be impossible.
+    let message = error.to_string();
+    assert!(message.contains("smaller page"), "{message}");
+    assert!(!message.contains("64 KiB"), "{message}");
 }
 
 /// A busy server asks to be left alone for a while, and says how long.
