@@ -27,6 +27,10 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.4.13
     pub const GET_HIERARCHY_TABLE: Self = Self(0x04);
+    /// `RopGetNamesFromPropertyIds`, `0x55` — what this store calls the ids it was given.
+    ///
+    /// [MS-OXCROPS] §2.2.8.2
+    pub const GET_NAMES_FROM_PROPERTY_IDS: Self = Self(0x55);
     /// `RopGetPropertiesAll`, `0x08` — every property an object has, tags included.
     ///
     /// [MS-OXCROPS] §2.2.8.4
@@ -35,6 +39,10 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.8.3
     pub const GET_PROPERTIES_SPECIFIC: Self = Self(0x07);
+    /// `RopGetPropertyIdsFromNames`, `0x56` — what this store calls the names it was given.
+    ///
+    /// [MS-OXCROPS] §2.2.8.1
+    pub const GET_PROPERTY_IDS_FROM_NAMES: Self = Self(0x56);
     /// `RopIdFromLongTermId`, `0x44` — a long-term id into one a ROP will take.
     ///
     /// [MS-OXCROPS] §2.2.3.9
@@ -90,6 +98,8 @@ impl RopId {
             Self::GET_CONTENTS_TABLE => "RopGetContentsTable",
             Self::GET_PROPERTIES_SPECIFIC => "RopGetPropertiesSpecific",
             Self::GET_PROPERTIES_ALL => "RopGetPropertiesAll",
+            Self::GET_NAMES_FROM_PROPERTY_IDS => "RopGetNamesFromPropertyIds",
+            Self::GET_PROPERTY_IDS_FROM_NAMES => "RopGetPropertyIdsFromNames",
             Self::SET_PROPERTIES => "RopSetProperties",
             Self::DELETE_PROPERTIES => "RopDeleteProperties",
             Self::SET_COLUMNS => "RopSetColumns",
@@ -136,6 +146,16 @@ mod tests {
             (RopId::QUERY_ROWS, 0x15, "RopQueryRows"),
             (RopId::LONG_TERM_ID_FROM_ID, 0x43, "RopLongTermIdFromId"),
             (RopId::ID_FROM_LONG_TERM_ID, 0x44, "RopIdFromLongTermId"),
+            (
+                RopId::GET_NAMES_FROM_PROPERTY_IDS,
+                0x55,
+                "RopGetNamesFromPropertyIds",
+            ),
+            (
+                RopId::GET_PROPERTY_IDS_FROM_NAMES,
+                0x56,
+                "RopGetPropertyIdsFromNames",
+            ),
             (RopId::BACKOFF, 0xF9, "RopBackoff"),
             (RopId::LOGON, 0xFE, "RopLogon"),
             (RopId::BUFFER_TOO_SMALL, 0xFF, "RopBufferTooSmall"),

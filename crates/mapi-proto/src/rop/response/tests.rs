@@ -1,5 +1,5 @@
 use super::*;
-use crate::oxcdata::{HIERARCHY_COLUMNS, PropertyTag, PropertyValue, TableString};
+use crate::oxcdata::{HIERARCHY_COLUMNS, PropertyName, PropertyTag, PropertyValue, TableString};
 use crate::testing::{logon_response, query_rows_response};
 use crate::wire::Writer;
 
@@ -412,6 +412,45 @@ fn accessors_answer_only_for_their_own_response() {
     );
     assert!(short.as_long_term_id().is_none());
     assert!(short.as_logon().is_none());
+}
+
+/// The two name ROPs answer in one stream, and each is decoded from its own `RopId` rather than
+/// from its position — which is what lets a batch ask both questions of one object at once.
+#[test]
+fn both_name_ropes_decode_from_one_stream() {
+    let name = PropertyName::lid(crate::oxcdata::PropertySetId::APPOINTMENT, 0x0000_8208);
+
+    let mut w = Writer::new();
+    w.u8(RopId::GET_PROPERTY_IDS_FROM_NAMES.as_u8())
+        .u8(0)
+        .u32(0)
+        .u16(2)
+        .u16(0x8205)
+        // `0x0000` is what a name the server would not map comes back as, alongside a ROP that
+        // succeeded. A caller that only checked the return value would read it as a property id.
+        .u16(0x0000);
+    w.u8(RopId::GET_NAMES_FROM_PROPERTY_IDS.as_u8())
+        .u8(0)
+        .u32(0)
+        .u16(1);
+    name.write(&mut w);
+
+    let responses = decode_all(&w.finish(), against(&no_columns())).unwrap();
+    assert_eq!(responses.len(), 2);
+
+    let ids = responses.first().and_then(RopResponse::as_property_ids);
+    assert_eq!(ids.map(PropertyIdsResponse::ids), Some(&[0x8205, 0][..]));
+
+    let names = responses.get(1).and_then(RopResponse::as_property_names);
+    assert_eq!(
+        names.map(PropertyNamesResponse::names),
+        Some(&[Some(name)][..])
+    );
+
+    // Neither answers for the other, and neither is a failure.
+    assert!(responses.first().unwrap().as_property_names().is_none());
+    assert!(responses.get(1).unwrap().as_property_ids().is_none());
+    assert!(responses.iter().all(|r| r.failure().is_none()));
 }
 
 #[test]

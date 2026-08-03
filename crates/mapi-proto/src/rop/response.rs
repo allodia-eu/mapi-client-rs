@@ -17,8 +17,8 @@ use crate::error::{Error, ErrorCode, Result};
 use crate::oxcdata::{LongTermId, PropertySet, PropertyTag, ShortTermId};
 use crate::rop::{
     GetPropertiesResponse, GetTableResponse, IdFromLongTermIdResponse, LogonResponse,
-    LongTermIdFromIdResponse, OpenFolderResponse, PropertyProblemsResponse, QueryRowsResponse,
-    RopId, SetColumnsResponse,
+    LongTermIdFromIdResponse, OpenFolderResponse, PropertyIdsResponse, PropertyNamesResponse,
+    PropertyProblemsResponse, QueryRowsResponse, RopId, SetColumnsResponse,
 };
 use crate::wire::Reader;
 
@@ -43,6 +43,13 @@ pub enum RopResponse {
     /// Success here is about the ROP, not about the properties: individual ones can have been
     /// refused and are named in the response.
     PropertyProblems(PropertyProblemsResponse),
+    /// A successful `RopGetPropertyIdsFromNames`.
+    ///
+    /// Its ids are positional against the names that were asked for, and this response carries no
+    /// record of what those were.
+    PropertyIds(PropertyIdsResponse),
+    /// A successful `RopGetNamesFromPropertyIds`.
+    PropertyNames(PropertyNamesResponse),
     /// A successful `RopIdFromLongTermId`.
     IdFromLongTermId(IdFromLongTermIdResponse),
     /// A successful `RopLongTermIdFromId`.
@@ -119,6 +126,24 @@ impl RopResponse {
     pub const fn as_property_problems(&self) -> Option<&PropertyProblemsResponse> {
         match self {
             Self::PropertyProblems(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    /// The resolved ids, if this is a `RopGetPropertyIdsFromNames` response.
+    #[must_use]
+    pub const fn as_property_ids(&self) -> Option<&PropertyIdsResponse> {
+        match self {
+            Self::PropertyIds(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    /// The names, if this is a `RopGetNamesFromPropertyIds` response.
+    #[must_use]
+    pub const fn as_property_names(&self) -> Option<&PropertyNamesResponse> {
+        match self {
+            Self::PropertyNames(response) => Some(response),
             _ => None,
         }
     }
@@ -248,6 +273,12 @@ pub(crate) fn decode_all(rops: &[u8], context: Decoding<'_>) -> Result<Vec<RopRe
             }
             RopId::SET_PROPERTIES | RopId::DELETE_PROPERTIES => {
                 RopResponse::PropertyProblems(PropertyProblemsResponse::read(&mut r, rop)?)
+            }
+            RopId::GET_PROPERTY_IDS_FROM_NAMES => {
+                RopResponse::PropertyIds(PropertyIdsResponse::read(&mut r)?)
+            }
+            RopId::GET_NAMES_FROM_PROPERTY_IDS => {
+                RopResponse::PropertyNames(PropertyNamesResponse::read(&mut r)?)
             }
             RopId::ID_FROM_LONG_TERM_ID => {
                 RopResponse::IdFromLongTermId(IdFromLongTermIdResponse::read(&mut r)?)

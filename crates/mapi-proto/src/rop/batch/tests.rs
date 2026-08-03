@@ -193,6 +193,60 @@ fn a_conversion_refuses_a_slot_from_another_batch() {
     );
 }
 
+/// Both name ROPs travel in one buffer against one object, which is what keeps resolving ten named
+/// properties at the cost of resolving one.
+#[test]
+fn both_name_ropes_ride_the_same_logon_slot() {
+    let mut batch = RopBatch::new();
+    let logon = batch.bind(ObjectHandle::new(0x2A));
+    batch
+        .property_ids_from_names(
+            logon,
+            &[PropertyName::lid(
+                crate::oxcdata::PropertySetId::APPOINTMENT,
+                0x0000_8208,
+            )],
+            NameRegistration::Existing,
+        )
+        .names_from_property_ids(logon, &[0x8005]);
+
+    assert_eq!(batch.len(), 2);
+    let built = batch.build().unwrap();
+    let rops = built.bytes.get(10..).unwrap();
+
+    // RopGetPropertyIdsFromNames: RopId, LogonId, InputHandleIndex, Flags, then the count.
+    assert_eq!(rops.get(..5), Some(&[0x56, 0x00, 0x00, 0x00, 0x01][..]));
+    // RopGetNamesFromPropertyIds picks up right after the one 21-byte PropertyName, same slot.
+    assert_eq!(
+        rops.get(27..34),
+        Some(&[0x55, 0x00, 0x00, 0x01, 0x00, 0x05, 0x80][..])
+    );
+    assert!(built.property_tags.is_empty(), "neither ROP needs the tags");
+}
+
+/// Neither takes a slot this batch never allocated, for the same reason a conversion does not: the
+/// mapping table belongs to one store, and an id resolved against another one reads a different
+/// property and reports nothing.
+#[test]
+fn a_name_lookup_refuses_a_slot_from_another_batch() {
+    let mut other = RopBatch::new();
+    let stranger = other.bind(ObjectHandle::new(7));
+
+    let mut forward = RopBatch::new();
+    forward.property_ids_from_names(stranger, &[], NameRegistration::Existing);
+    assert_eq!(
+        forward.build().unwrap_err(),
+        Error::UnknownHandleSlot { index: 0 }
+    );
+
+    let mut inverse = RopBatch::new();
+    inverse.names_from_property_ids(stranger, &[0x8005]);
+    assert_eq!(
+        inverse.build().unwrap_err(),
+        Error::UnknownHandleSlot { index: 0 }
+    );
+}
+
 #[test]
 fn handles_and_slots_render_for_humans() {
     assert_eq!(ObjectHandle::NONE.to_string(), "<none>");
