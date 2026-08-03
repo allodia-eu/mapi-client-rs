@@ -12,12 +12,17 @@
 //! [MS-OXCROPS] §3.1.4.1 — creating a ROP input buffer
 
 use crate::error::{Error, Result};
-use crate::oxcdata::{FolderId, LegacyDn, LongTermId, PropertyTag, ShortTermId, TaggedValue};
+use crate::oxcdata::{
+    FolderId, LegacyDn, LongTermId, PropertyName, PropertyTag, ShortTermId, TaggedValue,
+};
 use crate::rop::RopId;
 use crate::rop::buffer::RopBuffer;
 use crate::rop::folder::encode_open_folder;
 use crate::rop::logon::encode_logon;
 use crate::rop::longterm::{encode_id_from_long_term_id, encode_long_term_id_from_id};
+use crate::rop::named::{
+    NameRegistration, encode_names_from_property_ids, encode_property_ids_from_names,
+};
 use crate::rop::property::{
     encode_delete_properties, encode_get_properties_all, encode_get_properties_specific,
     encode_set_properties,
@@ -340,6 +345,50 @@ impl RopBatch {
     pub fn delete_properties(&mut self, object: HandleSlot, tags: &[PropertyTag]) -> &mut Self {
         if self.check(object) {
             self.push(|w| encode_delete_properties(w, object.index(), tags));
+        }
+        self
+    }
+
+    /// Asks what this store calls each of these named properties.
+    ///
+    /// The step every calendar read needs before it can begin: `PidLidAppointmentStartWhole` has no
+    /// property id of its own, and the one this store uses for it is not the one the mailbox next
+    /// door uses. The answer is positional — one id per name, in order, `0x0000` for any the server
+    /// would not map — and nothing in the response says which name each belongs to, so the caller
+    /// keeps the list it asked with.
+    ///
+    /// **`CreateIfMissing` writes to the store.** A name that is not registered gets an id
+    /// allocated for it, which is what writing a new named property needs and is not what a read
+    /// wants. See [`NameRegistration`].
+    ///
+    /// Valid on a Logon, Folder, Message or Attachment object; the answer is the same whichever is
+    /// used, because the mapping belongs to the store rather than the object
+    /// ([MS-OXCPRPT] §3.1.2).
+    ///
+    /// [MS-OXCROPS] §2.2.8.1 — `RopGetPropertyIdsFromNames`
+    pub fn property_ids_from_names(
+        &mut self,
+        object: HandleSlot,
+        names: &[PropertyName],
+        registration: NameRegistration,
+    ) -> &mut Self {
+        if self.check(object) {
+            self.push(|w| encode_property_ids_from_names(w, object.index(), names, registration));
+        }
+        self
+    }
+
+    /// Asks what named property each of these ids stands for in this store.
+    ///
+    /// The inverse, and the only way to say what a `0x8005` in a property dump actually is. An id
+    /// below `0x8000` is answered from the `PS_MAPI` set rather than refused, and one this store
+    /// has never registered comes back with no name rather than being left out of the answer.
+    ///
+    /// [MS-OXCROPS] §2.2.8.2 — `RopGetNamesFromPropertyIds`
+    /// [MS-OXCPRPT] §2.2.13 — `PS_MAPI` is used for ids that are not named properties
+    pub fn names_from_property_ids(&mut self, object: HandleSlot, ids: &[u16]) -> &mut Self {
+        if self.check(object) {
+            self.push(|w| encode_names_from_property_ids(w, object.index(), ids));
         }
         self
     }

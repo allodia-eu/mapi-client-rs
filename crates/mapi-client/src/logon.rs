@@ -376,4 +376,3 @@ fn classify(named: &PropertySet, folder: SpecialFolder) -> Slot {
         }),
     }
 }
-

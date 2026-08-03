@@ -78,15 +78,18 @@ pub use crate::http::{
     CookieJar, Headers, Lcid, MetaTag, Payload, Request, RequestType, ResponseCode,
 };
 pub use crate::oxcdata::{
-    CONTENTS_COLUMNS, Cell, ContainerClass, FOLDER_PROPERTIES, FileTime, Floating64, FolderEntryId,
-    FolderId, Guid, HIERARCHY_COLUMNS, LegacyDn, LongTermId, MAILBOX_PROPERTIES, MessageId,
-    PropertyProblem, PropertyRow, PropertySet, PropertySetIter, PropertyTag, PropertyType,
-    PropertyValue, ReplicaId, RowForm, SPECIAL_FOLDER_PROPERTIES, ShortTermId, SpecialFolder,
-    StoreObjectType, TableString, TaggedValue,
+    APPOINTMENT_PROPERTIES, CONTACT_PROPERTIES, CONTENTS_COLUMNS, Cell, ContainerClass,
+    FOLDER_PROPERTIES, FileTime, Floating64, FolderEntryId, FolderId, Guid, HIERARCHY_COLUMNS,
+    LegacyDn, LongTermId, MAILBOX_PROPERTIES, MessageId, NamedProperty, NamedPropertyId,
+    PropertyName, PropertyNameKind, PropertyProblem, PropertyRow, PropertySet, PropertySetId,
+    PropertySetIter, PropertyTag, PropertyType, PropertyValue, ReplicaId, RowForm,
+    SPECIAL_FOLDER_PROPERTIES, ShortTermId, SpecialFolder, StoreObjectType, TableString,
+    TaggedValue,
 };
 pub use crate::rop::{
     Bookmark, FolderDepth, GetPropertiesResponse, HandleSlot, IdFromLongTermIdResponse,
-    LogonResponse, LongTermIdFromIdResponse, ObjectHandle, PropertyProblemsResponse,
-    QueryRowsResponse, RopBatch, RopId, RopResponse, TableStatus, WellKnownFolder,
+    LogonResponse, LongTermIdFromIdResponse, NameRegistration, ObjectHandle, PropertyIdsResponse,
+    PropertyNamesResponse, PropertyProblemsResponse, QueryRowsResponse, RopBatch, RopId,
+    RopResponse, TableStatus, WellKnownFolder,
 };
 pub use crate::session::{Connected, Execution, Outcome, Session, SessionBuilder};

@@ -154,6 +154,20 @@ pub enum Error {
         reason: &'static str,
     },
 
+    /// A `PropertyName` carried a `Kind` other than `0x00`, `0x01` or `0xFF`.
+    ///
+    /// Which of the three it is decides whether a LID, a counted string or nothing follows, so an
+    /// unrecognised kind leaves no way to know where this structure ends and the next begins.
+    ///
+    /// [MS-OXCDATA] §2.6.1 — `Kind`
+    #[error("invalid PropertyName kind 0x{kind:02X} at {at}")]
+    InvalidPropertyNameKind {
+        /// The `Kind` byte as received.
+        kind: u8,
+        /// Byte offset the structure started at.
+        at: usize,
+    },
+
     /// A `FlaggedPropertyRow` carried a value flag other than `0x00`, `0x01` or `0x0A`.
     ///
     /// [MS-OXCDATA] §2.11.5 — `FlaggedPropertyValue`
