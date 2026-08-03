@@ -14,6 +14,7 @@
 //! mapi-cli folders --recursive        walk the whole hierarchy, tagged by container class
 //! mapi-cli folders --class IPF.Appointment   list the calendars
 //! mapi-cli special --details          find Calendar, Contacts, Drafts and the rest
+//! mapi-cli named --verify             what this store numbers the calendar properties as
 //! mapi-cli messages --folder inbox    read a contents table
 //! mapi-cli properties                 dump every property of the Store object
 //! mapi-cli capture session --out fixtures/exchange-se/session-en-us --scrub rules.tsv
@@ -118,6 +119,27 @@ enum Command {
         details: bool,
     },
 
+    /// Resolve the calendar and contact properties to the ids this mailbox uses for them.
+    ///
+    /// Named properties have no fixed id: each store allocates one from `0x8000` upwards the first
+    /// time it needs the property, so the numbers this prints are meaningful only in the mailbox
+    /// that answered. Run it against two mailboxes to see that. [MS-OXCPRPT] §3.1.2
+    Named {
+        /// Ask the store back what each resolved id is called, and fail if any disagrees.
+        ///
+        /// `RopGetNamesFromPropertyIds`, which is the only check on the response ordering that
+        /// does not come from the same answer being checked. [MS-OXCROPS] §2.2.8.2
+        #[arg(long)]
+        verify: bool,
+
+        /// Also ask what an id is called *here*, written as `0x8186`. Repeatable.
+        ///
+        /// Point it at an id another mailbox reported to see what the cross-store mistake actually
+        /// costs: the same number is a different property, or none at all.
+        #[arg(long = "id", value_name = "ID")]
+        ids: Vec<String>,
+    },
+
     /// Read a folder's contents table.
     Messages {
         /// Which folder to read. One of the thirteen a logon names, or a folder id as `0x...`.
@@ -189,6 +211,7 @@ async fn run(cli: Cli) -> Result<(), Failure> {
             class,
         } => command::folders(&connection, &folder, page_size, recursive, class.as_deref()).await,
         Command::Special { details } => command::special(&connection, details).await,
+        Command::Named { verify, ids } => command::named(&connection, verify, &ids).await,
         Command::Messages {
             folder,
             page_size,
