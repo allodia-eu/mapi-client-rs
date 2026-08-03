@@ -16,6 +16,10 @@
 //! mapi-cli special --details          find Calendar, Contacts, Drafts and the rest
 //! mapi-cli named --verify             what this store numbers the calendar properties as
 //! mapi-cli messages --folder inbox    read a contents table
+//! mapi-cli messages --newest-first --subject report   sort and filter on the server
+//! mapi-cli events                     list calendar entries with start, end and location
+//! mapi-cli contacts                   list contacts with their email addresses
+//! mapi-cli message --id 0x...  --body open one message, its body and its attachments
 //! mapi-cli properties                 dump every property of the Store object
 //! mapi-cli capture session --out fixtures/exchange-se/session-en-us --scrub rules.tsv
 //! ```
@@ -153,6 +157,67 @@ enum Command {
         /// How many rows to print. The rest are still read.
         #[arg(long, value_name = "ROWS", default_value_t = 20)]
         limit: usize,
+
+        /// Order by delivery time, newest first, on the server.
+        ///
+        /// `RopSortTable`. The sort key has to be among the columns read, which
+        /// [MS-OXCTABL] §2.2.2.3 requires and this client checks before sending.
+        #[arg(long)]
+        newest_first: bool,
+
+        /// Show only messages whose subject contains this, matched by the server.
+        ///
+        /// `RopRestrict` with a content restriction, paired with an existence test because
+        /// [MS-OXCDATA] §2.12.9.1 leaves the result on an item with no subject undefined.
+        #[arg(long, value_name = "TEXT")]
+        subject: Option<String>,
+    },
+
+    /// List a calendar's events, with real start times, end times and locations.
+    ///
+    /// Every one of those is a named property with no fixed id, so this resolves them against the
+    /// store first and builds its column set from the answer. [MS-OXOCAL] §2.2.1
+    Events {
+        /// Which folder to read, as `0x...`. Defaults to the Calendar the entry-id chain finds.
+        #[arg(long, value_name = "FOLDER")]
+        folder: Option<String>,
+
+        /// How many events to print. The rest are still read.
+        #[arg(long, value_name = "ROWS", default_value_t = 20)]
+        limit: usize,
+    },
+
+    /// List a contacts folder, with the email addresses that make it worth listing.
+    ///
+    /// `PidLidEmail1EmailAddress` is a named property, so this costs the same lookup `events` does.
+    /// [MS-OXOCNTC] §2.2.1.2
+    Contacts {
+        /// Which folder to read, as `0x...`. Defaults to the Contacts folder.
+        #[arg(long, value_name = "FOLDER")]
+        folder: Option<String>,
+
+        /// How many contacts to print. The rest are still read.
+        #[arg(long, value_name = "ROWS", default_value_t = 20)]
+        limit: usize,
+    },
+
+    /// Open one message: its properties, its recipients, its body and its attachments.
+    ///
+    /// The body is read with `RopOpenStream`, which is the only reading that works for a message of
+    /// any size — a property fetch answers anything past the response buffer with an error rather
+    /// than with the value. [MS-OXCPRPT] §2.2.3.2
+    Message {
+        /// Which folder it lives in. `RopOpenMessage` needs both ids.
+        #[arg(long, value_name = "FOLDER", default_value = "inbox")]
+        folder: String,
+
+        /// The message id, as `0x...`. `mapi-cli messages` prints these.
+        #[arg(long, value_name = "ID")]
+        id: String,
+
+        /// Also stream the plain-text and HTML bodies, and report how long each is.
+        #[arg(long)]
+        body: bool,
     },
 
     /// Dump the Store object's properties: display name, owner, size and quotas.
@@ -216,7 +281,28 @@ async fn run(cli: Cli) -> Result<(), Failure> {
             folder,
             page_size,
             limit,
-        } => command::messages(&connection, &folder, page_size, limit).await,
+            newest_first,
+            subject,
+        } => {
+            command::messages(
+                &connection,
+                &folder,
+                page_size,
+                limit,
+                newest_first,
+                subject.as_deref(),
+            )
+            .await
+        }
+        Command::Events { folder, limit } => {
+            command::events(&connection, folder.as_deref(), limit).await
+        }
+        Command::Contacts { folder, limit } => {
+            command::contacts(&connection, folder.as_deref(), limit).await
+        }
+        Command::Message { folder, id, body } => {
+            command::message(&connection, &folder, &id, body).await
+        }
         Command::Properties { tag } => command::properties(&connection, &tag).await,
         Command::Discover { address } => command::discover(&connection, &address).await,
         Command::Capture(arguments) => scenario::capture(&connection, &arguments).await,
