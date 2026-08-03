@@ -31,6 +31,11 @@ use mapi_client::{
 /// workspace's 500-line limit.
 mod folders;
 
+/// Calendar events, contacts, a body larger than a response buffer, and both kinds of attachment.
+/// Its own file for the same two reasons, and because it is the only one that needs a mailbox
+/// seeded by `scripts\Add-LabItems.ps1`.
+mod items;
+
 /// The ids a store allocates for named properties, and what carrying one across mailboxes costs.
 /// Its own file for the same two reasons.
 mod named;

@@ -32,6 +32,7 @@
 )]
 
 mod corpus;
+mod items;
 mod replayed;
 
 use std::sync::{Arc, Mutex};
@@ -252,7 +253,7 @@ async fn folder_tree(
 #[tokio::test]
 async fn an_en_us_session_replays_byte_for_byte() {
     let replayed = replay("session-en-us", Lcid::EN_US).await;
-    replayed.assert_shape_is_a_mailbox(6);
+    replayed.assert_shape_is_a_mailbox(7);
 
     assert_eq!(replayed.display_name, "Developer User");
     assert_eq!(replayed.folder(replayed.inbox), "Inbox");
@@ -274,7 +275,7 @@ async fn an_en_us_session_replays_byte_for_byte() {
 #[tokio::test]
 async fn an_nl_nl_session_replays_with_localised_folder_names() {
     let replayed = replay("session-nl-nl", Lcid::new(0x0413)).await;
-    replayed.assert_shape_is_a_mailbox(6);
+    replayed.assert_shape_is_a_mailbox(7);
 
     assert_eq!(replayed.display_name, "Developer User 2");
     assert_eq!(replayed.folder(replayed.inbox), "Postvak IN");

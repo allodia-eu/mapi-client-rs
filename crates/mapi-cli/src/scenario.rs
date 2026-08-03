@@ -8,6 +8,7 @@
 //! This file is the arguments, the redaction rules and the dispatch. The conversation itself is in
 //! [`mod@session`], which is the half that grows with every phase.
 
+mod items;
 mod session;
 
 use std::path::PathBuf;
@@ -17,6 +18,7 @@ use clap::Args;
 use mapi_client::MapiClient;
 
 use crate::capture::{Recorder, scenario_directory, write_scenario};
+use crate::scenario::items::items;
 use crate::scenario::session::session;
 use crate::scrub::Rules;
 use crate::settings::Connection;
@@ -68,6 +70,12 @@ pub(crate) enum Scenario {
     /// `PING`, `Connect`, `RopLogon`, a paged hierarchy table, a paged contents table, and
     /// `Disconnect` — everything this workspace implements, in one Session Context.
     Session,
+    /// A calendar, a contacts folder, and one message read to the bottom — its properties, its
+    /// attachments, the message inside one of them, and a body that takes several round trips.
+    ///
+    /// Needs a mailbox seeded by `scripts\Add-LabItems.ps1`, and refuses to write a capture that
+    /// would carry an empty calendar or a body small enough to fit one read.
+    Items,
     /// A `Connect` the server refuses because it cannot map the distinguished name.
     ///
     /// Needs `--user-dn-override` naming something the server has never heard of.
@@ -78,6 +86,7 @@ impl Scenario {
     fn directory_name(self) -> &'static str {
         match self {
             Self::Session => "session",
+            Self::Items => "items",
             Self::ConnectRefused => "connect-refused",
         }
     }
@@ -100,6 +109,7 @@ pub(crate) async fn capture(
     println!("capturing `{}`", arguments.scenario.directory_name());
     match arguments.scenario {
         Scenario::Session => session(&client, &recorder).await?,
+        Scenario::Items => items(&client, &recorder).await?,
         Scenario::ConnectRefused => connect_refused(&client, &recorder).await?,
     }
 
@@ -265,6 +275,7 @@ mod tests {
     #[test]
     fn each_scenario_has_its_own_directory_name() {
         assert_eq!(Scenario::Session.directory_name(), "session");
+        assert_eq!(Scenario::Items.directory_name(), "items");
         assert_eq!(Scenario::ConnectRefused.directory_name(), "connect-refused");
         assert_eq!(
             parse(&["connect-refused"]).scenario,
