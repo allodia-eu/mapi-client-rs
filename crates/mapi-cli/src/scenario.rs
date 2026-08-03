@@ -1,54 +1,26 @@
-//! The conversations that become fixtures.
+//! The conversations that become fixtures, and what drives them.
 //!
 //! A fixture set is only as good as what it covers, and the thing it has to cover is the *whole*
 //! path this workspace claims to implement — including the paging that a small mailbox would
 //! otherwise never exercise, and including a refusal, because error paths are exactly what an
 //! offline corpus usually lacks and exactly what a client gets wrong.
 //!
-//! Page sizes here are deliberately far smaller than the default fifty. A lab mailbox has fifteen
-//! folders and five messages; at the default both tables would arrive in one round trip and the
-//! committed corpus would contain no evidence that a second page decodes against the column set
-//! the first one established.
+//! This file is the arguments, the redaction rules and the dispatch. The conversation itself is in
+//! [`mod@session`], which is the half that grows with every phase.
+
+mod session;
 
 use std::path::PathBuf;
 use std::sync::Arc;
 
 use clap::Args;
-use mapi_client::{
-    FOLDER_PROPERTIES, FolderId, Logon, MAILBOX_PROPERTIES, MapiClient, PropertyTag, PropertyValue,
-    SpecialFolder, TaggedValue, WellKnownFolder,
-};
+use mapi_client::MapiClient;
 
 use crate::capture::{Recorder, scenario_directory, write_scenario};
+use crate::scenario::session::session;
 use crate::scrub::Rules;
 use crate::settings::Connection;
 use crate::{Failure, report};
-
-/// Folders per round trip, chosen so that a fifteen-folder mailbox needs three of them.
-const HIERARCHY_PAGE: u16 = 8;
-
-/// Messages per round trip, chosen so that a five-message inbox needs three of them.
-const CONTENTS_PAGE: u16 = 2;
-
-/// Folders per round trip for the recursive read, chosen so that a lab mailbox's twenty-six needs
-/// two of them.
-///
-/// Larger than [`HIERARCHY_PAGE`] on purpose: what the recursive capture is evidence *for* is the
-/// `Depth` flag and the parent ids that make its flat rows a tree, and four pages of that would
-/// treble the corpus to re-prove paging the immediate read already proves.
-const DEEP_PAGE: u16 = 20;
-
-/// The comment the capture tries to set on the Store object, and never does.
-///
-/// [MS-OXCSTOR] §2.2.2.1.2.1 note 14 says Exchange 2013 SP1 and later answer `ecAccessDenied` when
-/// a client sets `PidTagComment`, and the lab confirms it — so this write is captured precisely
-/// *because* it changes nothing, and it gives the corpus its only evidence of what a refused
-/// property looks like: a ROP that succeeded, carrying a `PropertyProblem` that says the property
-/// did not.
-///
-/// If a future server ever accepted it, the mailbox would gain this comment and
-/// `Verify-Fixtures.ps1` would report the changed response. Both are visible; neither is quiet.
-const COMMENT_PROBE: &str = "mapi-client-rs probe";
 
 /// What `mapi-cli capture` was asked to do.
 #[derive(Clone, Debug, Args)]
@@ -211,164 +183,6 @@ fn load_rules(arguments: &CaptureArguments) -> Result<Rules, Failure> {
     }
 }
 
-/// Everything this workspace implements, in one Session Context.
-async fn session(client: &MapiClient, recorder: &Recorder) -> Result<(), Failure> {
-    recorder.label("");
-    client.ping().await?;
-
-    recorder.label("");
-    let connection = client.connect().await?;
-    println!("  connected as {:?}", connection.server().display_name());
-
-    recorder.label("logon");
-    let mut logon = connection.logon().await?;
-    let subtree = logon.folder_id(WellKnownFolder::IpmSubtree)?;
-
-    store_object(&mut logon, recorder).await?;
-    hierarchy(&mut logon, recorder, subtree).await?;
-    special_folders(&mut logon, recorder).await?;
-
-    recorder.label("contents");
-    let mut rows = logon
-        .well_known(WellKnownFolder::Inbox)?
-        .contents()
-        .page_size(CONTENTS_PAGE)
-        .rows();
-    let mut messages = 0_usize;
-    while rows.try_next().await?.is_some() {
-        messages = messages.saturating_add(1);
-    }
-    recorder.label("contents-release");
-    rows.close().await?;
-    println!("  {messages} message(s) in the Inbox");
-
-    recorder.label("");
-    logon.disconnect().await?;
-    Ok(())
-}
-
-/// The Store object read, and the write the server refuses.
-///
-/// `RopGetPropertiesAll` is deliberately *not* captured: its answer on the lab carries a dozen
-/// server clocks that move on every logon, so a fixture of it would make `Verify-Fixtures.ps1`
-/// report a difference every single run and the one difference that mattered would be lost in the
-/// noise. Normalising a tagged property list is its own piece of work, and it belongs with the
-/// rest of the write-fixture harness.
-async fn store_object(logon: &mut Logon, recorder: &Recorder) -> Result<(), Failure> {
-    recorder.label("properties");
-    let mailbox = logon.store().read(MAILBOX_PROPERTIES).await?;
-    println!(
-        "  {} store properties, {} of them refused by the server",
-        mailbox.len(),
-        mailbox
-            .iter()
-            .filter(|cell| cell.value().as_error().is_some())
-            .count()
-    );
-
-    // A write the server refuses, which is why it is safe to capture. See `COMMENT_PROBE`.
-    recorder.label("properties-refused");
-    let problems = logon
-        .store()
-        .write(&[TaggedValue::new(
-            PropertyTag::COMMENT,
-            PropertyValue::String(COMMENT_PROBE.into()),
-        )?])
-        .await?;
-    println!(
-        "  setting PidTagComment reported {} problem(s)",
-        problems.len()
-    );
-    if problems.is_empty() {
-        return Err(Failure::from(
-            "the server accepted a write to PidTagComment. [MS-OXCSTOR] §2.2.2.1.2.1 note 14 says \
-             it will not, and this capture is only safe to run because of that — the mailbox now \
-             carries the probe comment. Remove it, and re-think this scenario before committing."
-                .to_owned(),
-        ));
-    }
-    Ok(())
-}
-
-/// Both hierarchy reads: the immediate children, paged, and then everything below at every level.
-///
-/// The first is where the paging evidence lives — the opening round trip sets the columns and every
-/// later one is a bare `RopQueryRows` against a handle that still remembers them. The second is the
-/// `Depth` flag, captured because the flat rows it produces are only a tree by way of
-/// `PidTagParentFolderId`, and a corpus with no recursive read in it would prove nothing about
-/// either.
-async fn hierarchy(
-    logon: &mut Logon,
-    recorder: &Recorder,
-    subtree: FolderId,
-) -> Result<(), Failure> {
-    recorder.label("hierarchy");
-    let mut rows = logon
-        .folder(subtree)
-        .subfolders()
-        .page_size(HIERARCHY_PAGE)
-        .rows();
-    let mut folders = 0_usize;
-    while rows.try_next().await?.is_some() {
-        folders = folders.saturating_add(1);
-    }
-    recorder.label("hierarchy-release");
-    rows.close().await?;
-    println!("  {folders} subfolder(s)");
-
-    recorder.label("hierarchy-deep");
-    let mut rows = logon
-        .folder(subtree)
-        .descendants()
-        .page_size(DEEP_PAGE)
-        .rows();
-    let mut descendants = 0_usize;
-    while rows.try_next().await?.is_some() {
-        descendants = descendants.saturating_add(1);
-    }
-    recorder.label("hierarchy-deep-release");
-    rows.close().await?;
-    println!("  {descendants} folder(s) below the IPM subtree, at every level");
-    Ok(())
-}
-
-/// The entry-id chain, and then the Calendar's own properties.
-///
-/// Three exchanges: the Inbox's binary properties, the conversion of every one of them that parsed,
-/// and a property read on the folder that conversion found. The middle one is the corpus's only
-/// evidence of what a `RopIdFromLongTermId` request and response look like, and the last is its
-/// only `RopGetPropertiesSpecific` against something other than the Logon object.
-async fn special_folders(logon: &mut Logon, recorder: &Recorder) -> Result<(), Failure> {
-    recorder.label("special-folders");
-    let special = logon.special_folders().await?;
-    println!(
-        "  {} of {} special folder(s) present",
-        special.found(),
-        SpecialFolder::ALL.len()
-    );
-
-    let Some(calendar) = special.get(SpecialFolder::Calendar) else {
-        return Err(Failure::from(
-            "this mailbox has no Calendar folder, so the capture would carry no evidence that the \
-             entry-id chain reaches one. Open the mailbox in Outlook or OWA once and re-run."
-                .to_owned(),
-        ));
-    };
-
-    recorder.label("folder-properties");
-    let details = logon
-        .folder(calendar)
-        .properties()
-        .read(FOLDER_PROPERTIES)
-        .await?;
-    println!(
-        "  the Calendar at {:#018x} answered with {} propert(y/ies)",
-        calendar.as_u64(),
-        details.len()
-    );
-    Ok(())
-}
-
 /// A `Connect` the server refuses, which is what an unmappable distinguished name looks like on
 /// the wire.
 ///
@@ -457,19 +271,5 @@ mod tests {
             Scenario::ConnectRefused
         );
         assert_eq!(parse(&["session"]).set, "exchange-se");
-    }
-
-    /// The page sizes exist to force paging on a small lab mailbox, so a change that quietly
-    /// raised them would empty the corpus of its only multi-page evidence.
-    #[test]
-    fn the_page_sizes_are_small_enough_to_force_paging() {
-        const { assert!(HIERARCHY_PAGE < 15, "a lab mailbox has fifteen folders") }
-        const { assert!(CONTENTS_PAGE < 5, "a seeded inbox has five messages") }
-        const {
-            assert!(
-                DEEP_PAGE < 26,
-                "a lab mailbox has twenty-six folders below the IPM subtree"
-            );
-        }
     }
 }

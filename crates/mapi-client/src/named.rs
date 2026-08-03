@@ -2,9 +2,9 @@
 //!
 //! The cache lives here rather than in `mapi-proto` for one reason: nothing in the codec needs it.
 //! A column set has to be remembered by the session because the rows that come back are undecodable
-//! without it; a named-property id is not like that. Every response carrying one is self-describing,
-//! and the id is only wanted by the layer that decides which properties to ask for — so keeping it
-//! here leaves the codec's state exactly what decoding requires and no more.
+//! without it; a named-property id is not like that. Every response carrying one is
+//! self-describing, and the id is only wanted by the layer that decides which properties to ask for
+//! — so keeping it here leaves the codec's state exactly what decoding requires and no more.
 //!
 //! **A map is bound to the store that answered it.** It carries the mailbox GUID from the logon,
 //! and there is no way to put an id from another mailbox into one, which is the strongest form the
