@@ -5,17 +5,17 @@
 # of each file.
 
 [exchange]
-name = 18-execute-contents
+name = 16-execute-folder-properties
 request-type = Execute
 url = https://exchange-lab-01/mapi/emsmdb/?MailboxId=00000000-0000-0000-0000-000000000002@lab.local
 status = 200
-request-bytes = 37
-response-bytes = 261
+request-bytes = 95
+response-bytes = 186
 
 [request-headers]
 Content-Type: application/mapi-http
 X-RequestType: Execute
-X-RequestId: {00000000-0000-0000-0000-000000000000}:17
+X-RequestId: {00000000-0000-0000-0000-000000000000}:15
 X-ClientApplication: Outlook/15.00.0847.4040
 X-ClientInfo: {00000000-0000-0000-0000-000000000000}:1
 Cookie: MapiRouting=<normalised>; MapiContext=<normalised>; MapiSequence=<normalised>; X-BackEndCookie=<normalised>
@@ -27,7 +27,7 @@ server: Microsoft-IIS/10.0
 request-id: <normalised by capture>
 x-calculatedbetarget: exchange-lab-01.lab.local
 x-serverapplication: Exchange/15.02.2562.045
-x-requestid: {00000000-0000-0000-0000-000000000000}:17
+x-requestid: {00000000-0000-0000-0000-000000000000}:15
 x-clientinfo: {00000000-0000-0000-0000-000000000000}:1
 x-requesttype: Execute
 x-pendingperiod: 30000

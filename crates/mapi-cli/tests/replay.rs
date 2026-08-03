@@ -27,6 +27,7 @@
     clippy::expect_used,
     clippy::indexing_slicing,
     clippy::panic,
+    clippy::arithmetic_side_effects,
     reason = "a test that walks a captured layout by offset is asserting something true about it"
 )]
 
@@ -37,8 +38,9 @@ use std::sync::{Arc, Mutex};
 
 use mapi_client::{
     Credentials, FOLDER_PROPERTIES, FolderId, Lcid, Logon, MAILBOX_PROPERTIES, MapiClient,
-    PropertyRow, PropertySet, PropertyTag, PropertyValue, SpecialFolder, SpecialFolders,
-    TableString, TaggedValue, WellKnownFolder,
+    NamedProperties, NamedProperty, PropertyName, PropertyRow, PropertySet, PropertySetId,
+    PropertyTag, PropertyValue, SpecialFolder, SpecialFolders, TableString, TaggedValue,
+    WellKnownFolder,
 };
 
 use crate::corpus::{assert_requests_match, fixtures, scenario, server, user_dn};
@@ -51,15 +53,22 @@ const CONTENTS_PAGE: u16 = 2;
 const DEEP_PAGE: u16 = 20;
 
 /// How many exchanges one captured session holds: `PING`, `Connect`, the logon, two property
-/// exchanges, two hierarchy pages and a release, two deep pages and a release, the two halves of
-/// the entry-id chain, the Calendar's properties, four contents pages and a release, and the
-/// `Disconnect` — which is `01-ping` through `20-disconnect` in either session directory.
-const SESSION_EXCHANGES: usize = 20;
+/// exchanges, both halves of the named-property lookup, two hierarchy pages and a release, two deep
+/// pages and a release, the two halves of the entry-id chain, the Calendar's properties, four
+/// contents pages and a release, and the `Disconnect` — which is `01-ping` through `22-disconnect`
+/// in either session directory.
+const SESSION_EXCHANGES: usize = 22;
 
 /// The comment `mapi-cli capture` tried to set on the Store object, and which Exchange refused.
 /// Same reason as the page sizes: the request bodies only match if the replay sends the same
 /// value.
 const COMMENT_PROBE: &str = "mapi-client-rs probe";
+
+/// The name, the fixed id and the unregistered id `mapi-cli capture` asked about, for the same
+/// reason again — a replay that asked about anything else would send different bytes.
+const UNREGISTERED_NAME: &str = "mapi-client-rs-no-such-property";
+const FIXED_ID: u16 = 0x0037;
+const UNREGISTERED_ID: u16 = 0xFFFE;
 
 /// Drives one captured session, then checks every request body against the corpus.
 ///
@@ -106,6 +115,8 @@ async fn replay(name: &str, locale: Lcid) -> Replayed {
         .expect("a string tag carrying a string")])
         .await
         .expect("RopSetProperties itself succeeds");
+
+    let (named, named_back) = named_properties(&mut logon).await;
 
     let mut rows = logon
         .folder(subtree)
@@ -158,6 +169,8 @@ async fn replay(name: &str, locale: Lcid) -> Replayed {
         subtree,
         mailbox,
         refused,
+        named,
+        named_back,
         folders,
         folder_count,
         descendants,
@@ -166,6 +179,37 @@ async fn replay(name: &str, locale: Lcid) -> Replayed {
         messages,
         message_count,
     }
+}
+
+/// The named-property half of a captured session: the ten this crate catalogues plus a name no
+/// store has registered, then the ids that came back plus two the client never resolved.
+///
+/// The order and the extras are not free choices — they are what `mapi-cli capture` sent, and the
+/// request bodies are compared byte for byte.
+async fn named_properties(logon: &mut Logon) -> (NamedProperties, Vec<Option<PropertyName>>) {
+    let unregistered = PropertyName::named(PropertySetId::PUBLIC_STRINGS, UNREGISTERED_NAME)
+        .expect("a name this crate can carry");
+    let mut wanted: Vec<PropertyName> = NamedProperty::ALL.iter().map(|p| p.name()).collect();
+    wanted.push(unregistered);
+
+    let named = logon
+        .resolve_names(wanted)
+        .await
+        .expect("RopGetPropertyIdsFromNames")
+        .clone();
+
+    let mut ids: Vec<u16> = named
+        .iter()
+        .filter_map(|entry| Some(entry.id()?.as_u16()))
+        .collect();
+    ids.push(FIXED_ID);
+    ids.push(UNREGISTERED_ID);
+
+    let back = logon
+        .names_of(&ids)
+        .await
+        .expect("RopGetNamesFromPropertyIds");
+    (named, back)
 }
 
 /// The special-folder half of a captured session: the recursive read, the entry-id chain, and the

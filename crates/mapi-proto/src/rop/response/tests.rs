@@ -420,14 +420,14 @@ fn accessors_answer_only_for_their_own_response() {
 fn both_name_ropes_decode_from_one_stream() {
     let name = PropertyName::lid(crate::oxcdata::PropertySetId::APPOINTMENT, 0x0000_8208);
 
+    // The second id is `0x0000`: what a name the server would not map comes back as, alongside a
+    // ROP that succeeded. A caller that only checked the return value would read it as an id.
     let mut w = Writer::new();
     w.u8(RopId::GET_PROPERTY_IDS_FROM_NAMES.as_u8())
         .u8(0)
         .u32(0)
         .u16(2)
         .u16(0x8205)
-        // `0x0000` is what a name the server would not map comes back as, alongside a ROP that
-        // succeeded. A caller that only checked the return value would read it as a property id.
         .u16(0x0000);
     w.u8(RopId::GET_NAMES_FROM_PROPERTY_IDS.as_u8())
         .u8(0)

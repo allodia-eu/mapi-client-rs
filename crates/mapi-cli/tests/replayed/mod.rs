@@ -4,9 +4,10 @@
 //! is the list of things the bytes Exchange sent are asserted to mean. Both are one test binary.
 
 use mapi_client::{
-    ContainerClass, ErrorCode, FOLDER_PROPERTIES, FolderId, MAILBOX_PROPERTIES, PropertyProblem,
-    PropertyRow, PropertySet, PropertyTag, PropertyValue, SpecialFolder, SpecialFolderState,
-    SpecialFolders, StoreObjectType, TableString,
+    ContainerClass, ErrorCode, FOLDER_PROPERTIES, FolderId, MAILBOX_PROPERTIES, NamedProperties,
+    NamedProperty, PropertyName, PropertyProblem, PropertyRow, PropertySet, PropertySetId,
+    PropertyTag, PropertyValue, SpecialFolder, SpecialFolderState, SpecialFolders, StoreObjectType,
+    TableString,
 };
 
 /// Everything one replay observed.
@@ -17,6 +18,8 @@ pub(crate) struct Replayed {
     pub(crate) subtree: FolderId,
     pub(crate) mailbox: PropertySet,
     pub(crate) refused: Vec<PropertyProblem>,
+    pub(crate) named: NamedProperties,
+    pub(crate) named_back: Vec<Option<PropertyName>>,
     pub(crate) folders: Vec<(FolderId, String)>,
     pub(crate) folder_count: Option<u32>,
     pub(crate) descendants: Vec<PropertyRow>,
@@ -62,8 +65,90 @@ impl Replayed {
         assert_eq!(truncated[0].chars().count(), 255);
 
         self.assert_shape_of_the_store_object();
+        self.assert_shape_of_the_named_properties();
         self.assert_shape_of_the_folder_tree();
         self.assert_shape_of_the_special_folders();
+    }
+
+    /// What the store numbered the catalogued properties as, and what it said those numbers are.
+    ///
+    /// No number is asserted here. The ids are a fact about the lab mailbox that produced the
+    /// capture — they differ between the two session directories, which is the whole point — so
+    /// what is checked is everything about them that *is* a claim about the protocol.
+    ///
+    /// [MS-OXCPRPT] §2.2.12.2 — one id per name, in order, `0x0000` for what could not be mapped
+    fn assert_shape_of_the_named_properties(&self) {
+        assert_eq!(
+            self.named.len(),
+            NamedProperty::ALL.len() + 1,
+            "one entry per name asked for, the unregistered one included"
+        );
+        assert_eq!(
+            self.named.mapped(),
+            NamedProperty::ALL.len(),
+            "every catalogued property resolves and the invented one does not"
+        );
+
+        for property in NamedProperty::ALL {
+            let id = self
+                .named
+                .get(&property.name())
+                .unwrap_or_else(|| panic!("{property} did not resolve"));
+            // [MS-OXCPRPT] §3.1.4.1: a named property's id has its most significant bit set.
+            assert!(id.as_u16() >= 0x8000, "{property} = {id}");
+            assert!(
+                id.belongs_to(self.named.store()),
+                "{property} came back bound to another store"
+            );
+        }
+
+        // `0x0000` alongside a successful ROP: a refusal reported as a value, and the reason an
+        // entry is not an `Option<u16>`. Asked for, answered, and not mapped.
+        let invented = PropertyName::named(PropertySetId::PUBLIC_STRINGS, crate::UNREGISTERED_NAME)
+            .expect("a name this crate can carry");
+        assert!(
+            self.named
+                .entry(&invented)
+                .is_some_and(|entry| !entry.is_mapped()),
+            "the server registered a name the capture asked it not to create"
+        );
+
+        // The inverse ROP, which is the only witness to the pairing that does not come from the
+        // ordering being checked. Every catalogued id has to come back as the name it was resolved
+        // for, in place.
+        assert_eq!(
+            self.named_back.len(),
+            NamedProperty::ALL.len() + 2,
+            "one name per id asked about, the two extras included"
+        );
+        for (index, property) in NamedProperty::ALL.into_iter().enumerate() {
+            assert_eq!(
+                self.named_back.get(index).and_then(Option::as_ref),
+                Some(&property.name()),
+                "{property} resolved to an id the store calls something else"
+            );
+        }
+
+        // An id below `0x8000` is not a named property, and the server answers out of `PS_MAPI`
+        // rather than refusing. [MS-OXCPRPT] §2.2.13
+        let fixed = self
+            .named_back
+            .get(NamedProperty::ALL.len())
+            .and_then(Option::as_ref)
+            .expect("PS_MAPI names the fixed ids");
+        assert_eq!(fixed.set(), PropertySetId::MAPI, "{fixed}");
+        assert_eq!(fixed.as_lid(), Some(u32::from(crate::FIXED_ID)), "{fixed}");
+
+        // **The deviation.** [MS-OXCDATA] §2.6.1's diagram marks `GUID` as not optional, so an
+        // entry with no name would still carry sixteen bytes of property set. Exchange sends the
+        // `0xFF` and stops. This entry decoding at all — and the `Disconnect` after it replaying —
+        // is the assertion; reading the specification's sixteen bytes here runs off the buffer.
+        assert_eq!(
+            self.named_back.last(),
+            Some(&None),
+            "the measurement this assertion records has changed; re-measure it rather than \
+             deleting it"
+        );
     }
 
     /// What the `Depth` flag answered, and the column that makes its answer a tree.
