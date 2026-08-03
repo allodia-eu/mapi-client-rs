@@ -125,8 +125,10 @@ impl SpecialFolder {
 }
 
 impl core::fmt::Display for SpecialFolder {
+    /// `pad` rather than `write_str`, so `{:<10}` lines a column of these up. `write_str` goes
+    /// straight past the formatter's width and produces a listing that silently does not align.
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        f.write_str(self.name())
+        f.pad(self.name())
     }
 }
 
@@ -166,6 +168,8 @@ mod tests {
             assert_eq!(folder.tag(), PropertyTag::new(raw), "{name}");
             assert_eq!(folder.name(), name);
             assert_eq!(folder.to_string(), name);
+            // `mapi-cli special` prints these in a column, and `write_str` would ignore the width.
+            assert_eq!(format!("{folder:<12}").len(), 12, "{name}");
             // Every one of them is binary, which is what makes the entry-id chain possible at all.
             assert_eq!(folder.tag().property_type(), crate::PropertyType::Binary);
         }
