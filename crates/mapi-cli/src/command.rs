@@ -3,8 +3,11 @@
 //! Every one of these is an ordinary use of `mapi-client` with nothing stubbed, which is the
 //! property that makes this binary worth having: what it prints is what the library saw.
 
+mod items;
+
 use std::collections::HashMap;
 
+pub(crate) use items::{contacts, events, message, messages};
 use mapi_client::{
     ContainerClass, EmailAddress, FOLDER_PROPERTIES, FolderId, Logon, NamedProperty,
     NamedPropertyEntry, NamedPropertyId, PropertyName, PropertyRow, PropertyTag, PropertyValue,
@@ -318,54 +321,6 @@ async fn verify_ids(logon: &mut Logon, entries: &[NamedPropertyEntry]) -> Result
     Ok(())
 }
 
-/// Read a folder's contents table.
-pub(crate) async fn messages(
-    connection: &Connection,
-    folder: &str,
-    page_size: u16,
-    limit: usize,
-) -> Result<(), Failure> {
-    let client = connection.client()?;
-    let mut logon = client.connect().await?.logon().await?;
-    let id = resolve(&logon, folder)?;
-
-    println!("contents of {folder} ({:#018x})", id.as_u64());
-    let mut rows = logon.folder(id).contents().page_size(page_size).rows();
-    let mut seen = 0_usize;
-    let mut truncated = 0_usize;
-    while let Some(row) = rows.try_next().await? {
-        if seen < limit {
-            println!("{}", report::message_line(&row));
-        }
-        if row
-            .string(PropertyTag::SUBJECT)
-            .is_some_and(TableString::is_truncated)
-        {
-            truncated = truncated.saturating_add(1);
-        }
-        seen = seen.saturating_add(1);
-    }
-    let reported = rows.row_count();
-    rows.close().await?;
-
-    if seen > limit {
-        println!(
-            "  ... {} more row(s) read but not shown",
-            seen.saturating_sub(limit)
-        );
-    }
-    summarise(seen, reported);
-    if truncated > 0 {
-        println!(
-            "  {truncated} subject(s) were truncated by the table at 255 characters — the full \
-             value is only available by opening the message"
-        );
-    }
-
-    logon.disconnect().await?;
-    Ok(())
-}
-
 /// Dump the Store object's properties — what the mailbox knows about itself.
 ///
 /// With no tags this is `RopGetPropertiesAll`, which names nothing and gets everything. That is
@@ -442,15 +397,26 @@ pub(crate) async fn discover(connection: &Connection, address: &str) -> Result<(
     Ok(())
 }
 
+/// Turns a `0x...` argument into the number it names.
+fn parse_hexadecimal(value: &str, what: &str) -> Result<u64, Failure> {
+    let hexadecimal = value
+        .strip_prefix("0x")
+        .or_else(|| value.strip_prefix("0X"))
+        .ok_or_else(|| Failure::from(format!("`{value}` is not {what}; write it as 0x...")))?;
+
+    u64::from_str_radix(hexadecimal, 16)
+        .map_err(|_| Failure::from(format!("`{value}` is not {what}; write it as 0x...")))
+}
+
+/// A folder id given directly, for the commands that do not take a well-known name.
+fn parse_folder_id(folder: &str) -> Result<FolderId, Failure> {
+    parse_hexadecimal(folder, "a folder id").map(FolderId::new)
+}
+
 /// Turns a folder argument into an id: a well-known name, or a raw id in hexadecimal.
 fn resolve(logon: &Logon, folder: &str) -> Result<FolderId, Failure> {
-    if let Some(hexadecimal) = folder
-        .strip_prefix("0x")
-        .or_else(|| folder.strip_prefix("0X"))
-    {
-        let raw = u64::from_str_radix(hexadecimal, 16)
-            .map_err(|_| Failure::from(format!("`{folder}` is not a folder id")))?;
-        return Ok(FolderId::new(raw));
+    if folder.starts_with("0x") || folder.starts_with("0X") {
+        return parse_folder_id(folder);
     }
 
     let wanted = folder.trim().to_ascii_lowercase();
