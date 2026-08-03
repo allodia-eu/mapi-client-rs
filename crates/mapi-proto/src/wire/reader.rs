@@ -96,15 +96,27 @@ impl<'a> Reader<'a> {
     ///
     /// [MS-OXCMAPIHTTP] §2.2.4.1.1 — `UserDn`
     pub(crate) fn ascii_z(&mut self) -> Result<String> {
+        Ok(String::from_utf8_lossy(self.bytes_z()?).into_owned())
+    }
+
+    /// A null-terminated run of bytes, handed back undecoded and without its terminator.
+    ///
+    /// For the one field whose bytes are not text in any encoding [`ascii_z`](Self::ascii_z) knows:
+    /// a *reduced* Unicode `TypedString` is UTF-16LE with every zero high byte removed, so byte
+    /// `0xE9` there is `é` and not the first half of a UTF-8 sequence. Decoding lossily first turns
+    /// it into a replacement character that no later widening can undo.
+    ///
+    /// [MS-OXCDATA] §2.11.7 — `TypedString`, `StringType` `0x03`
+    pub(crate) fn bytes_z(&mut self) -> Result<&'a [u8]> {
         let start = self.pos;
         let len = self
             .peek_rest()
             .iter()
             .position(|&b| b == 0)
             .ok_or(Error::Unterminated { at: start })?;
-        let text = String::from_utf8_lossy(self.take(len)?).into_owned();
+        let raw = self.take(len)?;
         self.take(1)?;
-        Ok(text)
+        Ok(raw)
     }
 
     /// A null-terminated UTF-16LE string, as every `PtypString` value carries it.

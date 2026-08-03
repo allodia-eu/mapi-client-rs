@@ -1,244 +1,12 @@
-use super::*;
+mod catalogue;
 
-/// Every named tag, with the id and type its defining document gives it — transcribed from the
-/// specification rather than derived from the constant, so a mistyped constant is not confirmed by
-/// the test that checks it.
-const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 39] = [
-    (
-        PropertyTag::ADDITIONAL_REN_ENTRY_IDS,
-        0x36D8,
-        PropertyType::MultipleBinary,
-        "PidTagAdditionalRenEntryIds",
-    ),
-    (
-        PropertyTag::ATTRIBUTE_HIDDEN,
-        0x10F4,
-        PropertyType::Boolean,
-        "PidTagAttributeHidden",
-    ),
-    (
-        PropertyTag::CODE_PAGE_ID,
-        0x66C3,
-        PropertyType::Integer32,
-        "PidTagCodePageId",
-    ),
-    (
-        PropertyTag::COMMENT,
-        0x3004,
-        PropertyType::String,
-        "PidTagComment",
-    ),
-    (
-        PropertyTag::CONTAINER_CLASS,
-        0x3613,
-        PropertyType::String,
-        "PidTagContainerClass",
-    ),
-    (
-        PropertyTag::CONTENT_COUNT,
-        0x3602,
-        PropertyType::Integer32,
-        "PidTagContentCount",
-    ),
-    (
-        PropertyTag::CONTENT_UNREAD_COUNT,
-        0x3603,
-        PropertyType::Integer32,
-        "PidTagContentUnreadCount",
-    ),
-    (
-        PropertyTag::DELETE_AFTER_SUBMIT,
-        0x0E01,
-        PropertyType::Boolean,
-        "PidTagDeleteAfterSubmit",
-    ),
-    (
-        PropertyTag::DISPLAY_NAME,
-        0x3001,
-        PropertyType::String,
-        "PidTagDisplayName",
-    ),
-    (
-        PropertyTag::EXTENDED_RULE_SIZE_LIMIT,
-        0x0E9B,
-        PropertyType::Integer32,
-        "PidTagExtendedRuleSizeLimit",
-    ),
-    (
-        PropertyTag::FOLDER_FLAGS,
-        0x66A8,
-        PropertyType::Integer32,
-        "PidTagFolderFlags",
-    ),
-    (
-        PropertyTag::FOLDER_ID,
-        0x6748,
-        PropertyType::Integer64,
-        "PidTagFolderId",
-    ),
-    (
-        PropertyTag::FOLDER_TYPE,
-        0x3601,
-        PropertyType::Integer32,
-        "PidTagFolderType",
-    ),
-    (
-        PropertyTag::IPM_APPOINTMENT_ENTRY_ID,
-        0x36D0,
-        PropertyType::Binary,
-        "PidTagIpmAppointmentEntryId",
-    ),
-    (
-        PropertyTag::IPM_ARCHIVE_ENTRY_ID,
-        0x35FF,
-        PropertyType::Binary,
-        "PidTagIpmArchiveEntryId",
-    ),
-    (
-        PropertyTag::IPM_CONTACT_ENTRY_ID,
-        0x36D1,
-        PropertyType::Binary,
-        "PidTagIpmContactEntryId",
-    ),
-    (
-        PropertyTag::IPM_DRAFTS_ENTRY_ID,
-        0x36D7,
-        PropertyType::Binary,
-        "PidTagIpmDraftsEntryId",
-    ),
-    (
-        PropertyTag::IPM_JOURNAL_ENTRY_ID,
-        0x36D2,
-        PropertyType::Binary,
-        "PidTagIpmJournalEntryId",
-    ),
-    (
-        PropertyTag::IPM_NOTE_ENTRY_ID,
-        0x36D3,
-        PropertyType::Binary,
-        "PidTagIpmNoteEntryId",
-    ),
-    (
-        PropertyTag::IPM_TASK_ENTRY_ID,
-        0x36D4,
-        PropertyType::Binary,
-        "PidTagIpmTaskEntryId",
-    ),
-    (
-        PropertyTag::LOCALE_ID,
-        0x66A1,
-        PropertyType::Integer32,
-        "PidTagLocaleId",
-    ),
-    (
-        PropertyTag::MAILBOX_OWNER_ENTRY_ID,
-        0x661B,
-        PropertyType::Binary,
-        "PidTagMailboxOwnerEntryId",
-    ),
-    (
-        PropertyTag::MAILBOX_OWNER_NAME,
-        0x661C,
-        PropertyType::String,
-        "PidTagMailboxOwnerName",
-    ),
-    (
-        PropertyTag::MAXIMUM_SUBMIT_MESSAGE_SIZE,
-        0x666D,
-        PropertyType::Integer32,
-        "PidTagMaximumSubmitMessageSize",
-    ),
-    (
-        PropertyTag::MESSAGE_DELIVERY_TIME,
-        0x0E06,
-        PropertyType::Time,
-        "PidTagMessageDeliveryTime",
-    ),
-    (
-        PropertyTag::MESSAGE_FLAGS,
-        0x0E07,
-        PropertyType::Integer32,
-        "PidTagMessageFlags",
-    ),
-    (
-        PropertyTag::MESSAGE_SIZE_EXTENDED,
-        0x0E08,
-        PropertyType::Integer64,
-        "PidTagMessageSizeExtended",
-    ),
-    (
-        PropertyTag::MID,
-        0x674A,
-        PropertyType::Integer64,
-        "PidTagMid",
-    ),
-    (
-        PropertyTag::OUT_OF_OFFICE_STATE,
-        0x661D,
-        PropertyType::Boolean,
-        "PidTagOutOfOfficeState",
-    ),
-    (
-        PropertyTag::PARENT_FOLDER_ID,
-        0x6749,
-        PropertyType::Integer64,
-        "PidTagParentFolderId",
-    ),
-    (
-        PropertyTag::PROHIBIT_RECEIVE_QUOTA,
-        0x666A,
-        PropertyType::Integer32,
-        "PidTagProhibitReceiveQuota",
-    ),
-    (
-        PropertyTag::PROHIBIT_SEND_QUOTA,
-        0x666E,
-        PropertyType::Integer32,
-        "PidTagProhibitSendQuota",
-    ),
-    (
-        PropertyTag::REMINDERS_ONLINE_ENTRY_ID,
-        0x36D5,
-        PropertyType::Binary,
-        "PidTagRemindersOnlineEntryId",
-    ),
-    (
-        PropertyTag::SERIALIZED_REPLID_GUID_MAP,
-        0x6638,
-        PropertyType::Binary,
-        "PidTagSerializedReplidGuidMap",
-    ),
-    (
-        PropertyTag::SORT_LOCALE_ID,
-        0x6705,
-        PropertyType::Integer32,
-        "PidTagSortLocaleId",
-    ),
-    (
-        PropertyTag::STORE_STATE,
-        0x340E,
-        PropertyType::Integer32,
-        "PidTagStoreState",
-    ),
-    (
-        PropertyTag::SUBFOLDERS,
-        0x360A,
-        PropertyType::Boolean,
-        "PidTagSubfolders",
-    ),
-    (
-        PropertyTag::SUBJECT,
-        0x0037,
-        PropertyType::String,
-        "PidTagSubject",
-    ),
-    (
-        PropertyTag::USER_ENTRY_ID,
-        0x6619,
-        PropertyType::Binary,
-        "PidTagUserEntryId",
-    ),
-];
+use catalogue::CATALOGUE;
+
+use super::*;
+use crate::oxcdata::columns::{
+    APPOINTMENT_COLUMNS, ATTACHMENT_COLUMNS, ATTACHMENT_PROPERTIES, CONTACT_COLUMNS,
+    CONTENTS_COLUMNS, FOLDER_PROPERTIES, HIERARCHY_COLUMNS, MAILBOX_PROPERTIES, MESSAGE_PROPERTIES,
+};
 
 /// The canonical constant, little-endian, *is* the wire form: type first, then id.
 #[test]
@@ -278,9 +46,27 @@ fn no_two_constants_are_the_same_tag() {
 /// undefined past 4 GB.
 #[test]
 fn one_property_id_can_carry_two_types() {
-    let thirty_two = PropertyTag::from_parts(0x0E08, PropertyType::Integer32);
-    assert_eq!(thirty_two.id(), PropertyTag::MESSAGE_SIZE_EXTENDED.id());
-    assert_ne!(thirty_two, PropertyTag::MESSAGE_SIZE_EXTENDED);
+    assert_eq!(
+        PropertyTag::MESSAGE_SIZE.id(),
+        PropertyTag::MESSAGE_SIZE_EXTENDED.id()
+    );
+    assert_ne!(
+        PropertyTag::MESSAGE_SIZE,
+        PropertyTag::MESSAGE_SIZE_EXTENDED
+    );
+}
+
+/// Streaming a body means asking for the same property under a different type — `PtypBinary` for
+/// the raw bytes rather than `PtypString` for the text. The id has to survive that.
+#[test]
+fn changing_a_tags_type_keeps_its_property() {
+    let raw = PropertyTag::BODY.with_type(PropertyType::Binary);
+    assert_eq!(raw.id(), PropertyTag::BODY.id());
+    assert_eq!(raw.property_type(), PropertyType::Binary);
+    assert_eq!(
+        PropertyTag::BODY.with_type(PropertyType::String),
+        PropertyTag::BODY
+    );
 }
 
 #[test]
@@ -288,8 +74,13 @@ fn every_tag_this_crate_sends_has_a_type_it_can_decode() {
     let sent = HIERARCHY_COLUMNS
         .iter()
         .chain(&CONTENTS_COLUMNS)
+        .chain(&ATTACHMENT_COLUMNS)
         .chain(&MAILBOX_PROPERTIES)
         .chain(&FOLDER_PROPERTIES)
+        .chain(&MESSAGE_PROPERTIES)
+        .chain(&ATTACHMENT_PROPERTIES)
+        .chain(&CONTACT_COLUMNS)
+        .chain(&APPOINTMENT_COLUMNS)
         .chain(&crate::oxcdata::SPECIAL_FOLDER_PROPERTIES);
 
     for tag in sent {
@@ -306,8 +97,8 @@ fn every_tag_this_crate_sends_has_a_type_it_can_decode() {
 }
 
 /// Ids from `0x8000` up are allocated per store, so the same number means a different property in
-/// a different mailbox. Nothing resolves them yet; recognising one is what stops a diagnostic
-/// printing it as though it were a constant.
+/// a different mailbox. Recognising one is what stops a diagnostic printing it as though it were a
+/// constant.
 #[test]
 fn named_property_ids_are_recognisable_from_the_id_alone() {
     assert!(PropertyTag::new(0x8005_001F).is_named());

@@ -11,26 +11,20 @@
 //!
 //! [MS-OXCROPS] §3.1.4.1 — creating a ROP input buffer
 
+//! The ROP-issuing methods themselves are grouped by the object they act on — [`objects`], the
+//! tables in [`tables`], the properties in [`props`] — so that no one file grows past what a
+//! reader can hold, and so that the grouping follows the specification's own division.
+
 use crate::error::{Error, Result};
-use crate::oxcdata::{
-    FolderId, LegacyDn, LongTermId, PropertyName, PropertyTag, ShortTermId, TaggedValue,
-};
+use crate::oxcdata::{LegacyDn, PropertyTag};
 use crate::rop::RopId;
 use crate::rop::buffer::RopBuffer;
-use crate::rop::folder::encode_open_folder;
 use crate::rop::logon::encode_logon;
-use crate::rop::longterm::{encode_id_from_long_term_id, encode_long_term_id_from_id};
-use crate::rop::named::{
-    NameRegistration, encode_names_from_property_ids, encode_property_ids_from_names,
-};
-use crate::rop::property::{
-    encode_delete_properties, encode_get_properties_all, encode_get_properties_specific,
-    encode_set_properties,
-};
-use crate::rop::table::{
-    FolderDepth, TABLE_FLAGS_NONE, encode_get_table, encode_query_rows, encode_set_columns,
-};
 use crate::wire::Writer;
+
+mod objects;
+mod props;
+mod tables;
 
 /// A ROP addresses the handle table with one byte, so a batch can hold this many slots.
 const MAX_SLOTS: usize = 256;
@@ -182,217 +176,6 @@ impl RopBatch {
         output
     }
 
-    /// Opens a folder by id, producing a folder handle.
-    ///
-    /// [MS-OXCROPS] §2.2.4.1 — `RopOpenFolder`
-    pub fn open_folder(&mut self, parent: HandleSlot, folder: FolderId) -> HandleSlot {
-        // Checked before the output slot is added, or a foreign slot 0 would be made valid by the
-        // very allocation this call performs.
-        let known = self.check(parent);
-        let output = self.allocate(ObjectHandle::NONE);
-        if known {
-            self.push(|w| encode_open_folder(w, parent.index(), output.index(), folder));
-        }
-        output
-    }
-
-    /// Opens the folder's contents table — its messages.
-    ///
-    /// [MS-OXCROPS] §2.2.4.14 — `RopGetContentsTable`
-    pub fn contents_table(&mut self, folder: HandleSlot) -> HandleSlot {
-        self.get_table(RopId::GET_CONTENTS_TABLE, folder, TABLE_FLAGS_NONE)
-    }
-
-    /// Opens the folder's hierarchy table — its subfolders.
-    ///
-    /// The depth is a parameter rather than a default because the two answers are different
-    /// questions: [`FolderDepth::Recursive`] lists every folder below this one in one round trip,
-    /// and its rows say nothing about where each folder sits unless
-    /// [`PidTagParentFolderId`](crate::PropertyTag::PARENT_FOLDER_ID) is among the columns.
-    ///
-    /// [MS-OXCROPS] §2.2.4.13 — `RopGetHierarchyTable`
-    /// [MS-OXCFOLD] §2.2.1.13.1 — `TableFlags`, `Depth`
-    pub fn hierarchy_table(&mut self, folder: HandleSlot, depth: FolderDepth) -> HandleSlot {
-        self.get_table(RopId::GET_HIERARCHY_TABLE, folder, depth.flags())
-    }
-
-    /// Converts a long-term id into one a ROP will take.
-    ///
-    /// The step that makes the folders a logon does not name reachable: a `PidTagIpm*EntryId`
-    /// property holds a [`FolderEntryId`](crate::FolderEntryId) whose tail is a
-    /// [`LongTermId`], and `RopOpenFolder` takes a [`FolderId`]. Only the server holds the mapping
-    /// between the two, so this is a round trip rather than arithmetic.
-    ///
-    /// Operates on the Logon object, and answers **for the store that logon named** — converting
-    /// an entry id issued by a different mailbox produces a valid-looking id for the wrong folder,
-    /// which is what [`FolderEntryId::belongs_to`](crate::FolderEntryId::belongs_to) is for.
-    ///
-    /// [MS-OXCROPS] §2.2.3.9 — `RopIdFromLongTermId`
-    /// [MS-OXOSFLD] §2.2.2 — entry ids MUST be converted before use
-    pub fn id_from_long_term_id(&mut self, logon: HandleSlot, id: &LongTermId) -> &mut Self {
-        if self.check(logon) {
-            self.push(|w| encode_id_from_long_term_id(w, logon.index(), id));
-        }
-        self
-    }
-
-    /// Converts a folder or message id into one that survives leaving the store.
-    ///
-    /// The inverse of [`id_from_long_term_id`](Self::id_from_long_term_id), and what a client
-    /// needs to *write* an entry-id property rather than read one.
-    ///
-    /// [MS-OXCROPS] §2.2.3.8 — `RopLongTermIdFromId`
-    pub fn long_term_id_from_id(&mut self, logon: HandleSlot, id: ShortTermId) -> &mut Self {
-        if self.check(logon) {
-            self.push(|w| encode_long_term_id_from_id(w, logon.index(), id));
-        }
-        self
-    }
-
-    /// Sets the column set every row read from this table is encoded against.
-    ///
-    /// The columns are remembered for the table's handle, so rows arriving now or in a later round
-    /// trip decode without the caller passing them again.
-    ///
-    /// [MS-OXCROPS] §2.2.5.1 — `RopSetColumns`
-    pub fn set_columns(&mut self, table: HandleSlot, columns: &[PropertyTag]) -> &mut Self {
-        if self.check(table) {
-            self.push(|w| encode_set_columns(w, table.index(), columns));
-            if let Some(slot) = self.columns.get_mut(usize::from(table.index())) {
-                *slot = Some(columns.to_vec());
-            }
-        }
-        self
-    }
-
-    /// Reads up to `count` rows forward from the table's current position.
-    ///
-    /// [MS-OXCROPS] §2.2.5.4 — `RopQueryRows`
-    pub fn query_rows(&mut self, table: HandleSlot, count: u16) -> &mut Self {
-        if self.check(table) {
-            self.push(|w| encode_query_rows(w, table.index(), count));
-        }
-        self
-    }
-
-    /// Reads the named properties of an object — a logon, a folder, a message, an attachment.
-    ///
-    /// The response carries values and no tags, exactly as a table row does, so the tags are
-    /// remembered here and handed to the decoder when the answer arrives. They are remembered
-    /// **per ROP rather than per handle**: two fetches on one object in one batch are two
-    /// different questions, and answering the second against the first's tags would decode a
-    /// plausible-looking wrong value rather than fail.
-    ///
-    /// [MS-OXCROPS] §2.2.8.3 — `RopGetPropertiesSpecific`
-    pub fn get_properties(&mut self, object: HandleSlot, tags: &[PropertyTag]) -> &mut Self {
-        if self.check(object) {
-            self.push(|w| encode_get_properties_specific(w, object.index(), tags));
-            self.property_tags.push(tags.to_vec());
-        }
-        self
-    }
-
-    /// Reads every property an object has.
-    ///
-    /// Each value arrives beside its own tag, so nothing has to be known in advance — which is
-    /// what makes this the ROP that answers "tell me about this mailbox".
-    ///
-    /// **"All" is not every readable property.** The server returns the values for all properties
-    /// *on* the object ([MS-OXCPRPT] §3.2.5.2), while an explicit `RopGetPropertiesSpecific`
-    /// returns computed properties as well ([MS-OXCPRPT] §3.2.5.1) — so a computed property is
-    /// simply absent here. Measured on Exchange Server SE `15.02.2562.045`, where a private
-    /// mailbox logon answered with 113 properties and `PidTagMailboxOwnerEntryId` was not among
-    /// them, yet was 151 bytes long when asked for by name.
-    ///
-    /// A value too large for the response buffer comes back under its own id with the type
-    /// changed to `PtypErrorCode`, carrying `NotEnoughMemory`; [`PropertySet::get`] is written to
-    /// hand that back rather than report the property as unset.
-    ///
-    /// [MS-OXCROPS] §2.2.8.4 — `RopGetPropertiesAll`
-    /// [MS-OXCPRPT] §2.2.3.2 — an oversized value becomes `NotEnoughMemory`
-    ///
-    /// [`PropertySet::get`]: crate::PropertySet::get
-    pub fn get_all_properties(&mut self, object: HandleSlot) -> &mut Self {
-        if self.check(object) {
-            self.push(|w| encode_get_properties_all(w, object.index()));
-        }
-        self
-    }
-
-    /// Writes properties to an object.
-    ///
-    /// **This persists immediately on a Folder or Logon object**, with no save ROP to follow; on a
-    /// Message or Attachment object it does not, and needs `RopSaveChangesMessage`. Individual
-    /// properties can fail while the ROP as a whole succeeds — see
-    /// [`PropertyProblemsResponse`](crate::PropertyProblemsResponse).
-    ///
-    /// [MS-OXCROPS] §2.2.8.6 — `RopSetProperties`
-    /// [MS-OXCPRPT] §3.2.5.4 — when the change is persisted
-    pub fn set_properties(&mut self, object: HandleSlot, values: &[TaggedValue]) -> &mut Self {
-        if self.check(object) {
-            self.try_push(|w| encode_set_properties(w, object.index(), values));
-        }
-        self
-    }
-
-    /// Deletes properties from an object.
-    ///
-    /// A server that succeeds here must afterwards answer `NotFound` when asked for the value,
-    /// rather than an empty one.
-    ///
-    /// [MS-OXCROPS] §2.2.8.8 — `RopDeleteProperties`
-    /// [MS-OXCPRPT] §3.2.5.5 — `NotFound` in place of a value afterwards
-    pub fn delete_properties(&mut self, object: HandleSlot, tags: &[PropertyTag]) -> &mut Self {
-        if self.check(object) {
-            self.push(|w| encode_delete_properties(w, object.index(), tags));
-        }
-        self
-    }
-
-    /// Asks what this store calls each of these named properties.
-    ///
-    /// The step every calendar read needs before it can begin: `PidLidAppointmentStartWhole` has no
-    /// property id of its own, and the one this store uses for it is not the one the mailbox next
-    /// door uses. The answer is positional — one id per name, in order, `0x0000` for any the server
-    /// would not map — and nothing in the response says which name each belongs to, so the caller
-    /// keeps the list it asked with.
-    ///
-    /// **`CreateIfMissing` writes to the store.** A name that is not registered gets an id
-    /// allocated for it, which is what writing a new named property needs and is not what a read
-    /// wants. See [`NameRegistration`].
-    ///
-    /// Valid on a Logon, Folder, Message or Attachment object; the answer is the same whichever is
-    /// used, because the mapping belongs to the store rather than the object
-    /// ([MS-OXCPRPT] §3.1.2).
-    ///
-    /// [MS-OXCROPS] §2.2.8.1 — `RopGetPropertyIdsFromNames`
-    pub fn property_ids_from_names(
-        &mut self,
-        object: HandleSlot,
-        names: &[PropertyName],
-        registration: NameRegistration,
-    ) -> &mut Self {
-        if self.check(object) {
-            self.push(|w| encode_property_ids_from_names(w, object.index(), names, registration));
-        }
-        self
-    }
-
-    /// Asks what named property each of these ids stands for in this store.
-    ///
-    /// The inverse, and the only way to say what a `0x8005` in a property dump actually is. An id
-    /// below `0x8000` is answered from the `PS_MAPI` set rather than refused, and one this store
-    /// has never registered comes back with no name rather than being left out of the answer.
-    ///
-    /// [MS-OXCROPS] §2.2.8.2 — `RopGetNamesFromPropertyIds`
-    /// [MS-OXCPRPT] §2.2.13 — `PS_MAPI` is used for ids that are not named properties
-    pub fn names_from_property_ids(&mut self, object: HandleSlot, ids: &[u16]) -> &mut Self {
-        if self.check(object) {
-            self.push(|w| encode_names_from_property_ids(w, object.index(), ids));
-        }
-        self
-    }
-
     /// Releases a handle the server is holding.
     ///
     /// A released handle value is free for the server to hand out again, so the session forgets
@@ -408,15 +191,6 @@ impl RopBatch {
             });
         }
         self
-    }
-
-    fn get_table(&mut self, rop: RopId, folder: HandleSlot, flags: u8) -> HandleSlot {
-        let known = self.check(folder);
-        let output = self.allocate(ObjectHandle::NONE);
-        if known {
-            self.push(|w| encode_get_table(w, rop, folder.index(), output.index(), flags));
-        }
-        output
     }
 
     /// Adds a slot, or records the first failure and hands back a slot that will never be sent.

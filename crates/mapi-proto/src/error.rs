@@ -168,6 +168,44 @@ pub enum Error {
         at: usize,
     },
 
+    /// A `TypedString` carried a `StringType` outside `0x00`–`0x04`.
+    ///
+    /// The byte says both whether a string follows and how wide its characters are, so an
+    /// unrecognised value leaves no way to know where the field ends — and a `RopOpenMessage`
+    /// response continues with a recipient table that would then be read from the wrong offset.
+    ///
+    /// [MS-OXCDATA] §2.11.7 — `TypedString` structure
+    #[error("invalid TypedString StringType 0x{kind:02X} at {at}")]
+    InvalidStringType {
+        /// The `StringType` byte as received.
+        kind: u8,
+        /// Byte offset the structure started at.
+        at: usize,
+    },
+
+    /// A stream read asked for more bytes than one `RopReadStream` response can carry.
+    ///
+    /// `DataSize` is two bytes ([MS-OXCROPS] §2.2.9.2.2), so a request for more than 65,535 could
+    /// not be answered in full and the shortfall would look exactly like the end of the stream.
+    #[error("a stream read of {wanted} bytes exceeds the {limit} one response can carry")]
+    StreamReadTooLarge {
+        /// How many bytes were asked for.
+        wanted: usize,
+        /// The most one response can hold.
+        limit: usize,
+    },
+
+    /// A sort was asked for on a column the table has not been given.
+    ///
+    /// [MS-OXCTABL] §2.2.2.3 requires every property sorted on to have been named in
+    /// `RopSetColumns`. A server refuses the sort rather than sorting on something else, but the
+    /// refusal does not say which column — so this is caught before the round trip, where it can.
+    #[error("cannot sort on {tag}: it is not among the columns this table was given")]
+    SortColumnNotSet {
+        /// The column the sort key named and the column set did not.
+        tag: PropertyTag,
+    },
+
     /// A `FlaggedPropertyRow` carried a value flag other than `0x00`, `0x01` or `0x0A`.
     ///
     /// [MS-OXCDATA] §2.11.5 — `FlaggedPropertyValue`
@@ -352,6 +390,18 @@ impl ErrorCode {
     pub const LOGON_FAILED: Self = Self(0x8004_0111);
     /// The call failed for a network reason. `0x80040115`, also written `ecRpcFailed`.
     pub const NETWORK_ERROR: Self = Self(0x8004_0115);
+    /// The value is too large to return this way. `0x8007000E`, also written `ecMAPIOOM`.
+    ///
+    /// Routine rather than exceptional, and the reason the stream ROPs exist: [MS-OXCDATA] §2.4.2
+    /// says of it "on get, indicates that the property or column value is too large to be retrieved
+    /// by the request, and the property value needs to be accessed with the `RopOpenStream` ROP".
+    /// Observed on Exchange Server SE `15.02.2562.045` for a 116,996-byte `PidTagBody` asked for
+    /// through `RopGetPropertiesSpecific`.
+    ///
+    /// [MS-OXCDATA] §2.4 lists the same numeric value under `OutOfMemory`, which is the general
+    /// meaning; §2.4.2 gives the specific one, and the specific one is what a property fetch means
+    /// by it.
+    pub const NOT_ENOUGH_MEMORY: Self = Self(0x8007_000E);
     /// The requested object could not be found. `0x8004010F`, also written `ecNotFound`.
     pub const NOT_FOUND: Self = Self(0x8004_010F);
     /// The server does not support this call. `0x80040102`, also written `ecNotSupported`.
@@ -409,6 +459,7 @@ impl ErrorCode {
             Self::NOT_SUPPORTED => "NotSupported",
             Self::STRING_TOO_LONG => "StringTooLong",
             Self::NOT_FOUND => "NotFound",
+            Self::NOT_ENOUGH_MEMORY => "NotEnoughMemory",
             Self::VERSION_MISMATCH => "VersionMismatch",
             Self::LOGON_FAILED => "LogonFailed",
             Self::NETWORK_ERROR => "NetworkError",
