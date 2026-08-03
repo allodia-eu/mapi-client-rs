@@ -1,0 +1,77 @@
+//! The canonical name of every tag [`PropertyTag`] carries a constant for.
+//!
+//! Its own module for one reason: a diagnostic that prints `0x37050003` instead of
+//! `PidTagAttachMethod` is a diagnostic somebody has to look up, so the table grows with every
+//! property — and a table that grows is exactly what should not share a file with the type it
+//! describes.
+
+use crate::oxcdata::PropertyTag;
+
+/// The `PidTagXxx` name for a tag, or `None` for one the crate has no constant for.
+pub(super) const fn name(tag: PropertyTag) -> Option<&'static str> {
+    Some(match tag {
+        PropertyTag::ADDITIONAL_REN_ENTRY_IDS => "PidTagAdditionalRenEntryIds",
+        PropertyTag::ATTACH_DATA_BINARY => "PidTagAttachDataBinary",
+        PropertyTag::ATTACH_FILENAME => "PidTagAttachFilename",
+        PropertyTag::ATTACH_LONG_FILENAME => "PidTagAttachLongFilename",
+        PropertyTag::ATTACH_METHOD => "PidTagAttachMethod",
+        PropertyTag::ATTACH_MIME_TAG => "PidTagAttachMimeTag",
+        PropertyTag::ATTACH_NUMBER => "PidTagAttachNumber",
+        PropertyTag::ATTACH_SIZE => "PidTagAttachSize",
+        PropertyTag::ATTRIBUTE_HIDDEN => "PidTagAttributeHidden",
+        PropertyTag::BODY => "PidTagBody",
+        PropertyTag::BODY_HTML => "PidTagHtml",
+        PropertyTag::BUSINESS_TELEPHONE_NUMBER => "PidTagBusinessTelephoneNumber",
+        PropertyTag::CODE_PAGE_ID => "PidTagCodePageId",
+        PropertyTag::COMMENT => "PidTagComment",
+        PropertyTag::COMPANY_NAME => "PidTagCompanyName",
+        PropertyTag::CONTAINER_CLASS => "PidTagContainerClass",
+        PropertyTag::CONTENT_COUNT => "PidTagContentCount",
+        PropertyTag::CONTENT_UNREAD_COUNT => "PidTagContentUnreadCount",
+        PropertyTag::DELETE_AFTER_SUBMIT => "PidTagDeleteAfterSubmit",
+        PropertyTag::DISPLAY_NAME => "PidTagDisplayName",
+        PropertyTag::DISPLAY_TO => "PidTagDisplayTo",
+        PropertyTag::EXTENDED_RULE_SIZE_LIMIT => "PidTagExtendedRuleSizeLimit",
+        PropertyTag::FOLDER_FLAGS => "PidTagFolderFlags",
+        PropertyTag::FOLDER_ID => "PidTagFolderId",
+        PropertyTag::FOLDER_TYPE => "PidTagFolderType",
+        PropertyTag::GIVEN_NAME => "PidTagGivenName",
+        PropertyTag::HAS_ATTACHMENTS => "PidTagHasAttachments",
+        PropertyTag::IPM_APPOINTMENT_ENTRY_ID => "PidTagIpmAppointmentEntryId",
+        PropertyTag::IPM_ARCHIVE_ENTRY_ID => "PidTagIpmArchiveEntryId",
+        PropertyTag::IPM_CONTACT_ENTRY_ID => "PidTagIpmContactEntryId",
+        PropertyTag::IPM_DRAFTS_ENTRY_ID => "PidTagIpmDraftsEntryId",
+        PropertyTag::IPM_JOURNAL_ENTRY_ID => "PidTagIpmJournalEntryId",
+        PropertyTag::IPM_NOTE_ENTRY_ID => "PidTagIpmNoteEntryId",
+        PropertyTag::IPM_TASK_ENTRY_ID => "PidTagIpmTaskEntryId",
+        PropertyTag::LAST_MODIFICATION_TIME => "PidTagLastModificationTime",
+        PropertyTag::LOCALE_ID => "PidTagLocaleId",
+        PropertyTag::MAILBOX_OWNER_ENTRY_ID => "PidTagMailboxOwnerEntryId",
+        PropertyTag::MAILBOX_OWNER_NAME => "PidTagMailboxOwnerName",
+        PropertyTag::MAXIMUM_SUBMIT_MESSAGE_SIZE => "PidTagMaximumSubmitMessageSize",
+        PropertyTag::MESSAGE_CLASS => "PidTagMessageClass",
+        PropertyTag::MESSAGE_DELIVERY_TIME => "PidTagMessageDeliveryTime",
+        PropertyTag::MESSAGE_FLAGS => "PidTagMessageFlags",
+        PropertyTag::MESSAGE_SIZE => "PidTagMessageSize",
+        PropertyTag::MESSAGE_SIZE_EXTENDED => "PidTagMessageSizeExtended",
+        PropertyTag::MID => "PidTagMid",
+        PropertyTag::NATIVE_BODY => "PidTagNativeBody",
+        PropertyTag::NORMALIZED_SUBJECT => "PidTagNormalizedSubject",
+        PropertyTag::OUT_OF_OFFICE_STATE => "PidTagOutOfOfficeState",
+        PropertyTag::PARENT_FOLDER_ID => "PidTagParentFolderId",
+        PropertyTag::PROHIBIT_RECEIVE_QUOTA => "PidTagProhibitReceiveQuota",
+        PropertyTag::PROHIBIT_SEND_QUOTA => "PidTagProhibitSendQuota",
+        PropertyTag::REMINDERS_ONLINE_ENTRY_ID => "PidTagRemindersOnlineEntryId",
+        PropertyTag::SENDER_EMAIL_ADDRESS => "PidTagSenderEmailAddress",
+        PropertyTag::SENDER_NAME => "PidTagSenderName",
+        PropertyTag::SERIALIZED_REPLID_GUID_MAP => "PidTagSerializedReplidGuidMap",
+        PropertyTag::SORT_LOCALE_ID => "PidTagSortLocaleId",
+        PropertyTag::STORE_STATE => "PidTagStoreState",
+        PropertyTag::SUBFOLDERS => "PidTagSubfolders",
+        PropertyTag::SUBJECT => "PidTagSubject",
+        PropertyTag::SUBJECT_PREFIX => "PidTagSubjectPrefix",
+        PropertyTag::SURNAME => "PidTagSurname",
+        PropertyTag::USER_ENTRY_ID => "PidTagUserEntryId",
+        _ => return None,
+    })
+}

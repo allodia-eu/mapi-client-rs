@@ -17,8 +17,9 @@ use crate::error::{Error, ErrorCode, Result};
 use crate::oxcdata::{LongTermId, PropertySet, PropertyTag, ShortTermId};
 use crate::rop::{
     GetPropertiesResponse, GetTableResponse, IdFromLongTermIdResponse, LogonResponse,
-    LongTermIdFromIdResponse, OpenFolderResponse, PropertyIdsResponse, PropertyNamesResponse,
-    PropertyProblemsResponse, QueryRowsResponse, RopId, SetColumnsResponse,
+    LongTermIdFromIdResponse, OpenFolderResponse, OpenMessageResponse, PropertyIdsResponse,
+    PropertyNamesResponse, PropertyProblemsResponse, QueryRowsResponse, ReadStreamResponse, RopId,
+    SetColumnsResponse, StreamSizeResponse, TableStatusResponse,
 };
 use crate::wire::Reader;
 
@@ -34,8 +35,28 @@ pub enum RopResponse {
     GetTable(GetTableResponse),
     /// A successful `RopSetColumns`.
     SetColumns(SetColumnsResponse),
+    /// A successful `RopSortTable` or `RopRestrict`.
+    ///
+    /// Neither reports how many rows are left, so a restricted table's size is only knowable by
+    /// reading it.
+    TableStatus(TableStatusResponse),
     /// A successful `RopQueryRows`, with its rows already decoded.
     QueryRows(QueryRowsResponse),
+    /// A successful `RopOpenMessage` or `RopOpenEmbeddedMessage`.
+    OpenMessage(OpenMessageResponse),
+    /// A successful `RopOpenStream` or `RopGetStreamSize`, reporting the stream's length.
+    StreamSize(StreamSizeResponse),
+    /// A successful `RopReadStream`. Empty data is how the end of the stream is reported.
+    ReadStream(ReadStreamResponse),
+    /// A ROP that succeeded and had nothing to report.
+    ///
+    /// `RopOpenAttachment` and `RopGetAttachmentTable` both answer with a bare `ReturnValue`: the
+    /// handle they produced is in the handle table and there is no body at all. The `RopId` is kept
+    /// so a batch issuing both can still tell which succeeded.
+    Succeeded {
+        /// Which ROP.
+        rop: RopId,
+    },
     /// A successful `RopGetPropertiesSpecific` or `RopGetPropertiesAll`.
     GetProperties(GetPropertiesResponse),
     /// A successful `RopSetProperties` or `RopDeleteProperties`.
@@ -99,6 +120,46 @@ impl RopResponse {
     pub const fn as_query_rows(&self) -> Option<&QueryRowsResponse> {
         match self {
             Self::QueryRows(rows) => Some(rows),
+            _ => None,
+        }
+    }
+
+    /// The opened message, if this is a response to the ROP named.
+    ///
+    /// The ROP is a parameter rather than implied because reaching an embedded message opens its
+    /// parent first, so one batch carries a response to each — and `RopOpenMessage`'s arrives
+    /// first, so a caller taking whichever came first gets the wrong message.
+    #[must_use]
+    pub fn as_open_message(&self, rop: RopId) -> Option<&OpenMessageResponse> {
+        match self {
+            Self::OpenMessage(response) if response.rop() == rop => Some(response),
+            _ => None,
+        }
+    }
+
+    /// The stream's length, if this is a `RopOpenStream` or `RopGetStreamSize` response.
+    #[must_use]
+    pub const fn as_stream_size(&self) -> Option<StreamSizeResponse> {
+        match self {
+            Self::StreamSize(response) => Some(*response),
+            _ => None,
+        }
+    }
+
+    /// The bytes, if this is a `RopReadStream` response.
+    #[must_use]
+    pub const fn as_stream_data(&self) -> Option<&ReadStreamResponse> {
+        match self {
+            Self::ReadStream(response) => Some(response),
+            _ => None,
+        }
+    }
+
+    /// The table's status, if this is a `RopSortTable` or `RopRestrict` response.
+    #[must_use]
+    pub const fn as_table_status(&self) -> Option<TableStatusResponse> {
+        match self {
+            Self::TableStatus(response) => Some(*response),
             _ => None,
         }
     }
@@ -256,6 +317,20 @@ pub(crate) fn decode_all(rops: &[u8], context: Decoding<'_>) -> Result<Vec<RopRe
                 RopResponse::GetTable(GetTableResponse::read(&mut r)?)
             }
             RopId::SET_COLUMNS => RopResponse::SetColumns(SetColumnsResponse::read(&mut r)?),
+            RopId::SORT_TABLE | RopId::RESTRICT => {
+                RopResponse::TableStatus(TableStatusResponse::read(&mut r, rop)?)
+            }
+            // Neither has a response body at all: the handle each produced is in the handle table
+            // and the buffer moves straight on to the next ROP.
+            RopId::OPEN_ATTACHMENT | RopId::GET_ATTACHMENT_TABLE => RopResponse::Succeeded { rop },
+            RopId::OPEN_MESSAGE => RopResponse::OpenMessage(OpenMessageResponse::read(&mut r)?),
+            RopId::OPEN_EMBEDDED_MESSAGE => {
+                RopResponse::OpenMessage(OpenMessageResponse::read_embedded(&mut r)?)
+            }
+            RopId::OPEN_STREAM | RopId::GET_STREAM_SIZE => {
+                RopResponse::StreamSize(StreamSizeResponse::read(&mut r, rop)?)
+            }
+            RopId::READ_STREAM => RopResponse::ReadStream(ReadStreamResponse::read(&mut r)?),
             RopId::QUERY_ROWS => {
                 let columns = context
                     .columns

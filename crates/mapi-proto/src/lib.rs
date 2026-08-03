@@ -55,10 +55,11 @@
 //!
 //! No compression (LZ77+DIRECT2), no `0xA5` obfuscation and no auxiliary buffers: every request
 //! asks the server to skip all three, and a server that ignores that is reported rather than
-//! guessed at. No Address Book endpoint, no notifications, no ICS, and no Message or Attachment
-//! objects. Table reads, folder walks — including the recursive kind and the entry-id chain that
-//! reaches the folders a logon does not name — the property layer, and the named-property lookup
-//! every calendar read depends on are what is covered so far.
+//! guessed at. No Address Book endpoint, no notifications and no ICS, and nothing that creates,
+//! modifies or sends an item. What is covered: table reads — including the recursive folder walk,
+//! the entry-id chain that reaches the folders a logon does not name, and sorting and filtering on
+//! the server — the property layer, the named-property lookup every calendar read depends on, and
+//! the Message, Attachment and Stream objects that turn a row into an item.
 //!
 //! [`mapi-client`]: https://docs.rs/mapi-client
 //! [`mapi-autodiscover`]: https://docs.rs/mapi-autodiscover
@@ -79,18 +80,21 @@ pub use crate::http::{
     CookieJar, Headers, Lcid, MetaTag, Payload, Request, RequestType, ResponseCode,
 };
 pub use crate::oxcdata::{
-    APPOINTMENT_PROPERTIES, CONTACT_PROPERTIES, CONTENTS_COLUMNS, Cell, ContainerClass,
-    FOLDER_PROPERTIES, FileTime, Floating64, FolderEntryId, FolderId, Guid, HIERARCHY_COLUMNS,
-    LegacyDn, LongTermId, MAILBOX_PROPERTIES, MessageId, NamedProperty, NamedPropertyId,
-    PropertyName, PropertyNameKind, PropertyProblem, PropertyRow, PropertySet, PropertySetId,
-    PropertySetIter, PropertyTag, PropertyType, PropertyValue, ReplicaId, RowForm,
-    SPECIAL_FOLDER_PROPERTIES, ShortTermId, SpecialFolder, StoreObjectType, TableString,
-    TaggedValue,
+    APPOINTMENT_COLUMNS, APPOINTMENT_PROPERTIES, ATTACHMENT_COLUMNS, ATTACHMENT_PROPERTIES,
+    AttachMethod, AttachmentNumber, CONTACT_COLUMNS, CONTACT_PROPERTIES, CONTENTS_COLUMNS, Cell,
+    ContainerClass, FOLDER_PROPERTIES, FileTime, Floating64, FolderEntryId, FolderId, FuzzyLevel,
+    Guid, HIERARCHY_COLUMNS, LegacyDn, LongTermId, MAILBOX_PROPERTIES, MESSAGE_PROPERTIES,
+    MessageId, NamedProperty, NamedPropertyId, PropertyName, PropertyNameKind, PropertyProblem,
+    PropertyRow, PropertySet, PropertySetId, PropertySetIter, PropertyTag, PropertyType,
+    PropertyValue, RelationalOperator, ReplicaId, Restriction, RowForm, SPECIAL_FOLDER_PROPERTIES,
+    ShortTermId, SortDirection, SortOrder, SortOrderSet, SpecialFolder, StoreObjectType,
+    TableString, TaggedValue,
 };
 pub use crate::rop::{
     Bookmark, FolderDepth, GetPropertiesResponse, HandleSlot, IdFromLongTermIdResponse,
-    LogonResponse, LongTermIdFromIdResponse, NameRegistration, ObjectHandle, PropertyIdsResponse,
-    PropertyNamesResponse, PropertyProblemsResponse, QueryRowsResponse, RopBatch, RopId,
-    RopResponse, TableStatus, WellKnownFolder,
+    LogonResponse, LongTermIdFromIdResponse, NameRegistration, ObjectHandle, OpenMessageResponse,
+    OpenRecipient, PropertyIdsResponse, PropertyNamesResponse, PropertyProblemsResponse,
+    QueryRowsResponse, ReadStreamResponse, RecipientType, RopBatch, RopId, RopResponse,
+    StreamSizeResponse, TableStatus, TableStatusResponse, WellKnownFolder,
 };
 pub use crate::session::{Connected, Execution, Outcome, Session, SessionBuilder};

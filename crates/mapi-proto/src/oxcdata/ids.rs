@@ -18,6 +18,37 @@ pub struct FolderId(u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct MessageId(u64);
 
+/// Identifies one attachment within its message — the value of `PidTagAttachNumber`.
+///
+/// A newtype rather than a `u32` for the usual reason and one of its own: this is *not* a MAPI
+/// identifier in the [`MessageId`] sense. It is an index the server assigns within a single
+/// message, so the same number means a different attachment on every message, and it is only valid
+/// against the message whose attachment table reported it.
+///
+/// [MS-OXCMSG] §2.2.2.6 — `PidTagAttachNumber`
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct AttachmentNumber(u32);
+
+impl AttachmentNumber {
+    /// Wraps the number an attachment table row reported.
+    #[must_use]
+    pub const fn new(raw: u32) -> Self {
+        Self(raw)
+    }
+
+    /// The number as `RopOpenAttachment`'s `AttachmentID` field carries it.
+    #[must_use]
+    pub const fn as_u32(self) -> u32 {
+        self.0
+    }
+}
+
+impl core::fmt::Display for AttachmentNumber {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
 /// Identifies a Store object; the short form of a replica GUID.
 ///
 /// [MS-OXCDATA] §2.2.1.1 — `ReplicaId`

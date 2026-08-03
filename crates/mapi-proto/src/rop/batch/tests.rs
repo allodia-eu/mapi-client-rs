@@ -1,5 +1,10 @@
 use super::*;
-use crate::oxcdata::{Guid, HIERARCHY_COLUMNS};
+use crate::oxcdata::{
+    CONTENTS_COLUMNS, FolderId, Guid, HIERARCHY_COLUMNS, LongTermId, MessageId, PropertyName,
+    Restriction, ShortTermId, SortOrder, SortOrderSet,
+};
+use crate::rop::named::NameRegistration;
+use crate::rop::table::FolderDepth;
 
 fn dn() -> LegacyDn {
     LegacyDn::new("/o=First/ou=Exchange Administrative Group/cn=alice").unwrap()
@@ -257,4 +262,130 @@ fn handles_and_slots_render_for_humans() {
 
     let mut batch = RopBatch::new();
     assert_eq!(batch.bind(ObjectHandle::NONE).to_string(), "slot 0");
+}
+
+/// The whole of *"extract an attachment's bytes"* in one buffer: open the message, open its
+/// attachment, open the attachment's data as a stream, read it. Four handles, and not one index
+/// written by hand.
+#[test]
+fn a_message_attachment_and_stream_chain_through_one_buffer() {
+    let mut batch = RopBatch::new();
+    let logon = batch.bind(ObjectHandle::new(0x2A));
+    let message = batch.open_message(logon, FolderId::new(1), MessageId::new(2));
+    let attachment = batch.open_attachment(message, 0);
+    let stream = batch.open_stream(attachment, PropertyTag::ATTACH_DATA_BINARY);
+    batch.read_stream(stream, 4096).release(stream);
+
+    assert_eq!(message.index(), 1);
+    assert_eq!(attachment.index(), 2);
+    assert_eq!(stream.index(), 3);
+    assert_eq!(batch.len(), 5);
+
+    let built = batch.build().unwrap();
+    let rops = built.bytes.get(10..).unwrap();
+    // RopOpenMessage reads slot 0 and writes slot 1.
+    assert_eq!(rops.get(..4), Some(&[0x03, 0x00, 0x00, 0x01][..]));
+    // RopOpenAttachment reads slot 1 and writes slot 2, 23 bytes later — the length of a
+    // RopOpenMessage request, which carries two 8-byte ids.
+    assert_eq!(rops.get(23..27), Some(&[0x22, 0x00, 0x01, 0x02][..]));
+    // RopOpenStream reads slot 2 and writes slot 3, 9 bytes after that.
+    assert_eq!(rops.get(32..36), Some(&[0x2B, 0x00, 0x02, 0x03][..]));
+}
+
+/// An attachment table hangs off a message, not off a folder — and a message that turns out to be
+/// an embedded one hangs off an attachment. Both are chains this layer has to allow.
+#[test]
+fn an_embedded_message_hangs_off_the_attachment_it_is() {
+    let mut batch = RopBatch::new();
+    let logon = batch.bind(ObjectHandle::new(0x2A));
+    let message = batch.open_message(logon, FolderId::new(1), MessageId::new(2));
+    let table = batch.attachment_table(message);
+    let attachment = batch.open_attachment(message, 3);
+    let embedded = batch.open_embedded_message(attachment);
+    batch.get_properties(embedded, &[PropertyTag::SUBJECT]);
+
+    assert_eq!(table.index(), 2);
+    assert_eq!(attachment.index(), 3);
+    assert_eq!(embedded.index(), 4);
+    assert!(batch.build().is_ok());
+}
+
+/// [MS-OXCTABL] §2.2.2.3 requires the sort key to be among the columns. The server's refusal does
+/// not name the column, so the batch does — and it does it before spending the round trip.
+#[test]
+fn sorting_on_a_column_the_table_was_not_given_is_refused_by_name() {
+    let mut batch = RopBatch::new();
+    let logon = batch.bind(ObjectHandle::new(0x2A));
+    let folder = batch.open_folder(logon, FolderId::new(1));
+    let table = batch.contents_table(folder);
+    batch.set_columns(table, &[PropertyTag::MID]).sort_table(
+        table,
+        &SortOrderSet::new([SortOrder::descending(PropertyTag::MESSAGE_DELIVERY_TIME)]),
+    );
+
+    assert!(matches!(
+        batch.build(),
+        Err(Error::SortColumnNotSet {
+            tag: PropertyTag::MESSAGE_DELIVERY_TIME
+        })
+    ));
+}
+
+/// The same sort against a column set that does carry it goes out, and a table whose columns this
+/// batch never saw is left to the server rather than refused.
+#[test]
+fn a_sort_whose_column_is_present_or_unknown_is_sent() {
+    let orders = SortOrderSet::new([SortOrder::descending(PropertyTag::MESSAGE_DELIVERY_TIME)]);
+
+    let mut batch = RopBatch::new();
+    let logon = batch.bind(ObjectHandle::new(0x2A));
+    let folder = batch.open_folder(logon, FolderId::new(1));
+    let table = batch.contents_table(folder);
+    batch
+        .set_columns(table, &CONTENTS_COLUMNS)
+        .sort_table(table, &orders);
+    assert!(batch.build().is_ok());
+
+    // A table bound from an earlier round trip carries no recorded column set here.
+    let mut later = RopBatch::new();
+    let bound = later.bind(ObjectHandle::new(0x30));
+    later.sort_table(bound, &orders);
+    assert!(later.build().is_ok());
+}
+
+/// A restriction goes out with its own length in front of it, and the packet is what
+/// [MS-OXCDATA] §2.12.9.1 describes.
+#[test]
+fn a_restriction_is_sent_with_its_own_size() {
+    let mut batch = RopBatch::new();
+    let table = batch.bind(ObjectHandle::new(0x30));
+    batch.restrict(table, &Restriction::exists(PropertyTag::SUBJECT));
+
+    let built = batch.build().unwrap();
+    #[rustfmt::skip]
+    let expected = &[
+        0x14, 0x00, 0x00,       // RopRestrict, LogonId, InputHandleIndex
+        0x00,                   // RestrictFlags: synchronous
+        0x05, 0x00,             // RestrictionDataSize
+        0x08, 0x1F, 0x00, 0x37, 0x00, // ExistRestriction on PidTagSubject
+    ][..];
+    // After the RPC_HEADER_EXT and RopSize, and before the one-entry handle table.
+    assert_eq!(built.bytes.get(10..21), Some(expected));
+}
+
+/// `DataSize` is two bytes, so a larger read could not be answered in full — and a short answer is
+/// how the end of a stream is reported, which is why this is refused rather than clamped.
+#[test]
+fn a_stream_read_past_what_one_response_holds_fails_the_batch() {
+    let mut batch = RopBatch::new();
+    let stream = batch.bind(ObjectHandle::new(0x40));
+    batch.read_stream(stream, 0x1_0000);
+
+    assert!(matches!(
+        batch.build(),
+        Err(Error::StreamReadTooLarge {
+            wanted: 0x1_0000,
+            ..
+        })
+    ));
 }

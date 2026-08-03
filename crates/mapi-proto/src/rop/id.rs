@@ -19,6 +19,13 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.8.8
     pub const DELETE_PROPERTIES: Self = Self(0x0B);
+    /// `RopGetAttachmentTable`, `0x21` — the attachments on a message.
+    ///
+    /// Its response carries **no row count**, unlike the folder tables, so how many attachments
+    /// there are is only known once rows have been read.
+    ///
+    /// [MS-OXCROPS] §2.2.6.17
+    pub const GET_ATTACHMENT_TABLE: Self = Self(0x21);
     /// `RopGetContentsTable`, `0x05` — the messages in a folder.
     ///
     /// [MS-OXCROPS] §2.2.4.14
@@ -43,6 +50,10 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.8.1
     pub const GET_PROPERTY_IDS_FROM_NAMES: Self = Self(0x56);
+    /// `RopGetStreamSize`, `0x5E` — how many bytes the stream holds now.
+    ///
+    /// [MS-OXCROPS] §2.2.9.6
+    pub const GET_STREAM_SIZE: Self = Self(0x5E);
     /// `RopIdFromLongTermId`, `0x44` — a long-term id into one a ROP will take.
     ///
     /// [MS-OXCROPS] §2.2.3.9
@@ -55,18 +66,45 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.3.8
     pub const LONG_TERM_ID_FROM_ID: Self = Self(0x43);
+    /// `RopOpenAttachment`, `0x22` — opens one attachment by its `PidTagAttachNumber`.
+    ///
+    /// [MS-OXCROPS] §2.2.6.12
+    pub const OPEN_ATTACHMENT: Self = Self(0x22);
+    /// `RopOpenEmbeddedMessage`, `0x46` — opens an attachment as the message it holds.
+    ///
+    /// The only way to reach an attachment whose `PidTagAttachMethod` is `afEmbeddedMessage`:
+    /// such an attachment has no `PidTagAttachDataBinary` at all.
+    ///
+    /// [MS-OXCROPS] §2.2.6.16
+    pub const OPEN_EMBEDDED_MESSAGE: Self = Self(0x46);
     /// `RopOpenFolder`, `0x02`.
     ///
     /// [MS-OXCROPS] §2.2.4.1
     pub const OPEN_FOLDER: Self = Self(0x02);
+    /// `RopOpenMessage`, `0x03` — opens a message in a folder.
+    ///
+    /// [MS-OXCROPS] §2.2.6.1
+    pub const OPEN_MESSAGE: Self = Self(0x03);
+    /// `RopOpenStream`, `0x2B` — opens one property for streaming access.
+    ///
+    /// [MS-OXCROPS] §2.2.9.1
+    pub const OPEN_STREAM: Self = Self(0x2B);
     /// `RopQueryRows`, `0x15`.
     ///
     /// [MS-OXCROPS] §2.2.5.4
     pub const QUERY_ROWS: Self = Self(0x15);
+    /// `RopReadStream`, `0x2C` — reads bytes from an open stream.
+    ///
+    /// [MS-OXCROPS] §2.2.9.2
+    pub const READ_STREAM: Self = Self(0x2C);
     /// `RopRelease`, `0x01` — releases a Server object handle.
     ///
     /// [MS-OXCROPS] §2.2.15.3
     pub const RELEASE: Self = Self(0x01);
+    /// `RopRestrict`, `0x14` — establishes a filter for a table.
+    ///
+    /// [MS-OXCROPS] §2.2.5.3
+    pub const RESTRICT: Self = Self(0x14);
     /// `RopSetColumns`, `0x12` — the column set every later row is encoded against.
     ///
     /// [MS-OXCROPS] §2.2.5.1
@@ -75,6 +113,10 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.8.6
     pub const SET_PROPERTIES: Self = Self(0x0A);
+    /// `RopSortTable`, `0x13` — orders a table's rows by a sort key.
+    ///
+    /// [MS-OXCROPS] §2.2.5.2
+    pub const SORT_TABLE: Self = Self(0x13);
 
     /// Wraps a raw opcode.
     #[must_use]
@@ -94,8 +136,17 @@ impl RopId {
         Some(match self {
             Self::RELEASE => "RopRelease",
             Self::OPEN_FOLDER => "RopOpenFolder",
+            Self::OPEN_MESSAGE => "RopOpenMessage",
             Self::GET_HIERARCHY_TABLE => "RopGetHierarchyTable",
             Self::GET_CONTENTS_TABLE => "RopGetContentsTable",
+            Self::SORT_TABLE => "RopSortTable",
+            Self::RESTRICT => "RopRestrict",
+            Self::GET_ATTACHMENT_TABLE => "RopGetAttachmentTable",
+            Self::OPEN_ATTACHMENT => "RopOpenAttachment",
+            Self::OPEN_EMBEDDED_MESSAGE => "RopOpenEmbeddedMessage",
+            Self::OPEN_STREAM => "RopOpenStream",
+            Self::READ_STREAM => "RopReadStream",
+            Self::GET_STREAM_SIZE => "RopGetStreamSize",
             Self::GET_PROPERTIES_SPECIFIC => "RopGetPropertiesSpecific",
             Self::GET_PROPERTIES_ALL => "RopGetPropertiesAll",
             Self::GET_NAMES_FROM_PROPERTY_IDS => "RopGetNamesFromPropertyIds",
@@ -132,8 +183,17 @@ mod tests {
         for (rop, raw, name) in [
             (RopId::RELEASE, 0x01, "RopRelease"),
             (RopId::OPEN_FOLDER, 0x02, "RopOpenFolder"),
+            (RopId::OPEN_MESSAGE, 0x03, "RopOpenMessage"),
             (RopId::GET_HIERARCHY_TABLE, 0x04, "RopGetHierarchyTable"),
             (RopId::GET_CONTENTS_TABLE, 0x05, "RopGetContentsTable"),
+            (RopId::SORT_TABLE, 0x13, "RopSortTable"),
+            (RopId::RESTRICT, 0x14, "RopRestrict"),
+            (RopId::GET_ATTACHMENT_TABLE, 0x21, "RopGetAttachmentTable"),
+            (RopId::OPEN_ATTACHMENT, 0x22, "RopOpenAttachment"),
+            (RopId::OPEN_STREAM, 0x2B, "RopOpenStream"),
+            (RopId::READ_STREAM, 0x2C, "RopReadStream"),
+            (RopId::OPEN_EMBEDDED_MESSAGE, 0x46, "RopOpenEmbeddedMessage"),
+            (RopId::GET_STREAM_SIZE, 0x5E, "RopGetStreamSize"),
             (
                 RopId::GET_PROPERTIES_SPECIFIC,
                 0x07,

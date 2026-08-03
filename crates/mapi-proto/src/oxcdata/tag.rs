@@ -1,12 +1,18 @@
-//! Property tags, and the sets of them this crate asks for.
+//! Property tags: a property id and the type of its value, packed into one 32-bit word.
 //!
-//! A tag is a property id and a property type packed into one 32-bit value. Written the way the
-//! documents write it — `0x0037001F` for `PidTagSubject` — the id is the high half and the type
-//! the low half, and the little-endian encoding of that `u32` is exactly the wire form.
+//! Written the way the documents write it — `0x0037001F` for `PidTagSubject` — the id is the high
+//! half and the type the low half, and the little-endian encoding of that `u32` is exactly the wire
+//! form.
+//!
+//! The catalogue is split three ways so that none of the three outgrows the file limit: the type
+//! and the constants are here, the canonical names are in the `names` submodule, and the sets a
+//! caller asks for are in `columns`.
 //!
 //! [MS-OXCDATA] §2.9 — `PropertyTag` structure
 
 use crate::oxcdata::PropertyType;
+
+mod names;
 
 /// A property id paired with the type of its value.
 ///
@@ -27,10 +33,68 @@ impl PropertyTag {
     ///
     /// [`SpecialFolder`]: crate::SpecialFolder
     pub const ADDITIONAL_REN_ENTRY_IDS: Self = Self(0x36D8_1102);
+    /// `PidTagAttachDataBinary`, `0x37010102` — an attachment's content.
+    ///
+    /// **Read this with `RopOpenStream`, not with a property fetch.** Anything larger than the
+    /// response buffer comes back as `NotEnoughMemory` instead of as bytes, and an attachment whose
+    /// [`ATTACH_METHOD`](Self::ATTACH_METHOD) is `afEmbeddedMessage` does not hold this property at
+    /// all — its payload is another Message object.
+    ///
+    /// [MS-OXCMSG] §2.2.2.7
+    pub const ATTACH_DATA_BINARY: Self = Self(0x3701_0102);
+    /// `PidTagAttachFilename`, `0x3704001F` — the 8.3 form of the attachment's file name.
+    ///
+    /// [MS-OXCMSG] §2.2.2.11
+    pub const ATTACH_FILENAME: Self = Self(0x3704_001F);
+    /// `PidTagAttachLongFilename`, `0x3707001F` — the attachment's full file name.
+    ///
+    /// [MS-OXCMSG] §2.2.2.10
+    pub const ATTACH_LONG_FILENAME: Self = Self(0x3707_001F);
+    /// `PidTagAttachMethod`, `0x37050003` — how the attachment's content is reached.
+    ///
+    /// The column that decides which of two entirely different reads is correct. See
+    /// [`AttachMethod`](crate::AttachMethod).
+    ///
+    /// [MS-OXCMSG] §2.2.2.9
+    pub const ATTACH_METHOD: Self = Self(0x3705_0003);
+    /// `PidTagAttachMimeTag`, `0x370E001F` — the attachment's MIME content type.
+    ///
+    /// [MS-OXCMSG] §2.2.2.29
+    pub const ATTACH_MIME_TAG: Self = Self(0x370E_001F);
+    /// `PidTagAttachNumber`, `0x0E210003` — identifies an attachment within its message.
+    ///
+    /// This is the `AttachmentID` `RopOpenAttachment` takes, and the only way to name one.
+    ///
+    /// [MS-OXCMSG] §2.2.2.6
+    pub const ATTACH_NUMBER: Self = Self(0x0E21_0003);
+    /// `PidTagAttachSize`, `0x0E200003` — bytes the attachment occupies on the server.
+    ///
+    /// [MS-OXCMSG] §2.2.2.5
+    pub const ATTACH_SIZE: Self = Self(0x0E20_0003);
     /// `PidTagAttributeHidden`, `0x10F4000B` — whether a client hides this folder from the user.
     ///
     /// [MS-OXCFOLD] §2.2.2.2.2.1
     pub const ATTRIBUTE_HIDDEN: Self = Self(0x10F4_000B);
+    /// `PidTagBody`, `0x1000001F` — the message's plain-text body.
+    ///
+    /// **Read this with `RopOpenStream`.** [MS-OXCPRPT] §2.2.3.2 has a value too large for the
+    /// response buffer come back as `NotEnoughMemory`, and any real body clears that bar — so a
+    /// property fetch answers a long message with an error and a short one with text, which is the
+    /// most misleading pair of behaviours a body reader could have.
+    ///
+    /// [MS-OXCMSG] §2.2.1.56.1
+    pub const BODY: Self = Self(0x1000_001F);
+    /// `PidTagHtml`, `0x10130102` — the message's body as HTML.
+    ///
+    /// `PtypBinary` rather than a string: the bytes carry their own character set, named by
+    /// `PidTagInternetCodepage`. Streamed for the same reason as [`BODY`](Self::BODY).
+    ///
+    /// [MS-OXCMSG] §2.2.1.56.4
+    pub const BODY_HTML: Self = Self(0x1013_0102);
+    /// `PidTagBusinessTelephoneNumber`, `0x3A08001F` — a contact's work telephone number.
+    ///
+    /// [MS-OXOCNTC] §2.2.1.4.4
+    pub const BUSINESS_TELEPHONE_NUMBER: Self = Self(0x3A08_001F);
     /// `PidTagCodePageId`, `0x66C30003` — the code page `PtypString8` values are encoded in.
     ///
     /// [MS-OXCSTOR] §2.2.2.1.1.15
@@ -46,6 +110,10 @@ impl PropertyTag {
     ///
     /// [MS-OXCSTOR] §2.2.2.1.2.1, and §7 note 14
     pub const COMMENT: Self = Self(0x3004_001F);
+    /// `PidTagCompanyName`, `0x3A16001F` — the company a contact works for.
+    ///
+    /// [MS-OXOCNTC] §2.2.1.6.2
+    pub const COMPANY_NAME: Self = Self(0x3A16_001F);
     /// `PidTagContainerClass`, `0x3613001F` — the kind of item a folder holds.
     ///
     /// The whole of what makes a folder a calendar rather than a mailbox: there is no calendar
@@ -71,6 +139,13 @@ impl PropertyTag {
     ///
     /// [MS-OXCFOLD] §2.2.2.2.2.5, and [MS-OXCSTOR] §2.2.2.1.2.3 for the Store object
     pub const DISPLAY_NAME: Self = Self(0x3001_001F);
+    /// `PidTagDisplayTo`, `0x0E04001F` — the primary recipients, as one display string.
+    ///
+    /// A computed summary of the recipient table rather than the table itself, which is why it can
+    /// be read as an ordinary column.
+    ///
+    /// [MS-OXOMSG] §2.2.1.9
+    pub const DISPLAY_TO: Self = Self(0x0E04_001F);
     /// `PidTagExtendedRuleSizeLimit`, `0x0E9B0003` — bytes allowed for one extended rule.
     ///
     /// [MS-OXCSTOR] §2.2.2.1.1.1
@@ -92,6 +167,18 @@ impl PropertyTag {
     ///
     /// [MS-OXCFOLD] §2.2.2.2.2.7
     pub const FOLDER_TYPE: Self = Self(0x3601_0003);
+    /// `PidTagGivenName`, `0x3A06001F` — a contact's first name.
+    ///
+    /// [MS-OXOCNTC] §2.2.1.1.6
+    pub const GIVEN_NAME: Self = Self(0x3A06_001F);
+    /// `PidTagHasAttachments`, `0x0E1B000B` — whether the message has any attachment.
+    ///
+    /// Computed from `PidTagMessageFlags`' `mfHasAttach` bit, and worth asking for by name: a
+    /// caller that opened an attachment table for every message would spend a round trip per
+    /// message to be told there is nothing there.
+    ///
+    /// [MS-OXCMSG] §2.2.1.2
+    pub const HAS_ATTACHMENTS: Self = Self(0x0E1B_000B);
     /// `PidTagIpmAppointmentEntryId`, `0x36D00102` — the Calendar folder's entry id.
     ///
     /// [MS-OXOSFLD] §2.2.3
@@ -120,6 +207,10 @@ impl PropertyTag {
     ///
     /// [MS-OXOSFLD] §2.2.3
     pub const IPM_TASK_ENTRY_ID: Self = Self(0x36D4_0102);
+    /// `PidTagLastModificationTime`, `0x30080040` — when the object last changed.
+    ///
+    /// [MS-OXCMSG] §2.2.2.2
+    pub const LAST_MODIFICATION_TIME: Self = Self(0x3008_0040);
     /// `PidTagLocaleId`, `0x66A10003` — the locale system-generated messages are written in.
     ///
     /// Documented as a read-only property of every private mailbox logon; observed answering
@@ -145,6 +236,14 @@ impl PropertyTag {
     ///
     /// [MS-OXCSTOR] §2.2.2.1.1.2
     pub const MAXIMUM_SUBMIT_MESSAGE_SIZE: Self = Self(0x666D_0003);
+    /// `PidTagMessageClass`, `0x001A001F` — what kind of item this is.
+    ///
+    /// `IPM.Note` for mail, `IPM.Appointment` for a calendar entry, `IPM.Contact` for a contact.
+    /// The message-level counterpart of `PidTagContainerClass`, and the only thing that
+    /// distinguishes an appointment from an ordinary message sitting in the same folder.
+    ///
+    /// [MS-OXCMSG] §2.2.1.3
+    pub const MESSAGE_CLASS: Self = Self(0x001A_001F);
     /// `PidTagMessageDeliveryTime`, `0x0E060040` — when the server took delivery.
     ///
     /// [MS-OXOMSG] §2.2.3.9
@@ -153,6 +252,14 @@ impl PropertyTag {
     ///
     /// [MS-OXCMSG] §2.2.1.6
     pub const MESSAGE_FLAGS: Self = Self(0x0E07_0003);
+    /// `PidTagMessageSize`, `0x0E080003` — bytes one message occupies.
+    ///
+    /// Shares its property id with [`MESSAGE_SIZE_EXTENDED`](Self::MESSAGE_SIZE_EXTENDED), which
+    /// is the same quantity in 64 bits. A tag is an id **and** a type, so the two are different
+    /// tags; this one is the right question for a message and the other for a mailbox.
+    ///
+    /// [MS-OXCMSG] §2.2.1.7
+    pub const MESSAGE_SIZE: Self = Self(0x0E08_0003);
     /// `PidTagMessageSizeExtended`, `0x0E080014` — bytes of content in the mailbox.
     ///
     /// Shares property id `0x0E08` with `PidTagMessageSize`, which is the same quantity in 32 bits
@@ -165,6 +272,21 @@ impl PropertyTag {
     ///
     /// [MS-OXCFXICS] §2.2.1.2.1
     pub const MID: Self = Self(0x674A_0014);
+    /// `PidTagNativeBody`, `0x10160003` — which body property is the original.
+    ///
+    /// Undefined (0), plain text (1), RTF (2), HTML (3), clear-signed (4). Everything else is
+    /// converted from it on demand, so this says which one to stream if the un-converted text is
+    /// what is wanted.
+    ///
+    /// [MS-OXCMSG] §2.2.1.56.7
+    pub const NATIVE_BODY: Self = Self(0x1016_0003);
+    /// `PidTagNormalizedSubject`, `0x0E1D001F` — the subject with its prefix removed.
+    ///
+    /// `PidTagSubject` is this and [`SUBJECT_PREFIX`](Self::SUBJECT_PREFIX) concatenated, which is
+    /// why `RopOpenMessage` answers with the two halves rather than the whole.
+    ///
+    /// [MS-OXCMSG] §2.2.1.10
+    pub const NORMALIZED_SUBJECT: Self = Self(0x0E1D_001F);
     /// `PidTagOutOfOfficeState`, `0x661D000B` — whether the user is out of office.
     ///
     /// [MS-OXCSTOR] §2.2.2.1.2.4
@@ -189,6 +311,14 @@ impl PropertyTag {
     ///
     /// [MS-OXOSFLD] §2.2.3
     pub const REMINDERS_ONLINE_ENTRY_ID: Self = Self(0x36D5_0102);
+    /// `PidTagSenderEmailAddress`, `0x0C1F001F` — the sender's address, in its own address type.
+    ///
+    /// [MS-OXOMSG] §2.2.1.48
+    pub const SENDER_EMAIL_ADDRESS: Self = Self(0x0C1F_001F);
+    /// `PidTagSenderName`, `0x0C1A001F` — the sender's display name.
+    ///
+    /// [MS-OXOMSG] §2.2.1.51
+    pub const SENDER_NAME: Self = Self(0x0C1A_001F);
     /// `PidTagSerializedReplidGuidMap`, `0x66380102` — 18-byte REPLID/REPLGUID pairs.
     ///
     /// Whatever part of the mapping the server chose to send, which is not required to be all of
@@ -215,6 +345,14 @@ impl PropertyTag {
     ///
     /// [MS-OXPROPS] §2.1035
     pub const SUBJECT: Self = Self(0x0037_001F);
+    /// `PidTagSubjectPrefix`, `0x003D001F` — the `RE:`/`FW:` part of a subject.
+    ///
+    /// [MS-OXCMSG] §2.2.1.9
+    pub const SUBJECT_PREFIX: Self = Self(0x003D_001F);
+    /// `PidTagSurname`, `0x3A11001F` — a contact's family name.
+    ///
+    /// [MS-OXOCNTC] §2.2.1.1.10
+    pub const SURNAME: Self = Self(0x3A11_001F);
     /// `PidTagUserEntryId`, `0x66190102` — the address book `EntryID` of the logged-on user.
     ///
     /// Not the same as [`MAILBOX_OWNER_ENTRY_ID`](Self::MAILBOX_OWNER_ENTRY_ID): they differ
@@ -258,11 +396,20 @@ impl PropertyTag {
         PropertyType::new(u16::from_le_bytes([low, high]))
     }
 
+    /// The same property, carried as a different type.
+    ///
+    /// What `RopOpenStream` needs when a body has to be read as bytes rather than as text: the
+    /// property is the same one, and only the reading changes.
+    #[must_use]
+    pub const fn with_type(self, property_type: PropertyType) -> Self {
+        Self::from_parts(self.id(), property_type)
+    }
+
     /// Whether this id was allocated for a named property rather than fixed by a specification.
     ///
     /// Ids from `0x8000` upwards are handed out by each store as it first needs them, so the same
-    /// id means a different property in a different mailbox. Nothing here resolves them yet; this
-    /// is what lets a diagnostic say "this number is only meaningful in the store it came from"
+    /// id means a different property in a different mailbox. Nothing here resolves them; this is
+    /// what lets a diagnostic say "this number is only meaningful in the store it came from"
     /// rather than printing it as though it were a constant.
     ///
     /// [MS-OXCDATA] §2.4.2 — `ecUnexpectedId`
@@ -272,50 +419,12 @@ impl PropertyTag {
     }
 
     /// The canonical `PidTagXxx` name, if this is a tag the crate knows.
+    ///
+    /// The table itself lives in this module's `names` submodule, so that adding a property is one
+    /// constant here and one line there rather than a file that outgrows the length limit.
     #[must_use]
     pub const fn name(self) -> Option<&'static str> {
-        Some(match self {
-            Self::ADDITIONAL_REN_ENTRY_IDS => "PidTagAdditionalRenEntryIds",
-            Self::ATTRIBUTE_HIDDEN => "PidTagAttributeHidden",
-            Self::CODE_PAGE_ID => "PidTagCodePageId",
-            Self::COMMENT => "PidTagComment",
-            Self::CONTAINER_CLASS => "PidTagContainerClass",
-            Self::CONTENT_COUNT => "PidTagContentCount",
-            Self::CONTENT_UNREAD_COUNT => "PidTagContentUnreadCount",
-            Self::DELETE_AFTER_SUBMIT => "PidTagDeleteAfterSubmit",
-            Self::DISPLAY_NAME => "PidTagDisplayName",
-            Self::EXTENDED_RULE_SIZE_LIMIT => "PidTagExtendedRuleSizeLimit",
-            Self::FOLDER_FLAGS => "PidTagFolderFlags",
-            Self::FOLDER_ID => "PidTagFolderId",
-            Self::FOLDER_TYPE => "PidTagFolderType",
-            Self::IPM_APPOINTMENT_ENTRY_ID => "PidTagIpmAppointmentEntryId",
-            Self::IPM_ARCHIVE_ENTRY_ID => "PidTagIpmArchiveEntryId",
-            Self::IPM_CONTACT_ENTRY_ID => "PidTagIpmContactEntryId",
-            Self::IPM_DRAFTS_ENTRY_ID => "PidTagIpmDraftsEntryId",
-            Self::IPM_JOURNAL_ENTRY_ID => "PidTagIpmJournalEntryId",
-            Self::IPM_NOTE_ENTRY_ID => "PidTagIpmNoteEntryId",
-            Self::IPM_TASK_ENTRY_ID => "PidTagIpmTaskEntryId",
-            Self::LOCALE_ID => "PidTagLocaleId",
-            Self::MAILBOX_OWNER_ENTRY_ID => "PidTagMailboxOwnerEntryId",
-            Self::MAILBOX_OWNER_NAME => "PidTagMailboxOwnerName",
-            Self::MAXIMUM_SUBMIT_MESSAGE_SIZE => "PidTagMaximumSubmitMessageSize",
-            Self::MESSAGE_DELIVERY_TIME => "PidTagMessageDeliveryTime",
-            Self::MESSAGE_FLAGS => "PidTagMessageFlags",
-            Self::MESSAGE_SIZE_EXTENDED => "PidTagMessageSizeExtended",
-            Self::MID => "PidTagMid",
-            Self::OUT_OF_OFFICE_STATE => "PidTagOutOfOfficeState",
-            Self::PARENT_FOLDER_ID => "PidTagParentFolderId",
-            Self::PROHIBIT_RECEIVE_QUOTA => "PidTagProhibitReceiveQuota",
-            Self::PROHIBIT_SEND_QUOTA => "PidTagProhibitSendQuota",
-            Self::REMINDERS_ONLINE_ENTRY_ID => "PidTagRemindersOnlineEntryId",
-            Self::SERIALIZED_REPLID_GUID_MAP => "PidTagSerializedReplidGuidMap",
-            Self::SORT_LOCALE_ID => "PidTagSortLocaleId",
-            Self::STORE_STATE => "PidTagStoreState",
-            Self::SUBFOLDERS => "PidTagSubfolders",
-            Self::SUBJECT => "PidTagSubject",
-            Self::USER_ENTRY_ID => "PidTagUserEntryId",
-            _ => return None,
-        })
+        names::name(self)
     }
 }
 
@@ -327,69 +436,6 @@ impl core::fmt::Display for PropertyTag {
         }
     }
 }
-
-/// The columns a hierarchy table is read with here.
-///
-/// `PidTagParentFolderId` and `PidTagContainerClass` are what make a listing useful rather than
-/// merely present: with the `Depth` flag set a hierarchy table lists every folder below the one
-/// asked about and says nothing about where each sits, so without the parent id the answer is a
-/// flat bag; and the class is the only thing that distinguishes a calendar from a mail folder.
-pub const HIERARCHY_COLUMNS: [PropertyTag; 6] = [
-    PropertyTag::FOLDER_ID,
-    PropertyTag::PARENT_FOLDER_ID,
-    PropertyTag::DISPLAY_NAME,
-    PropertyTag::CONTAINER_CLASS,
-    PropertyTag::CONTENT_COUNT,
-    PropertyTag::SUBFOLDERS,
-];
-
-/// The columns a contents table is read with here: message id, subject, delivery time, flags.
-pub const CONTENTS_COLUMNS: [PropertyTag; 4] = [
-    PropertyTag::MID,
-    PropertyTag::SUBJECT,
-    PropertyTag::MESSAGE_DELIVERY_TIME,
-    PropertyTag::MESSAGE_FLAGS,
-];
-
-/// The Folder object properties that answer "tell me about this folder".
-///
-/// This is *"get calendar details"* and *"get folder details"*: a calendar is a folder, so the two
-/// are one question. `PidTagFolderType` and `PidTagFolderFlags` are in the set because a search
-/// folder answers every other property exactly as a real folder does — the To-Do list reports a
-/// container class of `IPF.Task` and a message count, and holds none of them.
-///
-/// [MS-OXCFOLD] §2.2.2.2 — Folder object properties
-pub const FOLDER_PROPERTIES: [PropertyTag; 9] = [
-    PropertyTag::DISPLAY_NAME,
-    PropertyTag::CONTAINER_CLASS,
-    PropertyTag::PARENT_FOLDER_ID,
-    PropertyTag::CONTENT_COUNT,
-    PropertyTag::CONTENT_UNREAD_COUNT,
-    PropertyTag::MESSAGE_SIZE_EXTENDED,
-    PropertyTag::SUBFOLDERS,
-    PropertyTag::FOLDER_TYPE,
-    PropertyTag::FOLDER_FLAGS,
-];
-
-/// The Store object properties that answer "tell me about this mailbox".
-///
-/// Every one is documented as available on a private mailbox logon, so a server that omits one has
-/// said something — which is why they are asked for by name rather than filtered out of everything
-/// the store happens to hold.
-///
-/// [MS-OXCSTOR] §2.2.2.1 — private mailbox logon properties
-pub const MAILBOX_PROPERTIES: [PropertyTag; 10] = [
-    PropertyTag::DISPLAY_NAME,
-    PropertyTag::MAILBOX_OWNER_NAME,
-    PropertyTag::MESSAGE_SIZE_EXTENDED,
-    PropertyTag::CONTENT_COUNT,
-    PropertyTag::PROHIBIT_SEND_QUOTA,
-    PropertyTag::PROHIBIT_RECEIVE_QUOTA,
-    PropertyTag::MAXIMUM_SUBMIT_MESSAGE_SIZE,
-    PropertyTag::STORE_STATE,
-    PropertyTag::LOCALE_ID,
-    PropertyTag::MAILBOX_OWNER_ENTRY_ID,
-];
 
 #[cfg(test)]
 mod tests;

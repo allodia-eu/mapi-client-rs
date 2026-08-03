@@ -6,8 +6,8 @@
 //! [MS-OXCROPS] §2.2.5.4 — `RopQueryRows`
 //! [MS-OXCTABL] §2.2.2 — table semantics
 
-use crate::error::Result;
-use crate::oxcdata::{PropertyRow, PropertyTag, RowForm, ValueContext};
+use crate::error::{Error, Result};
+use crate::oxcdata::{PropertyRow, PropertyTag, Restriction, RowForm, SortOrderSet, ValueContext};
 use crate::rop::RopId;
 use crate::rop::batch::LOGON_ID;
 use crate::wire::{Reader, Writer};
@@ -194,6 +194,45 @@ impl SetColumnsResponse {
     }
 }
 
+/// What `RopSortTable` or `RopRestrict` reports.
+///
+/// Both answer with a `TableStatus` and nothing else. **Neither reports how many rows survived**:
+/// a restriction narrows the table and says so nowhere, so the count from before it was applied is
+/// stale and the only honest answer is to read.
+///
+/// [MS-OXCROPS] §2.2.5.2.2 — `RopSortTable` success response buffer
+/// [MS-OXCROPS] §2.2.5.3.2 — `RopRestrict` success response buffer
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TableStatusResponse {
+    rop: RopId,
+    status: TableStatus,
+}
+
+impl TableStatusResponse {
+    /// Which of the two ROPs answered.
+    #[must_use]
+    pub const fn rop(self) -> RopId {
+        self.rop
+    }
+
+    /// The table's status once the operation was applied.
+    ///
+    /// `SORTING` or `RESTRICTING` means the server took the work asynchronously and the rows read
+    /// next are the old ones — which is why this crate asks for the synchronous form and why a
+    /// status that is not [`TableStatus::COMPLETE`] is worth reporting rather than ignoring.
+    #[must_use]
+    pub const fn status(self) -> TableStatus {
+        self.status
+    }
+
+    pub(crate) fn read(r: &mut Reader<'_>, rop: RopId) -> Result<Self> {
+        Ok(Self {
+            rop,
+            status: TableStatus::new(r.u8()?),
+        })
+    }
+}
+
 /// Rows read from a table, decoded against the column set that was set on it.
 ///
 /// [MS-OXCROPS] §2.2.5.4.2 — success response buffer
@@ -269,6 +308,81 @@ pub(crate) fn encode_set_columns(w: &mut Writer, input: u8, columns: &[PropertyT
     for tag in columns {
         w.u32(tag.as_u32());
     }
+}
+
+/// `SortTableFlags`: block until the table really is sorted.
+///
+/// The asynchronous form answers at once with a status of `SORTING` and leaves the rows in their
+/// old order for a while, so a client that read straight afterwards would get the unsorted table
+/// and no indication that it had.
+///
+/// [MS-OXCTABL] §2.2.2.3.1 — `SortTableFlags`
+const SORT_TABLE_SYNCHRONOUS: u8 = 0x00;
+
+/// `RestrictFlags`: block until the filter has been applied, for the same reason.
+///
+/// [MS-OXCTABL] §2.2.2.4.1 — `RestrictFlags`
+const RESTRICT_SYNCHRONOUS: u8 = 0x00;
+
+/// Encodes a `RopSortTable` request.
+///
+/// The three counts and the array are the `SortOrderSet` structure inlined — [MS-OXCROPS]
+/// §2.2.5.2.1 spells out the same fields rather than nesting it — so one encoder serves both.
+///
+/// # Errors
+///
+/// [`Error::SortColumnNotSet`] if the sort key names a column `columns` does not, which
+/// [MS-OXCTABL] §2.2.2.3 forbids. Caught here because the server's refusal does not say which
+/// column was the problem. `columns` is `None` when the column set was sent in an earlier round
+/// trip and this batch therefore cannot see it, in which case there is nothing to check against.
+///
+/// [MS-OXCROPS] §2.2.5.2.1 — request buffer
+pub(crate) fn encode_sort_table(
+    w: &mut Writer,
+    input: u8,
+    orders: &SortOrderSet,
+    columns: Option<&[PropertyTag]>,
+) -> Result<()> {
+    if let Some(tag) = columns.and_then(|columns| orders.uncovered(columns)) {
+        return Err(Error::SortColumnNotSet { tag });
+    }
+
+    w.u8(RopId::SORT_TABLE.as_u8())
+        .u8(LOGON_ID)
+        .u8(input)
+        .u8(SORT_TABLE_SYNCHRONOUS);
+    orders.write(w);
+    Ok(())
+}
+
+/// Encodes a `RopRestrict` request.
+///
+/// The packet is encoded into a scratch buffer first because `RestrictionDataSize` counts it and a
+/// restriction's length cannot be predicted — every string inside one is variable-length.
+///
+/// # Errors
+///
+/// Whatever the restriction's own values refused, plus [`Error::RopBufferTooLarge`] if the encoded
+/// packet does not fit the 16-bit size field.
+///
+/// [MS-OXCROPS] §2.2.5.3.1 — request buffer
+pub(crate) fn encode_restrict(w: &mut Writer, input: u8, restriction: &Restriction) -> Result<()> {
+    let mut packet = Writer::new();
+    restriction.write(&mut packet, ValueContext::Object)?;
+    let packet = packet.finish();
+
+    let size = u16::try_from(packet.len()).map_err(|_| Error::RopBufferTooLarge {
+        bytes: packet.len(),
+        limit: usize::from(u16::MAX),
+    })?;
+
+    w.u8(RopId::RESTRICT.as_u8())
+        .u8(LOGON_ID)
+        .u8(input)
+        .u8(RESTRICT_SYNCHRONOUS)
+        .u16(size)
+        .bytes(&packet);
+    Ok(())
 }
 
 /// Encodes a `RopQueryRows` request.
