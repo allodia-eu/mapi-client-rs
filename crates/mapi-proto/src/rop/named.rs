@@ -17,9 +17,9 @@
 //!   did not ask for it to be" to a store that has used all 32,767 of its ids.
 //! * **An id is a fact about one store.** [MS-OXCPRPT] §3.1.2 makes it valid on any object within
 //!   the logon that answered and guarantees nothing outside it.
-//! * **An id with no name is one byte.** See [`PropertyName::read`] — [MS-OXCDATA] §2.6.1's diagram
-//!   says otherwise and Exchange does not, and the difference desynchronises the rest of the
-//!   buffer.
+//! * **An id with no name is one byte**, per [MS-OXCPRPT] §3.2.5.9 — not the seventeen [MS-OXCDATA]
+//!   §2.6.1's diagram implies when read on its own. See [`PropertyName::read`]; the difference
+//!   desynchronises the rest of the buffer.
 //!
 //! [MS-OXCROPS] §2.2.8.1 — `RopGetPropertyIdsFromNames`
 //! [MS-OXCROPS] §2.2.8.2 — `RopGetNamesFromPropertyIds`

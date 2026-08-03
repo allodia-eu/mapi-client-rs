@@ -139,10 +139,11 @@ impl Replayed {
         assert_eq!(fixed.set(), PropertySetId::MAPI, "{fixed}");
         assert_eq!(fixed.as_lid(), Some(u32::from(crate::FIXED_ID)), "{fixed}");
 
-        // **The deviation.** [MS-OXCDATA] §2.6.1's diagram marks `GUID` as not optional, so an
-        // entry with no name would still carry sixteen bytes of property set. Exchange sends the
-        // `0xFF` and stops. This entry decoding at all — and the `Disconnect` after it replaying —
-        // is the assertion; reading the specification's sixteen bytes here runs off the buffer.
+        // **The rule that lives in the other document.** [MS-OXCDATA] §2.6.1's diagram marks `GUID`
+        // as not optional, so an entry with no name would still carry sixteen bytes of property
+        // set; [MS-OXCPRPT] §3.2.5.9 step 3 says there is no other return data for it, and that is
+        // what Exchange sends. This entry decoding at all — and the `Disconnect` after it
+        // replaying — is the assertion; reading §2.6.1's sixteen bytes here runs off the buffer.
         assert_eq!(
             self.named_back.last(),
             Some(&None),

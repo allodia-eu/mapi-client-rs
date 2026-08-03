@@ -82,18 +82,21 @@ Two conventions specific to this project:
 - **`RopBatch::hierarchy_table` takes a `FolderDepth`.** The immediate children and the whole
   subtree are different questions and a default would answer one of them silently.
 - **`PropertyName::read` answers an `Option`, and there is no "unnamed" kind to construct.** An id a
-  store has no name for is the absence of a name, not a name that is absent — see the measurement
-  below.
+  store has no name for is the absence of a name, not a name that is absent — [MS-OXCPRPT] §3.2.5.9
+  step 3 returns a `Kind` of `0xFF` and no other data at all, property set included.
 
 ### Measured against Exchange Server SE `15.02.2562.045`
 
-- **A `PropertyName` whose `Kind` is `0xFF` is one byte, not seventeen.** [MS-OXCDATA] §2.6.1's
-  packet diagram marks `LID`, `NameSize` and `Name` optional and `GUID` not, so read literally an
-  entry for an id with no name would still carry sixteen bytes of property set. Exchange sends none:
-  asked for the name of the unregistered id `0xFFFE`, it framed a 30-byte ROP whose `RopSize` ends
-  on the `0xFF` itself. Reading the specification's sixteen bytes there consumes whatever follows —
-  which is how this was found, by running off the end of a buffer. The deviation is in the fixture
-  corpus, so CI checks it rather than the diagram.
+- **A `PropertyName` whose `Kind` is `0xFF` is one byte, not seventeen — and the rule for it is in a
+  different document from the structure.** [MS-OXCDATA] §2.6.1's packet diagram marks `LID`,
+  `NameSize` and `Name` optional and `GUID` not, so that section read alone has an entry for an id
+  with no name still carrying sixteen bytes of property set. [MS-OXCPRPT] §3.2.5.9 step 3 governs
+  this ROP and says the opposite outright — *"A value in the `Kind` field of `0xFF`. There is no
+  other return data for this entry."* — and that is what Exchange sends: asked for the name of the
+  unregistered id `0xFFFE`, it framed a 30-byte ROP whose `RopSize` ends on the `0xFF` itself.
+  Reading §2.6.1's sixteen bytes there consumes whatever follows, which is how this crate found out
+  it had read only half the specification. **Not a server deviation**; the shape is in the fixture
+  corpus so CI checks the rule that governs the ROP rather than the diagram beside the structure.
 - **The two lab mailboxes number all ten named properties differently, and every one of one
   mailbox's ids means a real, different property in the other.** `PidLidLocation` is `0x8178` in
   `developer` and `0x815B` in `developer2`; `developer`'s `0x8178` is `PSETID_Address/IsFavorite`

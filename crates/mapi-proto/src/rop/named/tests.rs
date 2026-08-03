@@ -122,8 +122,8 @@ fn the_inverse_response_decodes_the_names_the_forward_request_wrote() {
 }
 
 /// An id a store has no name for. It keeps its place, so the answer to the fourth id asked about is
-/// still the fourth entry — and it is **one byte**, which is what the lab sends and not what
-/// [MS-OXCDATA] §2.6.1's diagram describes.
+/// still the fourth entry — and it is **one byte**, per [MS-OXCPRPT] §3.2.5.9 rather than the
+/// seventeen [MS-OXCDATA] §2.6.1's diagram implies on its own.
 #[test]
 fn an_unnamed_id_keeps_its_place_and_costs_one_byte() {
     let mut body = Writer::new();

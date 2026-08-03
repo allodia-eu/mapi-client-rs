@@ -184,18 +184,24 @@ impl PropertyName {
     /// Reads one structure, as `RopGetNamesFromPropertyIds` answers with, or `None` for an id the
     /// store has no name for.
     ///
-    /// **`Kind` `0xFF` is one byte and nothing else.** [MS-OXCDATA] §2.6.1's packet diagram marks
-    /// `LID`, `NameSize` and `Name` optional and `GUID` not — so read literally, a `0xFF` entry
-    /// would still carry sixteen bytes of property set. Exchange Server SE `15.02.2562.045` sends
-    /// no such bytes: asked for the name of the unregistered id `0xFFFE`, it answered a 30-byte ROP
-    /// whose `RopSize` ends on the `0xFF` itself. Reading the specification's sixteen bytes there
-    /// consumes the next structure, or the handle table, or runs off the buffer — which is how this
-    /// was found. The server's reading is the coherent one: `0xFF` means *there is no
-    /// `PropertyName`*, and a property set is part of a name.
+    /// **`Kind` `0xFF` is one byte and nothing else**, and the rule for it is in a different
+    /// document from the structure. [MS-OXCDATA] §2.6.1's packet diagram marks `LID`, `NameSize`
+    /// and `Name` optional and `GUID` not, so that section read alone has a `0xFF` entry still
+    /// carrying sixteen bytes of property set. [MS-OXCPRPT] §3.2.5.9 step 3 is the one that governs
+    /// this ROP, and it says the opposite in as many words: *"A value in the `Kind` field of
+    /// `0xFF`. There is no other return data for this entry."*
+    ///
+    /// Exchange Server SE `15.02.2562.045` does exactly that — asked for the name of the
+    /// unregistered id `0xFFFE`, it answered a 30-byte ROP whose `RopSize` ends on the `0xFF`
+    /// itself. Reading §2.6.1's sixteen bytes there consumes the next structure, or the handle
+    /// table, or runs off the buffer, which is how this crate found out it had read only half the
+    /// specification.
     ///
     /// The name itself is taken from exactly `NameSize` bytes rather than by scanning for a
     /// terminator, so a size that disagrees with its own contents costs this one name and not the
     /// alignment of every structure after it.
+    ///
+    /// [MS-OXCPRPT] §3.2.5.9 — what a server returns for an id with no `PropertyName`
     pub(crate) fn read(r: &mut Reader<'_>) -> Result<Option<Self>> {
         let at = r.position();
         let kind = r.u8()?;
