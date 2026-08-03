@@ -284,10 +284,13 @@ turned up:
   property with no error anywhere — the mirror image of Phase 2, where the folder ids collided
   instead. `NamedPropertyId` carries the mailbox GUID and a `NamedProperties` map cannot hold a
   foreign id at all.
-- **A `PropertyName` whose `Kind` is `0xFF` is one byte, not seventeen.** [MS-OXCDATA] §2.6.1's
-  diagram marks `GUID` as not optional; Exchange sends the `0xFF` and ends the ROP. Reading the
-  documented sixteen bytes runs off the end of the buffer, which is how it was found. Both facts are
-  recorded, and the shape is in the corpus.
+- **A `PropertyName` whose `Kind` is `0xFF` is one byte, not seventeen — and reading only the
+  structure's own section is how you get that wrong.** [MS-OXCDATA] §2.6.1's diagram marks `GUID` as
+  not optional; [MS-OXCPRPT] §3.2.5.9 step 3, which governs this ROP, says there is no other return
+  data for the entry, and Exchange follows it. Reading §2.6.1's sixteen bytes runs off the end of
+  the buffer, which is how it was found — as a bug in this client, not in the server. The standing
+  brief says the specifications are authoritative; the lesson here is that *which* specification is
+  a question in its own right, and a structure definition is not always the one that governs a ROP.
 - **`RopGetNamesFromPropertyIds` was not in F3 and should have been.** The forward ROP answers a
   bare array of numbers whose only claim to meaning is the server's ordering, so checking it against
   itself proves nothing. The inverse is the only independent witness — and it is what turned the

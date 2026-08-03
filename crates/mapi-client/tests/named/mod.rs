@@ -269,11 +269,11 @@ async fn resolving_the_same_names_twice_sends_one_request() {
 ///
 /// An id below `0x8000` is not a named property at all, and the server answers from the `PS_MAPI`
 /// set rather than refusing ([MS-OXCPRPT] §2.2.13). An id the store has never registered comes back
-/// as a `Kind` of `0xFF` and **nothing else** — no property set, though [MS-OXCDATA] §2.6.1's
-/// diagram marks the `GUID` field as not optional. That is the deviation this whole test is here to
-/// keep an eye on: the specification's sixteen bytes are not on the wire, and reading them
-/// desynchronises whatever follows. Measured on Exchange Server SE `15.02.2562.045`, where the
-/// answer to `0xFFFE` framed a 30-byte ROP ending on the `0xFF` itself.
+/// as a `Kind` of `0xFF` and **nothing else** — no property set — which is [MS-OXCPRPT] §3.2.5.9
+/// step 3, and not what [MS-OXCDATA] §2.6.1's diagram implies when that section is read alone.
+/// That split is what this test is here to keep an eye on: §2.6.1's sixteen bytes are not on the
+/// wire, and reading them desynchronises whatever follows. Measured on Exchange Server SE
+/// `15.02.2562.045`, where the answer to `0xFFFE` framed a 30-byte ROP ending on the `0xFF` itself.
 #[tokio::test]
 #[ignore = "needs a live Exchange Server; run scripts\\Test-Live.ps1"]
 async fn a_fixed_id_is_answered_from_ps_mapi_and_an_unknown_one_carries_no_set() {

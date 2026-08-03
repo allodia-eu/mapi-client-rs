@@ -63,12 +63,12 @@ const FIXED_ID: u16 = 0x0037;
 
 /// An id from the named range that no lab store has reached.
 ///
-/// The one that matters most. Exchange answers a `Kind` of `0xFF` and **stops** — no property set,
-/// though [MS-OXCDATA] §2.6.1's diagram marks the `GUID` field as not optional. Reading the
-/// specification's sixteen bytes there consumes whatever follows, so this is in the corpus to keep
-/// CI checking the deviation rather than the diagram. It is last in the request for the same
-/// reason: a decoder that got it wrong runs off the end of the buffer rather than quietly reading
-/// the next entry wrongly.
+/// The one that matters most. Exchange answers a `Kind` of `0xFF` and **stops** — no property set —
+/// which is [MS-OXCPRPT] §3.2.5.9 step 3, and not what [MS-OXCDATA] §2.6.1's diagram implies when
+/// that section is read alone. Reading §2.6.1's sixteen bytes there consumes whatever follows, so
+/// this is in the corpus to keep CI checking the rule that governs the ROP rather than the diagram
+/// next to the structure. It is last in the request for the same reason: a decoder that got it
+/// wrong runs off the end of the buffer rather than quietly reading the next entry wrongly.
 const UNREGISTERED_ID: u16 = 0xFFFE;
 
 /// Everything this workspace implements, in one Session Context.
@@ -213,8 +213,8 @@ async fn named_properties(logon: &mut Logon, recorder: &Recorder) -> Result<(), 
     if names.last() != Some(&None) {
         return Err(Failure::from(format!(
             "0x{UNREGISTERED_ID:04X} has a name in this store, so the capture carries no unnamed \
-             entry — which is the one response shape [MS-OXCDATA] §2.6.1 describes wrongly. Pick \
-             an id this store has not reached."
+             entry — the one response shape whose layout is only stated in [MS-OXCPRPT] §3.2.5.9 \
+             and not beside the structure itself. Pick an id this store has not reached."
         )));
     }
     Ok(())
