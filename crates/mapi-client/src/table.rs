@@ -18,13 +18,14 @@ use core::borrow::Borrow;
 use std::vec;
 
 use mapi_proto::{
-    Bookmark, CONTENTS_COLUMNS, Execution, FolderDepth, FolderId, HIERARCHY_COLUMNS, ObjectHandle,
-    PropertyRow, PropertyTag, RopBatch, RopResponse,
+    ATTACHMENT_COLUMNS, Bookmark, CONTENTS_COLUMNS, Execution, FolderDepth, HIERARCHY_COLUMNS,
+    ObjectHandle, PropertyRow, PropertyTag, Restriction, RopBatch, RopResponse, SortOrderSet,
+    TableStatus,
 };
 
 use crate::connection::Connection;
 use crate::error::Result;
-use crate::folder::Folder;
+use crate::target::{Opened, Target};
 
 /// Rows per round trip, unless the caller says otherwise.
 ///
@@ -32,16 +33,25 @@ use crate::folder::Folder;
 /// bounds every string value at 255 characters — the server truncates rather than refusing — so a
 /// row of four columns cannot exceed roughly 540 bytes, and 50 of them cannot come close to
 /// filling the buffer. A caller asking for many wide columns can still overrun it, which is
-/// reported as [`Error::PageTooLarge`](crate::Error::PageTooLarge) rather than guessed at.
+/// reported as [`Error::ResponseTooLarge`](crate::Error::ResponseTooLarge) rather than
+/// guessed at.
 const DEFAULT_PAGE_SIZE: u16 = 50;
 
-/// Which of the two tables a folder offers, and how deep the hierarchy one reaches.
+/// Which table an object offers.
+///
+/// Two of the three hang off a folder and one off a message, which is why the object a table comes
+/// from is a [`Target`] rather than a folder id.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum TableKind {
-    /// The messages in the folder.
+    /// The messages in a folder.
     Contents,
-    /// The folders inside it, to the given depth.
+    /// The folders inside a folder, to the given depth.
     Hierarchy(FolderDepth),
+    /// The attachments on a message.
+    ///
+    /// **The server reports no row count for this one**, unlike the other two: [MS-OXCROPS]
+    /// §2.2.6.17.2 has no such field at all.
+    Attachments,
 }
 
 impl TableKind {
@@ -50,6 +60,20 @@ impl TableKind {
         match self {
             Self::Contents => &CONTENTS_COLUMNS,
             Self::Hierarchy(_) => &HIERARCHY_COLUMNS,
+            Self::Attachments => &ATTACHMENT_COLUMNS,
+        }
+    }
+
+    /// Opens the table on an object already placed in the batch.
+    fn open_on(
+        self,
+        batch: &mut RopBatch,
+        object: mapi_proto::HandleSlot,
+    ) -> mapi_proto::HandleSlot {
+        match self {
+            Self::Contents => batch.contents_table(object),
+            Self::Hierarchy(depth) => batch.hierarchy_table(object, depth),
+            Self::Attachments => batch.attachment_table(object),
         }
     }
 }
@@ -61,29 +85,73 @@ impl TableKind {
 #[derive(Debug)]
 pub struct TableRead<'a> {
     connection: &'a mut Connection,
-    logon: ObjectHandle,
-    folder: FolderId,
+    object: Target,
     kind: TableKind,
     columns: Option<Vec<PropertyTag>>,
+    sort: Option<SortOrderSet>,
+    filter: Option<Restriction>,
     page_size: u16,
 }
 
 impl<'a> TableRead<'a> {
-    pub(crate) fn new(folder: Folder<'a>, kind: TableKind) -> Self {
-        let Folder {
-            connection,
-            logon,
-            id,
-        } = folder;
-
+    pub(crate) const fn new(
+        connection: &'a mut Connection,
+        object: Target,
+        kind: TableKind,
+    ) -> Self {
         Self {
             connection,
-            logon,
-            folder: id,
+            object,
             kind,
             columns: None,
+            sort: None,
+            filter: None,
             page_size: DEFAULT_PAGE_SIZE,
         }
+    }
+
+    /// Orders the rows on the server, so that "the ten newest" is ten rows and not all of them.
+    ///
+    /// **Every column sorted on must be among the columns read.** [MS-OXCTABL] §2.2.2.3 requires
+    /// it; a sort key naming a column the table was not given is refused by the server, and the
+    /// refusal does not say which column. This crate catches that before the round trip and names
+    /// it — see [`Error::Protocol`](crate::Error::Protocol) carrying `SortColumnNotSet`.
+    ///
+    /// ```no_run
+    /// # use mapi_client::{Logon, PropertyTag, SortOrder, SortOrderSet, WellKnownFolder};
+    /// # async fn example(logon: &mut Logon) -> Result<(), mapi_client::Error> {
+    /// let newest = logon
+    ///     .well_known(WellKnownFolder::Inbox)?
+    ///     .contents()
+    ///     .sort(SortOrderSet::new([SortOrder::descending(
+    ///         PropertyTag::MESSAGE_DELIVERY_TIME,
+    ///     )]))
+    ///     .page_size(10)
+    ///     .rows();
+    /// # let _ = newest;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// [MS-OXCROPS] §2.2.5.2 — `RopSortTable`
+    #[must_use]
+    pub fn sort(mut self, orders: SortOrderSet) -> Self {
+        self.sort = Some(orders);
+        self
+    }
+
+    /// Filters the rows on the server, so it discards what nobody asked for.
+    ///
+    /// **The row count reported when the table opens is the unfiltered one.** [MS-OXCROPS]
+    /// §2.2.5.3.2 carries only a status, so [`Rows::row_count`] keeps saying how many rows the
+    /// folder holds while the read produces however many survive the filter. The two disagreeing
+    /// is the expected outcome here rather than a sign of anything.
+    ///
+    /// [MS-OXCROPS] §2.2.5.3 — `RopRestrict`
+    #[must_use]
+    pub fn filter(mut self, restriction: Restriction) -> Self {
+        self.filter = Some(restriction);
+        self
     }
 
     /// The columns to read.
@@ -129,7 +197,7 @@ impl<'a> TableRead<'a> {
     ///
     /// Larger pages mean fewer round trips and a bigger response. The response has to fit in a
     /// 64 KiB buffer, so a page of many wide columns can overrun it — see
-    /// [`Error::PageTooLarge`](crate::Error::PageTooLarge).
+    /// [`Error::ResponseTooLarge`](crate::Error::ResponseTooLarge).
     #[must_use]
     pub const fn page_size(mut self, rows: u16) -> Self {
         self.page_size = if rows == 0 { 1 } else { rows };
@@ -146,15 +214,17 @@ impl<'a> TableRead<'a> {
         Rows {
             connection: self.connection,
             start: Some(Start {
-                logon: self.logon,
-                folder: self.folder,
+                object: self.object,
                 kind: self.kind,
                 columns,
+                sort: self.sort,
+                filter: self.filter,
             }),
             table: None,
             page: Vec::new().into_iter(),
             page_size: self.page_size,
             row_count: None,
+            table_status: None,
             finished: false,
         }
     }
@@ -172,10 +242,11 @@ impl<'a> TableRead<'a> {
 /// What the first round trip needs, before there is a table handle to page with.
 #[derive(Debug)]
 struct Start {
-    logon: ObjectHandle,
-    folder: FolderId,
+    object: Target,
     kind: TableKind,
     columns: Vec<PropertyTag>,
+    sort: Option<SortOrderSet>,
+    filter: Option<Restriction>,
 }
 
 /// Rows arriving a page at a time.
@@ -206,6 +277,7 @@ pub struct Rows<'a> {
     page: vec::IntoIter<PropertyRow>,
     page_size: u16,
     row_count: Option<u32>,
+    table_status: Option<TableStatus>,
     finished: bool,
 }
 
@@ -233,10 +305,28 @@ impl Rows<'_> {
     /// This is the count the server reported when the table was opened. A table is a live view of
     /// a folder, so it is a measurement rather than a promise about how many rows will arrive.
     ///
+    /// Three things leave it `None` or stale, all of them documented rather than incidental: an
+    /// attachment table is not given one at all ([MS-OXCROPS] §2.2.6.17.2 has no such field), a
+    /// [`filter`](TableRead::filter) narrows the table without replacing the count, and the folder
+    /// can change under the read.
+    ///
     /// [MS-OXCROPS] §2.2.4.13.2 — `RowCount`
     #[must_use]
     pub const fn row_count(&self) -> Option<u32> {
         self.row_count
+    }
+
+    /// What the server said about the table after a sort or a filter was applied.
+    ///
+    /// `None` when neither was asked for. Anything other than
+    /// [`TableStatus::COMPLETE`](mapi_proto::TableStatus::COMPLETE) means the server took the work
+    /// asynchronously and the rows being read are the old ones — this crate asks for the
+    /// synchronous form, so it is a deviation worth seeing rather than a state to wait on.
+    ///
+    /// [MS-OXCTABL] §2.2.2.1.3 — `TableStatus`
+    #[must_use]
+    pub const fn table_status(&self) -> Option<TableStatus> {
+        self.table_status
     }
 
     /// Reads whatever is left, then releases the table.
@@ -308,29 +398,41 @@ impl Rows<'_> {
         Ok(())
     }
 
-    /// The first round trip: open the folder, open its table, set the columns, read a page.
+    /// The first round trip: open the object, open its table, set the columns, sort, filter, read
+    /// a page.
     ///
-    /// The folder handle is released in the same batch. A table is a Server object in its own
-    /// right and outlives the folder handle it was obtained from — verified against Exchange
-    /// Server SE `15.02.2562.045`, where paging continued normally after the release — so keeping
-    /// the folder handle open would tie up a server object for nothing.
+    /// The object's own handles are released in the same batch. A table is a Server object in its
+    /// own right and outlives the folder or message handle it was obtained from — verified against
+    /// Exchange Server SE `15.02.2562.045`, where paging continued normally after the release — so
+    /// keeping them open would tie up server objects for nothing.
+    ///
+    /// **Order matters here and is not arbitrary.** `RopSetColumns` comes first because
+    /// [MS-OXCTABL] §2.2.2.3 requires the sort key to be among the columns already set, and the
+    /// restriction comes before the read because a filter applied after one would return the rows
+    /// nobody asked for.
     ///
     /// [MS-OXCROPS] §3.1.4.1 — one ROP consumes the handle an earlier ROP produced
     async fn open(&mut self, start: &Start) -> Result<()> {
         let mut batch = RopBatch::new();
-        let logon = batch.bind(start.logon);
-        let folder = batch.open_folder(logon, start.folder);
-        let table = match start.kind {
-            TableKind::Contents => batch.contents_table(folder),
-            TableKind::Hierarchy(depth) => batch.hierarchy_table(folder, depth),
-        };
-        batch
-            .set_columns(table, &start.columns)
-            .query_rows(table, self.page_size)
-            .release(folder);
+        let opened: Opened = start.object.open(&mut batch);
+        let table = start.kind.open_on(&mut batch, opened.slot);
+        batch.set_columns(table, &start.columns);
+        if let Some(orders) = &start.sort {
+            batch.sort_table(table, orders);
+        }
+        if let Some(filter) = &start.filter {
+            batch.restrict(table, filter);
+        }
+        batch.query_rows(table, self.page_size);
+        opened.release(&mut batch);
 
         let execution = self.connection.execute(batch, "opening the table").await?;
         self.table = execution.handle(table).filter(|handle| !handle.is_none());
+        self.table_status = execution
+            .responses()
+            .iter()
+            .find_map(RopResponse::as_table_status)
+            .map(mapi_proto::TableStatusResponse::status);
         self.absorb(&execution);
         Ok(())
     }

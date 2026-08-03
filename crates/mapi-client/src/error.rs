@@ -213,18 +213,28 @@ pub enum Error {
         found: &'static str,
     },
 
-    /// A page of rows did not fit in the response buffer.
+    /// The server would not produce a response this large.
     ///
-    /// The output buffer is fixed at 64 KiB, so the remedy is a smaller page:
-    /// [`TableRead::page_size`](crate::TableRead::page_size).
+    /// The remedy is to ask for less: a smaller page from
+    /// [`TableRead::page_size`](crate::TableRead::page_size), or fewer bytes per stream read.
+    ///
+    /// **Not, despite what the documents say, a larger buffer.** [MS-OXCROPS] §3.1.5.1.2 has the
+    /// client resend with the output buffer set to at least `SizeNeeded`; this crate already asks
+    /// for 64 KiB, and Exchange Server SE `15.02.2562.045` reports a `SizeNeeded` of 32,767 in
+    /// every case measured, across a thirteenfold range of `MaxRopOut`. Its effective ceiling is
+    /// about 32 KiB and raising `MaxRopOut` does not move it — measured at `0x00040000`, the
+    /// maximum [MS-OXCRPC] §3.1.4.2 allows. `size_needed` is reported as received rather than
+    /// interpreted, because a server that starts computing it is a finding.
     ///
     /// [MS-OXCROPS] §2.2.15.1 — `RopBufferTooSmall`
+    /// [MS-OXCROPS] §3.1.5.1.2 — the remedy, which does not apply here
     #[error(
-        "the response needs a {size_needed}-byte output buffer, more than the 64 KiB this crate \
-         requests; read fewer rows per page"
+        "the server would not produce a response this large; it asked for a {size_needed}-byte \
+         output buffer, which is not more than this crate already requests. Ask for less: a \
+         smaller page, or fewer bytes per stream read"
     )]
-    PageTooLarge {
-        /// The buffer size the server said it needed.
+    ResponseTooLarge {
+        /// The buffer size the server reported, as received.
         size_needed: u16,
     },
 

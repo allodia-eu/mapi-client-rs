@@ -54,6 +54,13 @@
 //! [`Logon::resolve_names`] asks for them all in one round trip and caches the answer, so the cost
 //! falls on the session rather than on every read.
 //!
+//! **A message, an attachment and the message inside it are one round trip each.** The opens chain
+//! through a single ROP buffer like everything else, so reaching the message inside an attachment
+//! costs what reaching the attachment does. A body is the exception, and not because of round
+//! trips: it goes through [`Message::stream`] rather than a property fetch, because a value too
+//! large for the response buffer comes back as an error instead of a value and any real body
+//! clears that bar.
+//!
 //! # What the types enforce
 //!
 //! * **One request in flight.** MAPI/HTTP allows exactly one per Session Context, and a violation
@@ -102,11 +109,14 @@ mod connection;
 mod credentials;
 mod folder;
 mod logon;
+mod message;
 mod named;
 mod observer;
 mod properties;
 mod special;
+mod stream;
 mod table;
+mod target;
 mod transport;
 
 #[cfg(feature = "autodiscover")]
@@ -125,13 +135,16 @@ pub use mapi_proto;
 /// The types from [`mapi-proto`](mapi_proto) that appear in this crate's own API, re-exported
 /// so that the common path needs one dependency rather than two.
 pub use mapi_proto::{
-    APPOINTMENT_PROPERTIES, Bookmark, CONTACT_PROPERTIES, CONTENTS_COLUMNS, Cell, Connected,
-    ContainerClass, ErrorCode, FOLDER_PROPERTIES, FileTime, Floating64, FolderDepth, FolderEntryId,
-    FolderId, Guid, HIERARCHY_COLUMNS, Headers, Lcid, LegacyDn, LogonResponse, LongTermId,
-    MAILBOX_PROPERTIES, MessageId, NamedProperty, NamedPropertyId, PropertyName, PropertyNameKind,
-    PropertyProblem, PropertyRow, PropertySet, PropertySetId, PropertySetIter, PropertyTag,
-    PropertyType, PropertyValue, ReplicaId, RequestType, RowForm, ShortTermId, SpecialFolder,
-    StoreObjectType, TableString, TaggedValue, WellKnownFolder,
+    APPOINTMENT_COLUMNS, APPOINTMENT_PROPERTIES, ATTACHMENT_COLUMNS, ATTACHMENT_PROPERTIES,
+    AttachMethod, AttachmentNumber, Bookmark, CONTACT_COLUMNS, CONTACT_PROPERTIES,
+    CONTENTS_COLUMNS, Cell, Connected, ContainerClass, ErrorCode, FOLDER_PROPERTIES, FileTime,
+    Floating64, FolderDepth, FolderEntryId, FolderId, FuzzyLevel, Guid, HIERARCHY_COLUMNS, Headers,
+    Lcid, LegacyDn, LogonResponse, LongTermId, MAILBOX_PROPERTIES, MESSAGE_PROPERTIES, MessageId,
+    NamedProperty, NamedPropertyId, OpenMessageResponse, OpenRecipient, PropertyName,
+    PropertyNameKind, PropertyProblem, PropertyRow, PropertySet, PropertySetId, PropertySetIter,
+    PropertyTag, PropertyType, PropertyValue, RecipientType, RelationalOperator, ReplicaId,
+    RequestType, Restriction, RowForm, ShortTermId, SortDirection, SortOrder, SortOrderSet,
+    SpecialFolder, StoreObjectType, TableStatus, TableString, TaggedValue, WellKnownFolder,
 };
 
 pub use crate::builder::MapiClientBuilder;
@@ -141,12 +154,14 @@ pub use crate::credentials::Credentials;
 pub use crate::error::{Error, Result};
 pub use crate::folder::Folder;
 pub use crate::logon::Logon;
+pub use crate::message::{Attachment, EmbeddedMessage, Message};
 pub use crate::named::{NamedProperties, NamedPropertiesIter, NamedPropertyEntry};
 pub use crate::observer::{Exchange, Observer};
 pub use crate::properties::Properties;
 pub use crate::special::{
     SpecialFolderEntry, SpecialFolderState, SpecialFolders, SpecialFoldersIter,
 };
+pub use crate::stream::{StreamRead, StreamValue};
 pub use crate::table::{Rows, TableRead};
 
 /// Names an outcome for an error message, when the one that arrived is not the one expected.
@@ -181,6 +196,11 @@ mod tests {
         assert::<Properties<'_>>();
         assert::<TableRead<'_>>();
         assert::<Rows<'_>>();
+        assert::<Message<'_>>();
+        assert::<Attachment<'_>>();
+        assert::<EmbeddedMessage<'_>>();
+        assert::<StreamRead<'_>>();
+        assert::<StreamValue>();
         assert::<Exchange<'_>>();
         assert::<SpecialFolders>();
         assert::<SpecialFolderEntry>();
