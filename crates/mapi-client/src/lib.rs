@@ -93,6 +93,7 @@ mod connection;
 mod credentials;
 mod folder;
 mod logon;
+mod named;
 mod observer;
 mod properties;
 mod special;
@@ -115,12 +116,13 @@ pub use mapi_proto;
 /// The types from [`mapi-proto`](mapi_proto) that appear in this crate's own API, re-exported
 /// so that the common path needs one dependency rather than two.
 pub use mapi_proto::{
-    Bookmark, CONTENTS_COLUMNS, Cell, Connected, ContainerClass, ErrorCode, FOLDER_PROPERTIES,
-    FileTime, Floating64, FolderDepth, FolderEntryId, FolderId, Guid, HIERARCHY_COLUMNS, Headers,
-    Lcid, LegacyDn, LogonResponse, LongTermId, MAILBOX_PROPERTIES, MessageId, PropertyProblem,
-    PropertyRow, PropertySet, PropertySetIter, PropertyTag, PropertyType, PropertyValue, ReplicaId,
-    RequestType, RowForm, ShortTermId, SpecialFolder, StoreObjectType, TableString, TaggedValue,
-    WellKnownFolder,
+    APPOINTMENT_PROPERTIES, Bookmark, CONTACT_PROPERTIES, CONTENTS_COLUMNS, Cell, Connected,
+    ContainerClass, ErrorCode, FOLDER_PROPERTIES, FileTime, Floating64, FolderDepth, FolderEntryId,
+    FolderId, Guid, HIERARCHY_COLUMNS, Headers, Lcid, LegacyDn, LogonResponse, LongTermId,
+    MAILBOX_PROPERTIES, MessageId, NamedProperty, NamedPropertyId, PropertyName, PropertyNameKind,
+    PropertyProblem, PropertyRow, PropertySet, PropertySetId, PropertySetIter, PropertyTag,
+    PropertyType, PropertyValue, ReplicaId, RequestType, RowForm, ShortTermId, SpecialFolder,
+    StoreObjectType, TableString, TaggedValue, WellKnownFolder,
 };
 
 pub use crate::builder::MapiClientBuilder;
@@ -130,6 +132,7 @@ pub use crate::credentials::Credentials;
 pub use crate::error::{Error, Result};
 pub use crate::folder::Folder;
 pub use crate::logon::Logon;
+pub use crate::named::{NamedProperties, NamedPropertiesIter, NamedPropertyEntry};
 pub use crate::observer::{Exchange, Observer};
 pub use crate::properties::Properties;
 pub use crate::special::{
@@ -174,6 +177,9 @@ mod tests {
         assert::<SpecialFolderEntry>();
         assert::<SpecialFolderState>();
         assert::<SpecialFoldersIter<'_>>();
+        assert::<NamedProperties>();
+        assert::<NamedPropertyEntry>();
+        assert::<NamedPropertiesIter<'_>>();
     }
 
     #[test]
