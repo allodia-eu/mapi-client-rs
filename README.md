@@ -27,14 +27,17 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: `0.2.0` released.** What works is what the corpus proves: locate an endpoint by
-> Autodiscover, connect, log on, walk the folder hierarchy — the whole of it in one table, tagged by
-> container class — read or write the Store object's and any folder's own properties, find the
-> Calendar, Contacts, Drafts, Tasks, Notes and Journal folders that the logon does not name, resolve
-> the `PidLid` properties a calendar entry is made of to the ids one store uses for them, and page a
-> contents table with the columns you choose. All verified against Exchange Server SE
-> `15.02.2562.045`. What is missing is everything about messages, and `Negotiate`/`NTLM`
-> authentication. The gaps are stated below and in the changelog rather than left to be discovered.
+> **Status: `0.2.0` released; reading items is on `main`.** What works is what the corpus proves:
+> locate an endpoint by Autodiscover, connect, log on, walk the folder hierarchy — the whole of it in
+> one table, tagged by container class — read or write the Store object's and any folder's own
+> properties, find the Calendar, Contacts, Drafts, Tasks, Notes and Journal folders that the logon
+> does not name, resolve the `PidLid` properties a calendar entry is made of to the ids one store
+> uses for them, and page a contents table with the columns you choose, ordered and filtered by the
+> server. Since `0.2.0`: open a message, read its properties, list its attachments, extract one's
+> bytes, open the message inside another, and read a body far larger than a response buffer. All
+> verified against Exchange Server SE `15.02.2562.045`. What is missing is everything that *writes*
+> — drafting, sending, moving, flagging — and `Negotiate`/`NTLM` authentication. The gaps are stated
+> below and in the changelog rather than left to be discovered.
 
 ## Install
 

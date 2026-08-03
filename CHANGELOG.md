@@ -15,7 +15,80 @@ Two conventions specific to this project:
 
 ## [Unreleased]
 
-Nothing yet.
+Reading items. `0.2.0` could reach a calendar folder and say what its columns were called; this
+adds the message, the attachment, the message inside an attachment, and the body that does not fit
+in a response buffer. *List calendar events*, *list contacts*, *list messages* sorted and filtered
+by the server, and an attachment's bytes extracted are all delivered. Verified against Exchange
+Server SE `15.02.2562.045` against two mailboxes, with a new pair of captured scenarios — the corpus
+grows from 45 exchanges to 99.
+
+### Added
+
+- **The Message and Attachment object ROPs**: `RopOpenMessage`, `RopGetAttachmentTable`,
+  `RopOpenAttachment` and `RopOpenEmbeddedMessage`, with `Message`, `Attachment` and
+  `EmbeddedMessage` on the client. Reaching an attachment's bytes is one round trip, not four: the
+  opens chain through a single ROP buffer like everything else here.
+- **The stream ROPs**: `RopOpenStream`, `RopReadStream` and `RopGetStreamSize`, with
+  `Message::stream()` and `StreamValue`. This is the only correct way to read a body —
+  [MS-OXCPRPT] §2.2.3.2 has a property too large for the response buffer come back as
+  `NotEnoughMemory` rather than as a value, so a property fetch answers a short message with text
+  and a long one with an error. Measured: a 116,996-byte `PidTagBody` fetched that way comes back as
+  `NotEnoughMemory`, and streamed comes back whole.
+- **`RopSortTable` and `RopRestrict`**, with `SortOrderSet`, `SortOrder` and `Restriction`, reached
+  from `TableRead::sort()` and `TableRead::filter()`. Six of the twelve restriction packet formats
+  are modelled — the three that combine restrictions and the three a filter is built from — and the
+  crate says which.
+- **`AttachMethod`**, which is the fact an attachment reader cannot skip. An `afEmbeddedMessage`
+  attachment has no `PidTagAttachDataBinary` at all, so a client that only ever reads that property
+  reports a forwarded mail as an empty file. `Attachment::content()` and `Attachment::embedded()`
+  are separate calls for that reason.
+- **Twenty-three more property tags** — bodies, message metadata, attachment metadata and the
+  contact columns with fixed ids — and five more column sets: `MESSAGE_PROPERTIES`,
+  `ATTACHMENT_COLUMNS`, `ATTACHMENT_PROPERTIES`, `CONTACT_COLUMNS` and `APPOINTMENT_COLUMNS`.
+- **`mapi-cli events`, `mapi-cli contacts` and `mapi-cli message`**, plus `--newest-first` and
+  `--subject` on `mapi-cli messages`. Between them these are *list calendar events* with real start
+  times, end times and locations; *list contacts* with their email addresses; and a message opened
+  down to its body and both kinds of attachment.
+- **A second pair of captured scenarios**, `items-en-us` and `items-nl-nl`, 27 exchanges each. They
+  carry the shapes nothing else in the corpus does: a `TypedString` subject, a recipient table, an
+  attachment table with no row count, a `RopOpenEmbeddedMessage` response, and a body reassembled
+  from four round trips. The two are not copies of one another — the captured `RopSortTable` sorts
+  on a named-property tag, which is a different number in each mailbox.
+- **`scripts/Add-LabItems.ps1`**, which seeds a lab mailbox with the events, contacts and
+  attachment-bearing message those captures need.
+
+### Measured, and worth knowing
+
+- **`MaxRopOut` has an effective ceiling of about 32 KiB that no document states and that raising
+  it cannot pass.** Measured on Exchange Server SE `15.02.2562.045`: the field is honoured directly
+  below the ceiling — a 21,099-byte output buffer succeeds at `MaxRopOut` 40,000, a 24,675-byte one
+  is refused at 20,000 and succeeds at 65,536 — but a read refused at 65,536 is refused identically
+  at `0x00040000`, the maximum [MS-OXCRPC] §3.1.4.2 allows. Every refusal reports a `SizeNeeded` of
+  32,767 whatever was asked for. So [MS-OXCROPS] §3.1.5.1.2's remedy, resend with the buffer at
+  least `SizeNeeded`, is already satisfied and changes nothing; asking for fewer bytes is the only
+  way out. This crate reads 16 KiB at a time, because the read shares one buffer with the rest of
+  its batch and the rest is not fixed.
+- **`RopOpenEmbeddedMessage` reports a `MessageId` of zero.** [MS-OXCMSG] §2.2.3.16.2 calls the
+  field a MID without qualification; both lab mailboxes answer `0x0000000000000000`.
+  `OpenMessageResponse::embedded_id` reports the zero rather than folding it into `None`.
+- **`RopGetAttachmentTable` reports no row count**, where the two folder tables do, so
+  `Rows::row_count()` is `None` for one. So is the count after a `RopRestrict`, whose response
+  carries a status and nothing else — the number the table reported when it opened is the
+  unfiltered one and stays that way.
+- **Reaching an embedded message opens its parent first**, so one batch carries two
+  `RopOpenMessage`-shaped responses and taking the first reports the outer message's subject as the
+  inner one's. `OpenMessageResponse::rop()` exists to tell them apart; the live suite asserts the
+  distinction because it is a wrong answer that looks entirely right.
+
+### Changed
+
+- **`RopResponse::as_open_message` takes the `RopId` it is asked about**, for the reason above.
+- **`Error::PageTooLarge` is now `Error::ResponseTooLarge`**, and its message no longer says the
+  response exceeded the buffer this crate asks for — measurement showed that claim to be false, and
+  no longer suggests a remedy the server will not honour.
+- `PropertyTag`'s catalogue is split across three modules and `RopBatch`'s ROP-issuing methods
+  across three more, so that none of them outgrows the workspace's 500-line file limit. No public
+  item moved.
 
 ## [0.2.0] - 2026-08-03
 

@@ -57,6 +57,46 @@ let names = logon.resolve_names([NamedProperty::Location, NamedProperty::BusySta
 let location = names.get(&NamedProperty::Location.name());   // None if this store would not map it
 ```
 
+A message is opened by its folder and its id together, because `RopOpenMessage` takes both. Its
+body goes through a stream rather than a property fetch, which is not a preference: a value too
+large for the response buffer comes back as `NotEnoughMemory` instead of as a value, and any real
+body clears that bar.
+
+```rust
+use mapi_client::{ATTACHMENT_COLUMNS, AttachMethod, PropertyTag, PropertyValue};
+
+let body = logon.message(inbox, id).stream(PropertyTag::BODY).read().await?;
+println!("{} characters", body.text()?.chars().count());
+
+for row in logon.message(inbox, id).attachments().collect().await? {
+    let method = row.get(PropertyTag::ATTACH_METHOD)
+        .and_then(PropertyValue::as_u32)
+        .map(AttachMethod::new);
+
+    // An afEmbeddedMessage attachment has no PidTagAttachDataBinary at all: its content is
+    // another Message object. A client that only ever streamed the bytes reports a forwarded
+    // mail as an empty file.
+    match method {
+        Some(m) if m.is_embedded_message() => { /* attachment(n).embedded().open() */ }
+        Some(m) if m.has_binary_content()  => { /* attachment(n).content().read()   */ }
+        _ => {}
+    }
+}
+```
+
+Sorting and filtering happen on the server, so a folder of any size costs the rows you asked for
+rather than all of them:
+
+```rust
+use mapi_client::{PropertyTag, SortOrder, SortOrderSet};
+
+let newest = logon.folder(inbox)
+    .contents()
+    .sort(SortOrderSet::new([SortOrder::descending(PropertyTag::MESSAGE_DELIVERY_TIME)]))
+    .page_size(10)
+    .rows();
+```
+
 ## What the types enforce
 
 - **One request in flight.** MAPI/HTTP allows exactly one per Session Context, and a violation
@@ -101,11 +141,12 @@ Part of [`mapi-client-rs`](https://github.com/allodia-eu/mapi-client-rs). Every 
 cites its Microsoft Open Specification section; see `SPEC.md` in the repository root for the pinned
 document versions.
 
-**Status:** `0.2.0`. Connect, logon, hierarchy and contents reads with paging — the hierarchy
-recursively, tagged by container class — the folders a logon does not name, property reads and
-writes on Store and Folder objects, named-property resolution cached per session, disconnect, and
-Autodiscover lookup are implemented. No messages, no attachments, no streams, no notifications, no
-ICS, no address book.
+**Status:** `0.2.0`, plus reading items on `main`. Connect, logon, hierarchy and contents reads
+with paging — the hierarchy recursively, tagged by container class, the contents sorted and filtered
+by the server — the folders a logon does not name, property reads and writes on Store and Folder
+objects, named-property resolution cached per session, messages with their properties, attachments,
+embedded messages and streamed bodies, disconnect, and Autodiscover lookup are implemented. Nothing
+that creates, modifies or sends an item; no notifications, no ICS, no address book.
 
 ## Licence
 
