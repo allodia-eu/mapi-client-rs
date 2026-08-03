@@ -28,17 +28,17 @@ discovering it in Phase 6.
 | List mailboxes the user can access | **No such operation.** Autodiscover's `AlternativeMailbox` elements, plus a second `Connect` per mailbox | Not MAPI — see Phase 7 |
 | Get mailbox metadata | `RopLogon` response (have it) + `RopGetPropertiesSpecific` on the Store object | Phase 1 |
 | List folders in mailbox | `RopGetHierarchyTable` with the `Depth` flag + `PidTagContainerClass` | **Done in Phase 2** |
-| List messages in folder | `RopGetContentsTable` | **Done in v0.1.0**; sorting and filtering in Phase 4 |
+| List messages in folder | `RopGetContentsTable` | **Done in v0.1.0**; sorting and filtering done in Phase 4 |
 | Draft a new message | `RopCreateMessage` → `RopSetProperties` → `RopModifyRecipients` → `RopSaveChangesMessage` | Phase 5 |
 | Send a message | `RopSubmitMessage` | Phase 6 |
 | Archive / delete a message | `RopMoveCopyMessages` / `RopDeleteMessages` | Phase 6 |
 | Flag a message | Two different things — read state is `RopSetReadFlags`, follow-up is `RopSetProperties` | Phase 6 |
 | List calendars | Folder hierarchy filtered on `PidTagContainerClass = "IPF.Appointment"` | **Done in Phase 2** |
 | Get calendar details | `RopGetPropertiesSpecific` on the folder | **Done in Phase 2** |
-| List calendar events | Contents table, but the useful columns are **named properties** | Phase 4 |
+| List calendar events | Contents table, but the useful columns are **named properties** | **Done in Phase 4** |
 | Create / update calendar event | `RopCreateMessage` / `RopOpenMessage` with `IPM.Appointment` | Phase 5–6 |
 | Delete calendar event | `RopDeleteMessages` | Phase 6 |
-| List contacts | Contents table of an `IPF.Contact` folder | Phase 4 |
+| List contacts | Contents table of an `IPF.Contact` folder | **Done in Phase 4** |
 | Create / update / delete contact | As for appointments, with `IPM.Contact` | Phase 5–6 |
 
 The three that are not MAPI operations:
@@ -303,11 +303,57 @@ turned up:
   that skipped the lookup and used `PidLidLocation`'s documented `0x8208` would read something else
   entirely.
 
-**Phase 4 — Reading items.** `RopOpenMessage`, property reads on messages, streams for large
-values, the attachment table and attachment reads, and `RopSortTable`/`RopRestrict` for ordered and
-filtered contents tables. Ends with *"list calendar events"* with real start, end and location;
-*"list contacts"* with email addresses; a message body over the buffer limit read whole; and an
-attachment's bytes extracted, including the embedded-message case.
+**Phase 4 — Reading items. Done.** `RopOpenMessage`, property reads on messages, the three stream
+ROPs, the attachment table, `RopOpenAttachment`, `RopOpenEmbeddedMessage`, and
+`RopSortTable`/`RopRestrict`. `mapi-cli events`, `mapi-cli contacts` and `mapi-cli message --body`
+deliver all four of the endings this phase was written against, and `mapi-cli messages
+--newest-first --subject` shows the server doing the sorting and the filtering. Six things the phase
+turned up:
+
+- **The lab needed seeding before any of it could be read.** A folder-and-table client could be
+  demonstrated against an empty mailbox; an item client cannot. `scripts\Add-LabItems.ps1` puts
+  four appointments, three contacts and one message with a 60 KB body and one attachment of each
+  kind into a mailbox through EWS — deliberately not through this client, because a corpus a client
+  built for itself proves nothing about the client.
+- **`MaxRopOut` has an effective ceiling of about 32 KiB that no document states.** The field is
+  honoured directly below it — a 21,099-byte output buffer succeeds at `MaxRopOut` 40,000 and a
+  24,675-byte one is refused at 20,000 — but a read refused at 65,536 is refused identically at
+  `0x00040000`, the maximum [MS-OXCRPC] §3.1.4.2 allows, so raising it past the ceiling achieves
+  nothing. Every refusal reports `SizeNeeded` = 32,767 whatever was asked for, so [MS-OXCROPS]
+  §3.1.5.1.2's remedy — resend with the buffer at least `SizeNeeded` — is already satisfied and
+  changes nothing. Asking for fewer bytes is the only way out. Reads are 16 KiB because the read
+  shares its buffer with the rest of its batch and the rest is not fixed: the same chunk that works
+  behind a `RopOpenMessage` is refused behind the chain an attachment needs.
+
+  The first draft of this called it a product defect on the strength of the largest working buffer
+  being a few bytes under 32 KiB. That was wrong and is worth remembering: a server may reserve
+  space, and [MS-OXCROPS] §3.1.5.1.3 appends `RopNotify` and `RopPending` to the end of the very
+  buffer being measured. **An off-by-a-handful measurement is plumbing until proven otherwise.**
+  What survives is the probe at the documented maximum, and one `SHOULD`-level deviation:
+  §3.2.4.3's second bullet says a response that will not fit at the maximum SHOULD fail the
+  `Execute` with `0x0000047D` rather than answer `RopBufferTooSmall`.
+- **Reaching an embedded message opens its parent first**, so one batch carries two
+  `RopOpenMessage`-shaped responses and taking the first reports the outer message's subject as the
+  inner one's. Found on the lab, against an attachment named `forwarded.msg` that came back with
+  the subject of the mail carrying it. `OpenMessageResponse::rop()` exists because of it.
+- **`RopOpenEmbeddedMessage` reports a `MessageId` of zero.** [MS-OXCMSG] §2.2.3.16.2 calls the
+  field a MID without qualification; both mailboxes answer `0x0000000000000000`. Consistent with an
+  embedded message having no identity in the store, and not something the document says.
+- **`RopOpenMessage`'s recipient table is not optional and did not need decoding.** There is no
+  request flag that suppresses it, so the tail has to be consumed exactly — but [MS-OXCROPS]
+  §2.2.6.1.2.1 puts a `RecipientRowSize` in front of each row, so the framing is exact without
+  [MS-OXCDATA] §2.8.3.2's conditional-bitfield grammar. The rows are handed back as bytes and the
+  crate says so, which leaves `RopModifyRecipients` real examples to encode against later.
+- **Two counts a caller would expect are simply absent.** `RopGetAttachmentTable`'s response carries
+  no row count where the folder tables do, and `RopRestrict`'s carries a status and nothing else —
+  so a filtered table keeps reporting the count it had before the filter. Both are documented
+  rather than papered over, because a wrong count reads exactly like a right one.
+
+Two pieces of the fixture problem below turned out to be smaller than expected and one larger. The
+scenario is a **read** throughout, so nothing self-cleans and nothing drifts; but the seeded content
+had to be authored for stability — fixed dates rather than "today", fixed text rather than
+generated — because `Verify-Fixtures.ps1` demands byte equality on re-capture. It does get it: the
+whole corpus re-captured identical.
 
 **Phase 5 — Writing items.** `RopCreateMessage`, `RopSetProperties`, `RopSaveChangesMessage`,
 `RopModifyRecipients`, one-off EntryIDs, `RopWriteStream`, `RopCreateAttachment` and

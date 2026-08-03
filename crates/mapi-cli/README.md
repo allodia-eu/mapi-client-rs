@@ -20,6 +20,10 @@ mapi-cli folders --class IPF.Contact   only the contact folders, refinements inc
 mapi-cli special --details             find Calendar, Contacts, Drafts and the rest, and open them
 mapi-cli named --verify                what this store numbers each PidLid as, then asks it back
 mapi-cli messages --folder inbox       read a contents table
+mapi-cli messages --newest-first       let the server sort it, and --subject to let it filter
+mapi-cli events                        calendar entries with start, end, location and busy status
+mapi-cli contacts                      contacts with their email addresses
+mapi-cli message --id 0x... --body     one message: properties, body, attachments, embedded message
 mapi-cli properties                    dump every property of the Store object
 mapi-cli capture session --scrub r.tsv record a conversation as fixtures
 ```
