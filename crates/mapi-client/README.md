@@ -44,6 +44,19 @@ let calendar = special.get(SpecialFolder::Calendar).expect("a Calendar");
 let details = logon.folder(calendar).properties().read(FOLDER_PROPERTIES).await?;
 ```
 
+What is *in* a calendar entry costs one more round trip, and only once per session. A start time, an
+end time and a location are named properties with no fixed ids: each store allocates its own, so they
+have to be asked for. `Logon::resolve_names()` asks for them all in one `Execute` and caches the
+answer, and asking again for names already known sends nothing at all.
+
+```rust
+use mapi_client::NamedProperty;
+
+// Or `NamedProperty::ALL`, the ten a calendar or contact read is made of.
+let names = logon.resolve_names([NamedProperty::Location, NamedProperty::BusyStatus]).await?;
+let location = names.get(&NamedProperty::Location.name());   // None if this store would not map it
+```
+
 ## What the types enforce
 
 - **One request in flight.** MAPI/HTTP allows exactly one per Session Context, and a violation
@@ -59,6 +72,10 @@ let details = logon.folder(calendar).properties().read(FOLDER_PROPERTIES).await?
   opens a real folder and reports nothing wrong. The entry ids that resolve to them carry the
   mailbox GUID that issued them, and `FolderEntryId::belongs_to` answers before a conversion is
   asked for.
+- **Nor does a named-property id.** Ids are allocated per store, and in the lab every one of one
+  mailbox's ten ids names a real, *different*, registered property in the other — so the mistake is
+  answered with a plausible value rather than an error. A `NamedProperties` map carries the store
+  that issued its ids and cannot be given a foreign one.
 
 ## Transport and authentication
 
@@ -84,11 +101,11 @@ Part of [`mapi-client-rs`](https://github.com/allodia-eu/mapi-client-rs). Every 
 cites its Microsoft Open Specification section; see `SPEC.md` in the repository root for the pinned
 document versions.
 
-**Status:** `0.1.0` released; the property layer and the special-folder chain have landed since and
-are unreleased. Connect, logon, hierarchy and contents reads with paging — the hierarchy
+**Status:** `0.2.0`. Connect, logon, hierarchy and contents reads with paging — the hierarchy
 recursively, tagged by container class — the folders a logon does not name, property reads and
-writes on Store and Folder objects, disconnect, and Autodiscover lookup are implemented. No
-messages, no attachments, no streams, no notifications, no ICS, no address book.
+writes on Store and Folder objects, named-property resolution cached per session, disconnect, and
+Autodiscover lookup are implemented. No messages, no attachments, no streams, no notifications, no
+ICS, no address book.
 
 ## Licence
 

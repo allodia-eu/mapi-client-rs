@@ -8,7 +8,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 # Kept in lockstep with rust-toolchain.toml, which is the single source of truth
 # for the version CI installs. This field is what tells *consumers* the floor.
@@ -21,9 +21,9 @@ keywords = ["mapi", "exchange", "outlook", "email", "protocol"]
 categories = ["email", "network-programming", "parser-implementations"]
 
 [workspace.dependencies]
-mapi-proto = { version = "0.1.0", path = "crates/mapi-proto" }
-mapi-autodiscover = { version = "0.1.0", path = "crates/mapi-autodiscover" }
-mapi-client = { version = "0.1.0", path = "crates/mapi-client" }
+mapi-proto = { version = "0.2.0", path = "crates/mapi-proto" }
+mapi-autodiscover = { version = "0.2.0", path = "crates/mapi-autodiscover" }
+mapi-client = { version = "0.2.0", path = "crates/mapi-client" }
 
 thiserror = "2"
 roxmltree = "0.21"

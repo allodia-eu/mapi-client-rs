@@ -15,6 +15,21 @@ Two conventions specific to this project:
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.2.0] - 2026-08-03
+
+Everything a calendar read needs except the message itself. `0.1.0` could walk a folder hierarchy
+and page a table; this release adds the property layer, the entry-id chain that reaches the folders
+a logon does not name, and the named-property lookup that turns `PidLidLocation` into the id one
+particular store uses for it. Verified against Exchange Server SE `15.02.2562.045`, with the
+byte-exact captures that prove it committed to the repository — the corpus grows from 25 exchanges
+to 45, ten of them added to each of the two captured sessions.
+
+**This is a breaking release**: three public items changed shape, listed under *Changed*.
+`mapi-autodiscover` is unchanged and is republished only because all four crates share one version
+number.
+
 ### Added
 
 - **Nine more property types**, taking `PropertyType` from six to fifteen: `PtypInteger16`,
@@ -75,6 +90,10 @@ Two conventions specific to this project:
 
 ### Changed
 
+All three are breaking, which is what makes this `0.2.0` rather than `0.1.1`. Each was a choice
+between a default that answers the wrong question silently and a signature that makes the caller
+say which question they meant.
+
 - **`HIERARCHY_COLUMNS` is six tags rather than four**, adding `PidTagParentFolderId` and
   `PidTagContainerClass`. Without the first a recursive read is a flat bag of names with no way back
   to a tree; without the second a calendar and a mail folder are two names in a language the reader
@@ -110,7 +129,6 @@ Two conventions specific to this project:
 - **A lookup with the create flag off registers nothing.** An invented `PS_PUBLIC_STRINGS` name
   answers `0x0000` and is still unregistered in a fresh session, which is what makes it safe for the
   capture to ask.
-
 - **`RopGetPropertiesAll` does not return every readable property.** It returns the properties *on*
   the object ([MS-OXCPRPT] §3.2.5.2); computed ones need an explicit fetch (§3.2.5.1). A private
   mailbox logon answered with 113 properties, and `PidTagMailboxOwnerEntryId` was not among them —
@@ -218,5 +236,6 @@ to the repository.
   measured, so neither LZ77/DIRECT2 nor the `0xA5` XOR layer is implemented. A server that refuses
   those flags is not supported.
 
-[Unreleased]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/allodia-eu/mapi-client-rs/releases/tag/v0.1.0

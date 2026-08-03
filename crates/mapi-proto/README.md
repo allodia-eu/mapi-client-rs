@@ -23,13 +23,13 @@ batch.set_columns(table, &HIERARCHY_COLUMNS).query_rows(table, 50);
 let request = session.execute(batch)?;   // one round trip for the whole chain
 ```
 
-**Status:** `0.1.0` released; the property layer and the special-folder chain have landed since and
-are unreleased. The transport envelope, the ROP layer, the OXCDATA structures and the session state
-machine are implemented. `Connect`, `Execute`, `Disconnect` and `PING` are the request types
-covered, with the logon, folder, table, property and long-term-id ROPs on top — enough to walk a
-whole folder tree, read and write a Store or Folder object's properties, and resolve the folders a
-logon does not name. No Message or Attachment objects, no streams, no notifications, no ICS and no
-address book endpoint.
+**Status:** `0.2.0`. The transport envelope, the ROP layer, the OXCDATA structures and the session
+state machine are implemented. `Connect`, `Execute`, `Disconnect` and `PING` are the request types
+covered, with the logon, folder, table, property, long-term-id and named-property ROPs on top —
+enough to walk a whole folder tree, read and write a Store or Folder object's properties, reach the
+folders a logon does not name, and ask a store which id it has allocated for a `PidLid`. Fifteen of
+the OXCDATA property types are modelled. No Message or Attachment objects, no streams, no
+notifications, no ICS and no address book endpoint.
 
 ## Licence
 

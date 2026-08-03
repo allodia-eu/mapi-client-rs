@@ -27,21 +27,20 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: `0.1.0` released, with the property layer, the special folders and named properties
-> landed since.** What works is what the corpus proves: locate an endpoint by Autodiscover, connect,
-> log on, walk the folder hierarchy — the whole of it in one table, tagged by container class — read
-> or write the Store object's and any folder's own properties, find the Calendar, Contacts, Drafts,
-> Tasks, Notes and Journal folders that the logon does not name, resolve the `PidLid` properties a
-> calendar entry is made of to the ids one store uses for them, and page a contents table with the
-> columns you choose. All verified against Exchange Server SE `15.02.2562.045`. What is missing is
-> everything about messages, and `Negotiate`/`NTLM` authentication. The gaps are stated below and in
-> the changelog rather than left to be discovered.
+> **Status: `0.2.0` released.** What works is what the corpus proves: locate an endpoint by
+> Autodiscover, connect, log on, walk the folder hierarchy — the whole of it in one table, tagged by
+> container class — read or write the Store object's and any folder's own properties, find the
+> Calendar, Contacts, Drafts, Tasks, Notes and Journal folders that the logon does not name, resolve
+> the `PidLid` properties a calendar entry is made of to the ids one store uses for them, and page a
+> contents table with the columns you choose. All verified against Exchange Server SE
+> `15.02.2562.045`. What is missing is everything about messages, and `Negotiate`/`NTLM`
+> authentication. The gaps are stated below and in the changelog rather than left to be discovered.
 
 ## Install
 
 ```toml
 [dependencies]
-mapi-client = "0.1"
+mapi-client = "0.2"
 ```
 
 `mapi-proto` and `mapi-autodiscover` are published separately and are useful on their own — the
