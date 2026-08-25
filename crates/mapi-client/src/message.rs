@@ -9,8 +9,8 @@
 //! [MS-OXCMSG] — Message and Attachment Object Protocol
 
 use mapi_proto::{
-    AttachmentNumber, FolderId, MessageId, ObjectHandle, OpenMessageResponse, PropertyTag,
-    RopBatch, RopId,
+    AttachmentNumber, FolderId, MessageId, MessageMode, ObjectHandle, OpenMessageResponse,
+    PropertyProblem, PropertyTag, Recipient, RopBatch, RopId, TaggedValue,
 };
 
 use crate::connection::Connection;
@@ -134,6 +134,26 @@ impl<'a> Message<'a> {
         StreamRead::new(self.connection, Target::Message(self.path), tag)
     }
 
+    /// Changes an existing item and commits the change.
+    ///
+    /// The counterpart of [`Folder::create_message`](crate::Folder::create_message), and *"update a
+    /// contact"* and *"update a calendar event"* between them. One round trip: the message is
+    /// opened read/write, written, saved and released in a single `Execute`.
+    ///
+    /// **A read/write open can be refused where a read-only one would have succeeded** — see
+    /// [`MessageMode`] — so this is not the call to reach for when nothing is being changed.
+    ///
+    /// [MS-OXCMSG] §3.1.4.3 — saving changes on a Message object
+    #[must_use]
+    pub fn update(self) -> MessageUpdate<'a> {
+        MessageUpdate {
+            connection: self.connection,
+            path: self.path,
+            properties: Vec::new(),
+            recipients: Vec::new(),
+        }
+    }
+
     /// The message's attachment table.
     ///
     /// Defaults to [`ATTACHMENT_COLUMNS`](crate::ATTACHMENT_COLUMNS), which carries
@@ -165,6 +185,77 @@ impl<'a> Message<'a> {
             message: self.path,
             number,
         }
+    }
+}
+
+/// Changes to make to an existing item. Nothing is sent until [`save`](MessageUpdate::save).
+#[derive(Debug)]
+pub struct MessageUpdate<'a> {
+    connection: &'a mut Connection,
+    path: MessagePath,
+    properties: Vec<TaggedValue>,
+    recipients: Vec<Recipient>,
+}
+
+impl MessageUpdate<'_> {
+    /// Properties to write.
+    #[must_use]
+    pub fn set<I>(mut self, values: I) -> Self
+    where
+        I: IntoIterator<Item = TaggedValue>,
+    {
+        self.properties.extend(values);
+        self
+    }
+
+    /// Recipients to add or change.
+    ///
+    /// **This does not replace the list.** `RopModifyRecipients` addresses each row by a `RowId`
+    /// that is its position here ([MS-OXCMSG] §3.1.5.5), so passing two recipients rewrites the
+    /// first two and leaves any others in place. Clearing a list needs `RopRemoveAllRecipients`,
+    /// which this crate does not implement.
+    #[must_use]
+    pub fn to<I>(mut self, recipients: I) -> Self
+    where
+        I: IntoIterator<Item = Recipient>,
+    {
+        self.recipients.extend(recipients);
+        self
+    }
+
+    /// Applies the changes.
+    ///
+    /// The returned list names the properties the server refused, as
+    /// [`Properties::write`](crate::Properties::write) does — and with the same caveat: an empty
+    /// list is what a server chose to report, not proof that everything landed.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Rop`] if the server refused the open — `ecNoAccess` for a message this account may
+    /// read and not change — or the save, plus whatever the round trip failed with.
+    pub async fn save(self) -> Result<Vec<PropertyProblem>> {
+        let mut batch = RopBatch::new();
+        let logon = batch.bind(self.path.logon);
+        let message = batch.open_message(
+            logon,
+            self.path.folder,
+            self.path.id,
+            MessageMode::ReadWrite,
+        );
+        batch.set_properties(message, &self.properties);
+        if !self.recipients.is_empty() {
+            batch.modify_recipients(message, &self.recipients);
+        }
+        batch.save_message(message).release(message);
+
+        let execution = self.connection.execute(batch, "updating a message").await?;
+        execution
+            .property_problems()
+            .map(|response| response.problems().to_vec())
+            .ok_or(Error::Unexpected {
+                expected: "a property write response",
+                found: "no property problems report in the batch's responses",
+            })
     }
 }
 

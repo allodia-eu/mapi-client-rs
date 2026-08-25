@@ -10,6 +10,7 @@
 
 #![allow(
     dead_code,
+    unused_imports,
     reason = "shared by several test binaries; each one uses a different part"
 )]
 #![allow(
@@ -25,10 +26,16 @@
     reason = "these builders hand their bytes onward to wiremock, which wants them owned"
 )]
 
+/// The ROP walker, which grows with every ROP the crate learns to send.
+mod roplist;
+/// The responses to the ROPs that change a mailbox, which are their own half of the harness.
+pub(crate) mod writes;
+
 use std::collections::VecDeque;
 use std::sync::{Arc, Mutex};
 
 use mapi_client::{Credentials, LegacyDn, MapiClient, PropertyTag};
+pub(crate) use roplist::{opcodes, rop_list};
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
@@ -282,6 +289,32 @@ pub(crate) fn release_response(slot: u8) -> Vec<u8> {
     Bytes::new().u8(0x01).u8(slot).u32(0).done()
 }
 
+/// A `RopOpenStream` success response, whose body is the size the stream had at the open.
+///
+/// A measurement rather than a promise, and the client says so: this is what the property was when
+/// the stream was opened, not what the reads will add up to.
+///
+/// [MS-OXCROPS] §2.2.9.1.2
+pub(crate) fn open_stream_response(slot: u8, size: u32) -> Vec<u8> {
+    Bytes::new().u8(0x2B).u8(slot).u32(0).u32(size).done()
+}
+
+/// A `RopReadStream` success response carrying a chunk.
+///
+/// There is no end-of-stream flag. A read past the last byte succeeds and answers with nothing,
+/// which is the only way a client learns it is done.
+///
+/// [MS-OXCROPS] §2.2.9.2.2
+pub(crate) fn read_stream_response(slot: u8, data: &[u8]) -> Vec<u8> {
+    Bytes::new()
+        .u8(0x2C)
+        .u8(slot)
+        .u32(0)
+        .u16(u16::try_from(data.len()).unwrap())
+        .raw(data)
+        .done()
+}
+
 /// Where the cursor sits after a read. [MS-OXCTABL] §2.2.2.1.1
 pub(crate) const BOOKMARK_CURRENT: u8 = 0x01;
 pub(crate) const BOOKMARK_END: u8 = 0x02;
@@ -446,53 +479,6 @@ impl MapiServer {
         let rop_size = usize::from(u16::from_le_bytes([body[16], body[17]]));
         body[18..18 + rop_size - 2].to_vec()
     }
-}
-
-/// Splits a ROP list into one entry per ROP: its opcode, and the whole ROP including its header.
-///
-/// ROPs are variable-length and not self-describing, so this walks them with the layouts of the
-/// ones this crate actually sends. A test can then say "the batch was open, table, columns, rows,
-/// release" instead of counting bytes, and an accidental change to any encoding shows up here as a
-/// wrong opcode rather than as a silently shifted offset.
-///
-/// # Panics
-///
-/// On a ROP this crate does not send, which in a test means the batch builder has changed and this
-/// walker has not.
-pub(crate) fn rop_list(rops: &[u8]) -> Vec<(u8, &[u8])> {
-    let u16_at = |at: usize| usize::from(u16::from_le_bytes([rops[at], rops[at + 1]]));
-
-    let mut out = Vec::new();
-    let mut at = 0;
-    while at < rops.len() {
-        let opcode = rops[at];
-        let length = match opcode {
-            0x01 => 3,                      // RopRelease
-            0x02 => 13,                     // RopOpenFolder: FolderId is 8 of them
-            0x04 | 0x05 => 5,               // RopGetHierarchyTable / RopGetContentsTable
-            0x07 => 9 + 4 * u16_at(at + 7), // RopGetPropertiesSpecific: limit, unicode, then tags
-            0x0B => 5 + 4 * u16_at(at + 3), // RopDeleteProperties: PropertyTagCount, then the tags
-            0x12 => 6 + 4 * u16_at(at + 4), // RopSetColumns: PropertyTagCount, then the tags
-            // RopGetPropertiesAll (limit and unicode) and RopQueryRows (flags, direction, count)
-            // are the same length by coincidence rather than by kinship.
-            0x08 | 0x15 => 7,
-            0x43 => 11,                   // RopLongTermIdFromId: an 8-byte ObjectId
-            0x44 => 27,                   // RopIdFromLongTermId: a 24-byte LongTermID
-            0xFE => 14 + u16_at(at + 12), // RopLogon: EssdnSize counts the NUL
-            other => panic!("ROP 0x{other:02X} is not one this crate sends"),
-        };
-        out.push((opcode, &rops[at..at + length]));
-        at += length;
-    }
-    out
-}
-
-/// The opcodes of a ROP list, in order.
-pub(crate) fn opcodes(rops: &[u8]) -> Vec<u8> {
-    rop_list(rops)
-        .into_iter()
-        .map(|(opcode, _)| opcode)
-        .collect()
 }
 
 /// A successful MAPI response: `X-ResponseCode: 0` and the meta-tag preamble a server sends.
