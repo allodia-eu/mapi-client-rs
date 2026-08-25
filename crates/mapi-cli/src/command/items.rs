@@ -50,7 +50,7 @@ pub(crate) async fn messages(
 ) -> Result<(), Failure> {
     let client = connection.client()?;
     let mut logon = client.connect().await?.logon().await?;
-    let id = super::resolve(&logon, folder)?;
+    let id = super::resolve(&mut logon, folder).await?;
 
     println!("contents of {folder} ({:#018x})", id.as_u64());
     let mut table = logon.folder(id).contents().page_size(page_size);
@@ -293,7 +293,7 @@ pub(crate) async fn message(
     let message_id = MessageId::new(super::parse_hexadecimal(id, "a message id")?);
     let client = connection.client()?;
     let mut logon = client.connect().await?.logon().await?;
-    let folder_id = super::resolve(&logon, folder)?;
+    let folder_id = super::resolve(&mut logon, folder).await?;
 
     let opened = logon.message(folder_id, message_id).open().await?;
     println!(

@@ -20,6 +20,10 @@
 //! mapi-cli events                     list calendar entries with start, end and location
 //! mapi-cli contacts                   list contacts with their email addresses
 //! mapi-cli message --id 0x...  --body open one message, its body and its attachments
+//! mapi-cli draft --subject Hi --to a@b.test --attach notes.txt   write one into Drafts
+//! mapi-cli contact --name 'Ada Lovelace' --email ada@example.test create a contact
+//! mapi-cli event --subject Review --start 2026-09-10T09:00:00Z --end 2026-09-10T10:00:00Z
+//! mapi-cli delete --folder drafts --id 0x...   take one back out again
 //! mapi-cli properties                 dump every property of the Store object
 //! mapi-cli capture session --out fixtures/exchange-se/session-en-us --scrub rules.tsv
 //! ```
@@ -220,6 +224,89 @@ enum Command {
         body: bool,
     },
 
+    /// Write a message into Drafts, with recipients and an attachment.
+    ///
+    /// The recipients are addressed one-off — an SMTP address and nothing looked up — because the
+    /// address book is NSPI, a separate endpoint this workspace does not implement.
+    /// [MS-OXCDATA] §2.2.5.1
+    Draft {
+        /// The subject.
+        #[arg(long, value_name = "TEXT", default_value = "Drafted by mapi-cli")]
+        subject: String,
+
+        /// The plain-text body.
+        #[arg(long, value_name = "TEXT", default_value = "")]
+        body: String,
+
+        /// An SMTP address to address it to. Repeatable.
+        #[arg(long = "to", value_name = "ADDRESS")]
+        to: Vec<String>,
+
+        /// A file to attach. Its bytes go through `RopWriteStream`, 16 KiB at a time.
+        #[arg(long, value_name = "FILE")]
+        attach: Option<std::path::PathBuf>,
+    },
+
+    /// Create a contact in the Contacts folder.
+    ///
+    /// Half of what makes a contact a contact is named properties, and one of those is a one-off
+    /// entry id — without it a client shows the address and will not send to it.
+    /// [MS-OXOCNTC] §2.2.1.2
+    Contact {
+        /// The display name. Split on its last space into a given name and a surname.
+        #[arg(long, value_name = "NAME")]
+        name: String,
+
+        /// The SMTP address.
+        #[arg(long, value_name = "ADDRESS")]
+        email: String,
+
+        /// The company name.
+        #[arg(long, value_name = "NAME")]
+        company: Option<String>,
+
+        /// The business telephone number.
+        #[arg(long, value_name = "NUMBER")]
+        phone: Option<String>,
+    },
+
+    /// Create a single-instance appointment in the Calendar.
+    ///
+    /// Both instants are UTC and the `Z` is required: [MS-OXOCAL] §2.2.1.5 specifies the start in
+    /// UTC, and this tool will not guess a time zone.
+    Event {
+        /// The subject.
+        #[arg(long, value_name = "TEXT")]
+        subject: String,
+
+        /// When it starts, as `2026-09-10T09:00:00Z`.
+        #[arg(long, value_name = "INSTANT")]
+        start: String,
+
+        /// When it ends, as `2026-09-10T10:00:00Z`.
+        #[arg(long, value_name = "INSTANT")]
+        end: String,
+
+        /// Where it is.
+        #[arg(long, value_name = "TEXT")]
+        location: Option<String>,
+    },
+
+    /// Delete messages from a folder, by id.
+    ///
+    /// A soft delete: the server keeps a back-up copy. `RopDeleteMessages` succeeds whether or not
+    /// it deleted anything, so this reports what the `PartialCompletion` flag said.
+    /// [MS-OXCROPS] §2.2.4.11
+    Delete {
+        /// Which folder they are in. One of the thirteen a logon names, or a folder id as `0x...`.
+        #[arg(long, value_name = "FOLDER", default_value = "drafts")]
+        folder: String,
+
+        /// A message id, as `0x...`. Repeatable.
+        #[arg(long = "id", value_name = "ID", required = true)]
+        ids: Vec<String>,
+    },
+
     /// Dump the Store object's properties: display name, owner, size and quotas.
     ///
     /// With no `--tag`, this asks for everything the object holds, which is the only way to see
@@ -303,6 +390,34 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         Command::Message { folder, id, body } => {
             command::message(&connection, &folder, &id, body).await
         }
+        Command::Draft {
+            subject,
+            body,
+            to,
+            attach,
+        } => command::draft(&connection, &subject, &body, &to, attach.as_deref()).await,
+        Command::Contact {
+            name,
+            email,
+            company,
+            phone,
+        } => {
+            command::contact(
+                &connection,
+                &name,
+                &email,
+                company.as_deref(),
+                phone.as_deref(),
+            )
+            .await
+        }
+        Command::Event {
+            subject,
+            start,
+            end,
+            location,
+        } => command::event(&connection, &subject, &start, &end, location.as_deref()).await,
+        Command::Delete { folder, ids } => command::delete(&connection, &folder, &ids).await,
         Command::Properties { tag } => command::properties(&connection, &tag).await,
         Command::Discover { address } => command::discover(&connection, &address).await,
         Command::Capture(arguments) => scenario::capture(&connection, &arguments).await,
@@ -367,6 +482,26 @@ mod tests {
 
         let cli = Cli::try_parse_from([&common[..], &["ping"]].concat()).expect("ping");
         assert!(matches!(cli.command, Command::Ping));
+
+        let cli = Cli::try_parse_from(
+            [
+                &common[..],
+                &["draft", "--to", "a@b.test", "--to", "c@d.test"],
+            ]
+            .concat(),
+        )
+        .expect("draft");
+        match cli.command {
+            Command::Draft { to, attach, .. } => {
+                assert_eq!(to, ["a@b.test", "c@d.test"]);
+                assert!(attach.is_none());
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // A delete with no id is refused rather than defaulted, because the default would be
+        // "delete nothing" and a command that quietly does nothing is worse than one that fails.
+        assert!(Cli::try_parse_from([&common[..], &["delete"]].concat()).is_err());
     }
 
     /// A failure prints its causes, because the cause is usually the actionable half.
