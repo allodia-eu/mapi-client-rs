@@ -15,6 +15,28 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.15.1
     pub const BUFFER_TOO_SMALL: Self = Self(0xFF);
+    /// `RopCommitStream`, `0x5D` — pushes what has been written into the property itself.
+    ///
+    /// [MS-OXCROPS] §2.2.9.5
+    pub const COMMIT_STREAM: Self = Self(0x5D);
+    /// `RopCreateAttachment`, `0x23` — adds an attachment to an open message.
+    ///
+    /// Its response carries the `PidTagAttachNumber` the new attachment was given, which is the
+    /// only way to name it afterwards.
+    ///
+    /// [MS-OXCROPS] §2.2.6.13
+    pub const CREATE_ATTACHMENT: Self = Self(0x23);
+    /// `RopCreateMessage`, `0x06` — creates a Message object in a folder.
+    ///
+    /// **Nothing is committed until `RopSaveChangesMessage`**, so a batch that creates a message
+    /// and stops leaves nothing behind.
+    ///
+    /// [MS-OXCROPS] §2.2.6.2
+    pub const CREATE_MESSAGE: Self = Self(0x06);
+    /// `RopDeleteMessages`, `0x1E` — deletes messages from a folder by id.
+    ///
+    /// [MS-OXCROPS] §2.2.4.11
+    pub const DELETE_MESSAGES: Self = Self(0x1E);
     /// `RopDeleteProperties`, `0x0B` — removes properties from an object.
     ///
     /// [MS-OXCROPS] §2.2.8.8
@@ -66,6 +88,10 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.3.8
     pub const LONG_TERM_ID_FROM_ID: Self = Self(0x43);
+    /// `RopModifyRecipients`, `0x0E` — adds or changes the recipients of an open message.
+    ///
+    /// [MS-OXCROPS] §2.2.6.5
+    pub const MODIFY_RECIPIENTS: Self = Self(0x0E);
     /// `RopOpenAttachment`, `0x22` — opens one attachment by its `PidTagAttachNumber`.
     ///
     /// [MS-OXCROPS] §2.2.6.12
@@ -105,6 +131,17 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.5.3
     pub const RESTRICT: Self = Self(0x14);
+    /// `RopSaveChangesAttachment`, `0x25` — commits an attachment's changes.
+    ///
+    /// **Before the message's own save, never after.** An attachment saved after its message is
+    /// lost without anything failing.
+    ///
+    /// [MS-OXCROPS] §2.2.6.15
+    pub const SAVE_CHANGES_ATTACHMENT: Self = Self(0x25);
+    /// `RopSaveChangesMessage`, `0x0C` — commits a message's changes and reports its id.
+    ///
+    /// [MS-OXCROPS] §2.2.6.3
+    pub const SAVE_CHANGES_MESSAGE: Self = Self(0x0C);
     /// `RopSetColumns`, `0x12` — the column set every later row is encoded against.
     ///
     /// [MS-OXCROPS] §2.2.5.1
@@ -117,6 +154,10 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.5.2
     pub const SORT_TABLE: Self = Self(0x13);
+    /// `RopWriteStream`, `0x2D` — writes bytes at the stream's cursor.
+    ///
+    /// [MS-OXCROPS] §2.2.9.3
+    pub const WRITE_STREAM: Self = Self(0x2D);
 
     /// Wraps a raw opcode.
     #[must_use]
@@ -137,6 +178,14 @@ impl RopId {
             Self::RELEASE => "RopRelease",
             Self::OPEN_FOLDER => "RopOpenFolder",
             Self::OPEN_MESSAGE => "RopOpenMessage",
+            Self::CREATE_MESSAGE => "RopCreateMessage",
+            Self::SAVE_CHANGES_MESSAGE => "RopSaveChangesMessage",
+            Self::MODIFY_RECIPIENTS => "RopModifyRecipients",
+            Self::CREATE_ATTACHMENT => "RopCreateAttachment",
+            Self::SAVE_CHANGES_ATTACHMENT => "RopSaveChangesAttachment",
+            Self::DELETE_MESSAGES => "RopDeleteMessages",
+            Self::WRITE_STREAM => "RopWriteStream",
+            Self::COMMIT_STREAM => "RopCommitStream",
             Self::GET_HIERARCHY_TABLE => "RopGetHierarchyTable",
             Self::GET_CONTENTS_TABLE => "RopGetContentsTable",
             Self::SORT_TABLE => "RopSortTable",
@@ -184,6 +233,18 @@ mod tests {
             (RopId::RELEASE, 0x01, "RopRelease"),
             (RopId::OPEN_FOLDER, 0x02, "RopOpenFolder"),
             (RopId::OPEN_MESSAGE, 0x03, "RopOpenMessage"),
+            (RopId::CREATE_MESSAGE, 0x06, "RopCreateMessage"),
+            (RopId::SAVE_CHANGES_MESSAGE, 0x0C, "RopSaveChangesMessage"),
+            (RopId::MODIFY_RECIPIENTS, 0x0E, "RopModifyRecipients"),
+            (RopId::DELETE_MESSAGES, 0x1E, "RopDeleteMessages"),
+            (RopId::CREATE_ATTACHMENT, 0x23, "RopCreateAttachment"),
+            (
+                RopId::SAVE_CHANGES_ATTACHMENT,
+                0x25,
+                "RopSaveChangesAttachment",
+            ),
+            (RopId::WRITE_STREAM, 0x2D, "RopWriteStream"),
+            (RopId::COMMIT_STREAM, 0x5D, "RopCommitStream"),
             (RopId::GET_HIERARCHY_TABLE, 0x04, "RopGetHierarchyTable"),
             (RopId::GET_CONTENTS_TABLE, 0x05, "RopGetContentsTable"),
             (RopId::SORT_TABLE, 0x13, "RopSortTable"),

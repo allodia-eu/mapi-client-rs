@@ -16,10 +16,11 @@
 use crate::error::{Error, ErrorCode, Result};
 use crate::oxcdata::{LongTermId, PropertySet, PropertyTag, ShortTermId};
 use crate::rop::{
-    GetPropertiesResponse, GetTableResponse, IdFromLongTermIdResponse, LogonResponse,
-    LongTermIdFromIdResponse, OpenFolderResponse, OpenMessageResponse, PropertyIdsResponse,
-    PropertyNamesResponse, PropertyProblemsResponse, QueryRowsResponse, ReadStreamResponse, RopId,
-    SetColumnsResponse, StreamSizeResponse, TableStatusResponse,
+    CreateAttachmentResponse, CreateMessageResponse, DeleteMessagesResponse, GetPropertiesResponse,
+    GetTableResponse, IdFromLongTermIdResponse, LogonResponse, LongTermIdFromIdResponse,
+    OpenFolderResponse, OpenMessageResponse, PropertyIdsResponse, PropertyNamesResponse,
+    PropertyProblemsResponse, QueryRowsResponse, ReadStreamResponse, RopId, SaveChangesResponse,
+    SetColumnsResponse, StreamSizeResponse, TableStatusResponse, WriteStreamResponse,
 };
 use crate::wire::Reader;
 
@@ -50,13 +51,30 @@ pub enum RopResponse {
     ReadStream(ReadStreamResponse),
     /// A ROP that succeeded and had nothing to report.
     ///
-    /// `RopOpenAttachment` and `RopGetAttachmentTable` both answer with a bare `ReturnValue`: the
-    /// handle they produced is in the handle table and there is no body at all. The `RopId` is kept
-    /// so a batch issuing both can still tell which succeeded.
+    /// `RopOpenAttachment`, `RopGetAttachmentTable`, `RopModifyRecipients`,
+    /// `RopSaveChangesAttachment` and `RopCommitStream` all answer with a bare `ReturnValue`: what
+    /// they did is in the handle table or in the store, and there is no body at all. The `RopId` is
+    /// kept so a batch issuing several can still tell which succeeded.
     Succeeded {
         /// Which ROP.
         rop: RopId,
     },
+    /// A successful `RopCreateMessage`.
+    ///
+    /// **Nothing exists yet.** The message is committed by `RopSaveChangesMessage` and by nothing
+    /// else, so this response on its own means a handle was opened.
+    CreateMessage(CreateMessageResponse),
+    /// A successful `RopSaveChangesMessage`, carrying the id the message now has.
+    SaveChanges(SaveChangesResponse),
+    /// A successful `RopCreateAttachment`, carrying the number the new attachment was given.
+    CreateAttachment(CreateAttachmentResponse),
+    /// A successful `RopWriteStream`, saying how many bytes reached the stream.
+    WriteStream(WriteStreamResponse),
+    /// A successful `RopDeleteMessages`.
+    ///
+    /// Success here is about the ROP: the response says separately whether every message named was
+    /// actually deleted.
+    DeleteMessages(DeleteMessagesResponse),
     /// A successful `RopGetPropertiesSpecific` or `RopGetPropertiesAll`.
     GetProperties(GetPropertiesResponse),
     /// A successful `RopSetProperties` or `RopDeleteProperties`.
@@ -133,6 +151,53 @@ impl RopResponse {
     pub fn as_open_message(&self, rop: RopId) -> Option<&OpenMessageResponse> {
         match self {
             Self::OpenMessage(response) if response.rop() == rop => Some(response),
+            _ => None,
+        }
+    }
+
+    /// The new message, if this is a `RopCreateMessage` response.
+    #[must_use]
+    pub const fn as_created_message(&self) -> Option<CreateMessageResponse> {
+        match self {
+            Self::CreateMessage(response) => Some(*response),
+            _ => None,
+        }
+    }
+
+    /// The committed message, if this is a `RopSaveChangesMessage` response.
+    ///
+    /// The id it carries is the one that names the message from then on.
+    #[must_use]
+    pub const fn as_saved_message(&self) -> Option<SaveChangesResponse> {
+        match self {
+            Self::SaveChanges(response) => Some(*response),
+            _ => None,
+        }
+    }
+
+    /// The new attachment, if this is a `RopCreateAttachment` response.
+    #[must_use]
+    pub const fn as_created_attachment(&self) -> Option<CreateAttachmentResponse> {
+        match self {
+            Self::CreateAttachment(response) => Some(*response),
+            _ => None,
+        }
+    }
+
+    /// How many bytes landed, if this is a `RopWriteStream` response.
+    #[must_use]
+    pub const fn as_written(&self) -> Option<WriteStreamResponse> {
+        match self {
+            Self::WriteStream(response) => Some(*response),
+            _ => None,
+        }
+    }
+
+    /// The outcome, if this is a `RopDeleteMessages` response.
+    #[must_use]
+    pub const fn as_deleted_messages(&self) -> Option<DeleteMessagesResponse> {
+        match self {
+            Self::DeleteMessages(response) => Some(*response),
             _ => None,
         }
     }
@@ -310,69 +375,101 @@ pub(crate) fn decode_all(rops: &[u8], context: Decoding<'_>) -> Result<Vec<RopRe
             continue;
         }
 
-        out.push(match rop {
-            RopId::LOGON => RopResponse::Logon(LogonResponse::read(&mut r)?),
-            RopId::OPEN_FOLDER => RopResponse::OpenFolder(OpenFolderResponse::read(&mut r)?),
-            RopId::GET_HIERARCHY_TABLE | RopId::GET_CONTENTS_TABLE => {
-                RopResponse::GetTable(GetTableResponse::read(&mut r)?)
-            }
-            RopId::SET_COLUMNS => RopResponse::SetColumns(SetColumnsResponse::read(&mut r)?),
-            RopId::SORT_TABLE | RopId::RESTRICT => {
-                RopResponse::TableStatus(TableStatusResponse::read(&mut r, rop)?)
-            }
-            // Neither has a response body at all: the handle each produced is in the handle table
-            // and the buffer moves straight on to the next ROP.
-            RopId::OPEN_ATTACHMENT | RopId::GET_ATTACHMENT_TABLE => RopResponse::Succeeded { rop },
-            RopId::OPEN_MESSAGE => RopResponse::OpenMessage(OpenMessageResponse::read(&mut r)?),
-            RopId::OPEN_EMBEDDED_MESSAGE => {
-                RopResponse::OpenMessage(OpenMessageResponse::read_embedded(&mut r)?)
-            }
-            RopId::OPEN_STREAM | RopId::GET_STREAM_SIZE => {
-                RopResponse::StreamSize(StreamSizeResponse::read(&mut r, rop)?)
-            }
-            RopId::READ_STREAM => RopResponse::ReadStream(ReadStreamResponse::read(&mut r)?),
-            RopId::QUERY_ROWS => {
-                let columns = context
-                    .columns
-                    .get(usize::from(handle_index))
-                    .and_then(Option::as_deref)
-                    .ok_or(Error::UnknownColumns { handle_index })?;
-                RopResponse::QueryRows(QueryRowsResponse::read(&mut r, columns)?)
-            }
-            RopId::GET_PROPERTIES_SPECIFIC => {
-                let tags = requested.ok_or(Error::UnrequestedProperties { at: r.position() })?;
-                RopResponse::GetProperties(GetPropertiesResponse::read_row(&mut r, rop, tags)?)
-            }
-            RopId::GET_PROPERTIES_ALL => {
-                RopResponse::GetProperties(GetPropertiesResponse::read_all(&mut r, rop)?)
-            }
-            RopId::SET_PROPERTIES | RopId::DELETE_PROPERTIES => {
-                RopResponse::PropertyProblems(PropertyProblemsResponse::read(&mut r, rop)?)
-            }
-            RopId::GET_PROPERTY_IDS_FROM_NAMES => {
-                RopResponse::PropertyIds(PropertyIdsResponse::read(&mut r)?)
-            }
-            RopId::GET_NAMES_FROM_PROPERTY_IDS => {
-                RopResponse::PropertyNames(PropertyNamesResponse::read(&mut r)?)
-            }
-            RopId::ID_FROM_LONG_TERM_ID => {
-                RopResponse::IdFromLongTermId(IdFromLongTermIdResponse::read(&mut r)?)
-            }
-            RopId::LONG_TERM_ID_FROM_ID => {
-                RopResponse::LongTermIdFromId(LongTermIdFromIdResponse::read(&mut r)?)
-            }
-            // Every response is variable-length and none is self-describing, so there is no
-            // honest way to skip one whose layout is unknown.
-            _ => {
-                return Err(Error::UnmodelledRop {
-                    rop,
-                    at: r.position(),
-                });
-            }
-        });
+        out.push(decode_success(
+            &mut r,
+            rop,
+            handle_index,
+            requested,
+            context,
+        )?);
     }
 
     Ok(out)
+}
+
+/// Decodes one successful response body, after `RopId`, the handle index and a zero `ReturnValue`.
+///
+/// Split out of [`decode_all`] because the loop around it is the part with the rules — the ROPs
+/// that answer out of turn, the tag queue, the one refusal that carries a body — and a match arm
+/// per ROP buries them.
+fn decode_success(
+    r: &mut Reader<'_>,
+    rop: RopId,
+    handle_index: u8,
+    requested: Option<&Vec<PropertyTag>>,
+    context: Decoding<'_>,
+) -> Result<RopResponse> {
+    Ok(match rop {
+        RopId::LOGON => RopResponse::Logon(LogonResponse::read(r)?),
+        RopId::OPEN_FOLDER => RopResponse::OpenFolder(OpenFolderResponse::read(r)?),
+        RopId::GET_HIERARCHY_TABLE | RopId::GET_CONTENTS_TABLE => {
+            RopResponse::GetTable(GetTableResponse::read(r)?)
+        }
+        RopId::SET_COLUMNS => RopResponse::SetColumns(SetColumnsResponse::read(r)?),
+        RopId::SORT_TABLE | RopId::RESTRICT => {
+            RopResponse::TableStatus(TableStatusResponse::read(r, rop)?)
+        }
+        // None of these has a response body at all: what each did is in the handle table or
+        // in the store, and the buffer moves straight on to the next ROP.
+        RopId::OPEN_ATTACHMENT
+        | RopId::GET_ATTACHMENT_TABLE
+        | RopId::MODIFY_RECIPIENTS
+        | RopId::SAVE_CHANGES_ATTACHMENT
+        | RopId::COMMIT_STREAM => RopResponse::Succeeded { rop },
+        RopId::CREATE_MESSAGE => RopResponse::CreateMessage(CreateMessageResponse::read(r)?),
+        RopId::SAVE_CHANGES_MESSAGE => RopResponse::SaveChanges(SaveChangesResponse::read(r)?),
+        RopId::CREATE_ATTACHMENT => {
+            RopResponse::CreateAttachment(CreateAttachmentResponse::read(r)?)
+        }
+        RopId::WRITE_STREAM => RopResponse::WriteStream(WriteStreamResponse::read(r)?),
+        RopId::DELETE_MESSAGES => RopResponse::DeleteMessages(DeleteMessagesResponse::read(r)?),
+        RopId::OPEN_MESSAGE => RopResponse::OpenMessage(OpenMessageResponse::read(r)?),
+        RopId::OPEN_EMBEDDED_MESSAGE => {
+            RopResponse::OpenMessage(OpenMessageResponse::read_embedded(r)?)
+        }
+        RopId::OPEN_STREAM | RopId::GET_STREAM_SIZE => {
+            RopResponse::StreamSize(StreamSizeResponse::read(r, rop)?)
+        }
+        RopId::READ_STREAM => RopResponse::ReadStream(ReadStreamResponse::read(r)?),
+        RopId::QUERY_ROWS => {
+            let columns = context
+                .columns
+                .get(usize::from(handle_index))
+                .and_then(Option::as_deref)
+                .ok_or(Error::UnknownColumns { handle_index })?;
+            RopResponse::QueryRows(QueryRowsResponse::read(r, columns)?)
+        }
+        RopId::GET_PROPERTIES_SPECIFIC => {
+            let tags = requested.ok_or(Error::UnrequestedProperties { at: r.position() })?;
+            RopResponse::GetProperties(GetPropertiesResponse::read_row(r, rop, tags)?)
+        }
+        RopId::GET_PROPERTIES_ALL => {
+            RopResponse::GetProperties(GetPropertiesResponse::read_all(r, rop)?)
+        }
+        RopId::SET_PROPERTIES | RopId::DELETE_PROPERTIES => {
+            RopResponse::PropertyProblems(PropertyProblemsResponse::read(r, rop)?)
+        }
+        RopId::GET_PROPERTY_IDS_FROM_NAMES => {
+            RopResponse::PropertyIds(PropertyIdsResponse::read(r)?)
+        }
+        RopId::GET_NAMES_FROM_PROPERTY_IDS => {
+            RopResponse::PropertyNames(PropertyNamesResponse::read(r)?)
+        }
+        RopId::ID_FROM_LONG_TERM_ID => {
+            RopResponse::IdFromLongTermId(IdFromLongTermIdResponse::read(r)?)
+        }
+        RopId::LONG_TERM_ID_FROM_ID => {
+            RopResponse::LongTermIdFromId(LongTermIdFromIdResponse::read(r)?)
+        }
+        // Every response is variable-length and none is self-describing, so there is no honest
+        // way to skip one whose layout is unknown.
+        _ => {
+            return Err(Error::UnmodelledRop {
+                rop,
+                at: r.position(),
+            });
+        }
+    })
 }
 
 /// Reads the tail of a `RopLogon` redirect, after `ReturnValue` of `ecWrongServer`.

@@ -195,6 +195,18 @@ pub enum Error {
         limit: usize,
     },
 
+    /// A stream write offered more bytes than one `RopWriteStream` request can carry.
+    ///
+    /// `DataSize` is two bytes ([MS-OXCROPS] §2.2.9.3.1), so the surplus would simply not be sent —
+    /// and a short write succeeds, so nothing downstream would say the value is incomplete.
+    #[error("a stream write of {wanted} bytes exceeds the {limit} one request can carry")]
+    StreamWriteTooLarge {
+        /// How many bytes were offered.
+        wanted: usize,
+        /// The most one request can hold.
+        limit: usize,
+    },
+
     /// A sort was asked for on a column the table has not been given.
     ///
     /// [MS-OXCTABL] §2.2.2.3 requires every property sorted on to have been named in

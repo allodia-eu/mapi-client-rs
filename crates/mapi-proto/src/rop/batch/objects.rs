@@ -15,10 +15,12 @@ use crate::rop::batch::{HandleSlot, ObjectHandle, RopBatch};
 use crate::rop::folder::encode_open_folder;
 use crate::rop::longterm::{encode_id_from_long_term_id, encode_long_term_id_from_id};
 use crate::rop::message::{
-    encode_get_attachment_table, encode_open_attachment, encode_open_embedded_message,
+    MessageMode, encode_get_attachment_table, encode_open_attachment, encode_open_embedded_message,
     encode_open_message,
 };
-use crate::rop::stream::{encode_get_stream_size, encode_open_stream, encode_read_stream};
+use crate::rop::stream::{
+    StreamMode, encode_get_stream_size, encode_open_stream, encode_read_stream,
+};
 
 impl RopBatch {
     /// Opens a folder by id, producing a folder handle.
@@ -41,8 +43,9 @@ impl RopBatch {
     /// a message can be opened without a `RopOpenFolder` in front of it and a whole read costs one
     /// ROP fewer than the shape of the API suggests.
     ///
-    /// Opened **read-only**. A read/write open on a message another client already has open can be
-    /// refused where a read-only open would have succeeded.
+    /// **The mode is a request, not a permission the caller holds.** A read/write open on a message
+    /// another client already has open can be refused where a read-only open would have succeeded —
+    /// and a message opened read-only will not save. See [`MessageMode`].
     ///
     /// [MS-OXCROPS] §2.2.6.1 — `RopOpenMessage`
     /// [MS-OXCMSG] §2.2.3.1.1 — `OpenModeFlags`
@@ -51,11 +54,14 @@ impl RopBatch {
         logon: HandleSlot,
         folder: FolderId,
         message: MessageId,
+        mode: MessageMode,
     ) -> HandleSlot {
         let known = self.check(logon);
         let output = self.allocate(ObjectHandle::NONE);
         if known {
-            self.push(|w| encode_open_message(w, logon.index(), output.index(), folder, message));
+            self.push(|w| {
+                encode_open_message(w, logon.index(), output.index(), folder, message, mode);
+            });
         }
         output
     }
@@ -110,17 +116,23 @@ impl RopBatch {
     /// The response reports the stream's length, so an open and a
     /// [`stream_size`](Self::stream_size) in the same batch are the same question asked twice.
     ///
-    /// Opened **read-only**, which matters more here than elsewhere: the `Create` mode deletes the
-    /// current property value before opening, so a mistyped flag on a body read would destroy the
-    /// body.
+    /// **The mode is not a detail.** [`StreamMode::Create`] deletes the current property value
+    /// before opening, so passing it on a body read destroys the body — and it is the only mode
+    /// that works on a property that has never been set, which is every property of an attachment
+    /// created moments ago.
     ///
     /// [MS-OXCROPS] §2.2.9.1 — `RopOpenStream`
     /// [MS-OXCPRPT] §2.2.14 — valid on Folder, Message and Attachment objects
-    pub fn open_stream(&mut self, object: HandleSlot, tag: PropertyTag) -> HandleSlot {
+    pub fn open_stream(
+        &mut self,
+        object: HandleSlot,
+        tag: PropertyTag,
+        mode: StreamMode,
+    ) -> HandleSlot {
         let known = self.check(object);
         let output = self.allocate(ObjectHandle::NONE);
         if known {
-            self.push(|w| encode_open_stream(w, object.index(), output.index(), tag));
+            self.push(|w| encode_open_stream(w, object.index(), output.index(), tag, mode));
         }
         output
     }
