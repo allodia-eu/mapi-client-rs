@@ -4,6 +4,7 @@
 //! property that makes this binary worth having: what it prints is what the library saw.
 
 mod items;
+mod writes;
 
 use std::collections::HashMap;
 
@@ -13,6 +14,7 @@ use mapi_client::{
     NamedPropertyEntry, NamedPropertyId, PropertyName, PropertyRow, PropertyTag, PropertyValue,
     SpecialFolder, SpecialFolderState, TableString, WellKnownFolder,
 };
+pub(crate) use writes::{contact, delete, draft, event};
 
 use crate::settings::Connection;
 use crate::{Failure, report};
@@ -67,7 +69,7 @@ pub(crate) async fn folders(
 ) -> Result<(), Failure> {
     let client = connection.client()?;
     let mut logon = client.connect().await?.logon().await?;
-    let id = resolve(&logon, folder)?;
+    let id = resolve(&mut logon, folder).await?;
     let wanted = class.map(ContainerClass::new);
 
     println!(
@@ -413,8 +415,16 @@ fn parse_folder_id(folder: &str) -> Result<FolderId, Failure> {
     parse_hexadecimal(folder, "a folder id").map(FolderId::new)
 }
 
-/// Turns a folder argument into an id: a well-known name, or a raw id in hexadecimal.
-fn resolve(logon: &Logon, folder: &str) -> Result<FolderId, Failure> {
+/// Turns a folder argument into an id: a well-known name, a special-folder name, or a raw id.
+///
+/// The three are not equivalent, and what each costs is the reason to say so here. A well-known
+/// name is free — the logon reported its id. A special-folder name costs two round trips, because
+/// Calendar, Contacts and Drafts live behind entry-id properties on the Inbox and an entry id has
+/// to be converted before `RopOpenFolder` will take it. A raw id costs nothing and is meaningful
+/// only in the mailbox it came from.
+///
+/// [MS-OXOSFLD] §2.2.3 — where the special folders' entry ids live
+async fn resolve(logon: &mut Logon, folder: &str) -> Result<FolderId, Failure> {
     if folder.starts_with("0x") || folder.starts_with("0X") {
         return parse_folder_id(folder);
     }
@@ -425,10 +435,18 @@ fn resolve(logon: &Logon, folder: &str) -> Result<FolderId, Failure> {
             return Ok(logon.folder_id(candidate)?);
         }
     }
+    for candidate in SpecialFolder::ALL {
+        if slug(candidate.name()) == wanted {
+            return Ok(logon.special_folder(candidate).await?);
+        }
+    }
 
     Err(Failure::from(format!(
-        "`{folder}` is not a folder. Give a folder id as `0x...`, or one of: {}",
+        "`{folder}` is not a folder. Give a folder id as `0x...`, or one of: {}, {}",
         WellKnownFolder::ALL
+            .map(|folder| slug(folder.name()))
+            .join(", "),
+        SpecialFolder::ALL
             .map(|folder| slug(folder.name()))
             .join(", ")
     )))
