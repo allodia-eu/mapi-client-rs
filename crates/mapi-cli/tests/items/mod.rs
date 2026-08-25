@@ -109,12 +109,13 @@ async fn replay(name: &str, locale: Lcid) -> Items {
     let (attachments, content, embedded_subject, embedded_id) =
         replay_attachments(&mut logon, inbox, id).await;
 
-    let body = logon
-        .message(inbox, id)
-        .stream(PropertyTag::BODY_HTML)
-        .read()
-        .await
-        .expect("a streamed body");
+    let stream = logon.message(inbox, id).stream(PropertyTag::BODY_HTML);
+    assert_eq!(
+        stream.tag(),
+        PropertyTag::BODY_HTML,
+        "a read that failed has nothing but this to name what it was reading"
+    );
+    let body = stream.read().await.expect("a streamed body");
     assert!(
         body.is_complete(),
         "the replayed read stopped at its own limit"

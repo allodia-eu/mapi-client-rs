@@ -15,7 +15,9 @@
 //!
 //! [MS-OXCROPS] §3.1.4.1 — one ROP consumes the handle an earlier ROP produced
 
-use mapi_proto::{AttachmentNumber, FolderId, HandleSlot, MessageId, ObjectHandle, RopBatch};
+use mapi_proto::{
+    AttachmentNumber, FolderId, HandleSlot, MessageId, MessageMode, ObjectHandle, RopBatch,
+};
 
 /// Where a message lives: the logon it hangs off, and the folder and id that name it.
 ///
@@ -106,9 +108,14 @@ impl Target {
     }
 }
 
+/// Opens the message **read-only**, because everything reached through a [`Target`] is a read.
+///
+/// A read/write open on a message another client already has open can be refused where this one
+/// succeeds, so asking for write access a read does not need turns a working read into an error.
+/// The write path builds its own batch and says so there.
 fn open_message(batch: &mut RopBatch, path: MessagePath) -> HandleSlot {
     let logon = batch.bind(path.logon);
-    batch.open_message(logon, path.folder, path.id)
+    batch.open_message(logon, path.folder, path.id, MessageMode::ReadOnly)
 }
 
 /// An object placed in a batch, and the handles that batch has to give back.
@@ -121,6 +128,14 @@ pub(crate) struct Opened {
 }
 
 impl Opened {
+    /// The handles this open created, innermost first.
+    ///
+    /// For an operation that outlives its own batch — a stream read that takes several round trips
+    /// — which has to keep the chain alive and release it at the end instead.
+    pub(crate) fn slots(&self) -> &[HandleSlot] {
+        &self.opened
+    }
+
     /// Releases everything the open created, in the reverse of the order it was created.
     ///
     /// Called *after* the operation's own ROPs have been added, so the handles are still live when
