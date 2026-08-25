@@ -184,6 +184,7 @@ foreach ($identity in $Mailbox) {
         Endpoint  = "$($vdir.InternalUrl)/emsmdb/?MailboxId=$($box.ExchangeGuid)@$domain"
         Scenario  = "session-$($language.ToLowerInvariant())"
         Items     = "items-$($language.ToLowerInvariant())"
+        Writes    = "writes-$($language.ToLowerInvariant())"
     })
 
     Write-Host "    $identity  $language (LCID 0x$('{0:x4}' -f $lcid))  ->  session-$($language.ToLowerInvariant())"
@@ -296,6 +297,13 @@ try {
         # here by name rather than producing a corpus that proves nothing.
         Write-Step "Capturing $($target.Items) from $($target.Identity)"
         Invoke-Capture -Scenario 'items' -Name $target.Items -Environment $environment
+
+        # The one scenario that writes. It creates a draft, reads it back and deletes it, so the
+        # mailbox ends as it started - and it declares the message id the server minted, so the
+        # capture zeroes it and a re-capture of an unchanged server produces the same bytes. If it
+        # fails part way it says so and names the draft it left behind.
+        Write-Step "Capturing $($target.Writes) from $($target.Identity)"
+        Invoke-Capture -Scenario 'writes' -Name $target.Writes -Environment $environment
     }
 
     if (-not $SkipRefused) {

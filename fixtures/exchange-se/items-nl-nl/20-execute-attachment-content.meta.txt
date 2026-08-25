@@ -9,8 +9,8 @@ name = 20-execute-attachment-content
 request-type = Execute
 url = https://exchange-lab-01/mapi/emsmdb/?MailboxId=00000000-0000-0000-0000-000000000002@lab.local
 status = 200
-request-bytes = 33
-response-bytes = 88
+request-bytes = 47
+response-bytes = 96
 
 [request-headers]
 Content-Type: application/mapi-http

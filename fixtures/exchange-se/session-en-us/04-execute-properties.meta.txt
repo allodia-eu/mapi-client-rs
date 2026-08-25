@@ -47,6 +47,7 @@ date: <normalised by capture>
 [normalised]
 - response preamble: `X-StartTime` value replaced with `0` ([MS-OXCMAPIHTTP] §2.2.7)
 - response preamble: `X-ElapsedTime` value replaced with `0` ([MS-OXCMAPIHTTP] §2.2.7)
+- 1 occurrence(s) of PidTagMessageSizeExtended, the mailbox's size at the moment of the capture zeroed: 8 bytes minted by this capture
 - header `X-RequestId`: GUID replaced
 - header `X-ClientInfo`: GUID replaced
 - header `Cookie`: value replaced
