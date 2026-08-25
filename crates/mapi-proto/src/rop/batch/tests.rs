@@ -3,7 +3,9 @@ use crate::oxcdata::{
     CONTENTS_COLUMNS, FolderId, Guid, HIERARCHY_COLUMNS, LongTermId, MessageId, PropertyName,
     Restriction, ShortTermId, SortOrder, SortOrderSet,
 };
+use crate::rop::message::MessageMode;
 use crate::rop::named::NameRegistration;
+use crate::rop::stream::StreamMode;
 use crate::rop::table::FolderDepth;
 
 fn dn() -> LegacyDn {
@@ -271,9 +273,18 @@ fn handles_and_slots_render_for_humans() {
 fn a_message_attachment_and_stream_chain_through_one_buffer() {
     let mut batch = RopBatch::new();
     let logon = batch.bind(ObjectHandle::new(0x2A));
-    let message = batch.open_message(logon, FolderId::new(1), MessageId::new(2));
+    let message = batch.open_message(
+        logon,
+        FolderId::new(1),
+        MessageId::new(2),
+        MessageMode::ReadOnly,
+    );
     let attachment = batch.open_attachment(message, 0);
-    let stream = batch.open_stream(attachment, PropertyTag::ATTACH_DATA_BINARY);
+    let stream = batch.open_stream(
+        attachment,
+        PropertyTag::ATTACH_DATA_BINARY,
+        StreamMode::ReadOnly,
+    );
     batch.read_stream(stream, 4096).release(stream);
 
     assert_eq!(message.index(), 1);
@@ -298,7 +309,12 @@ fn a_message_attachment_and_stream_chain_through_one_buffer() {
 fn an_embedded_message_hangs_off_the_attachment_it_is() {
     let mut batch = RopBatch::new();
     let logon = batch.bind(ObjectHandle::new(0x2A));
-    let message = batch.open_message(logon, FolderId::new(1), MessageId::new(2));
+    let message = batch.open_message(
+        logon,
+        FolderId::new(1),
+        MessageId::new(2),
+        MessageMode::ReadOnly,
+    );
     let table = batch.attachment_table(message);
     let attachment = batch.open_attachment(message, 3);
     let embedded = batch.open_embedded_message(attachment);
@@ -388,4 +404,54 @@ fn a_stream_read_past_what_one_response_holds_fails_the_batch() {
             ..
         })
     ));
+}
+
+/// One write call, named, so a failure says which ROP let the slot through.
+type Attempt = (&'static str, fn(&mut RopBatch, HandleSlot));
+
+/// Every write ROP refuses a slot this batch never allocated, for the reason the reads do and with
+/// more at stake: a create, a save or a delete addressed at a handle-table entry that does not
+/// exist is a change to whatever the server has in that slot, and the ROP that made it reports
+/// success.
+#[test]
+fn a_write_refuses_a_slot_from_another_batch() {
+    let mut other = RopBatch::new();
+    let stranger = other.bind(ObjectHandle::new(7));
+
+    let attempts: [Attempt; 8] = [
+        ("create_message", |batch, slot| {
+            batch.create_message(slot, FolderId::new(1));
+        }),
+        ("save_message", |batch, slot| {
+            batch.save_message(slot);
+        }),
+        ("modify_recipients", |batch, slot| {
+            batch.modify_recipients(slot, &[]);
+        }),
+        ("create_attachment", |batch, slot| {
+            batch.create_attachment(slot);
+        }),
+        ("save_attachment", |batch, slot| {
+            batch.save_attachment(slot);
+        }),
+        ("write_stream", |batch, slot| {
+            batch.write_stream(slot, &[0x00]);
+        }),
+        ("commit_stream", |batch, slot| {
+            batch.commit_stream(slot);
+        }),
+        ("delete_messages", |batch, slot| {
+            batch.delete_messages(slot, &[MessageId::new(0x0100)]);
+        }),
+    ];
+
+    for (name, attempt) in attempts {
+        let mut batch = RopBatch::new();
+        attempt(&mut batch, stranger);
+        assert_eq!(
+            batch.build().unwrap_err(),
+            Error::UnknownHandleSlot { index: 0 },
+            "{name} sent a ROP against a slot it does not have"
+        );
+    }
 }

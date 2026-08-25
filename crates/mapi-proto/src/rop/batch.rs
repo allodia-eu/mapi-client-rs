@@ -11,9 +11,10 @@
 //!
 //! [MS-OXCROPS] §3.1.4.1 — creating a ROP input buffer
 
-//! The ROP-issuing methods themselves are grouped by the object they act on — [`objects`], the
-//! tables in [`tables`], the properties in [`props`] — so that no one file grows past what a
-//! reader can hold, and so that the grouping follows the specification's own division.
+//! The ROP-issuing methods themselves are grouped by what they act on — [`objects`], the tables in
+//! [`tables`], the properties in [`props`], the ROPs that create and destroy in [`writes`] — so
+//! that no one file grows past what a reader can hold, and so that the grouping follows the
+//! specification's own division.
 
 use crate::error::{Error, Result};
 use crate::oxcdata::{LegacyDn, PropertyTag};
@@ -25,6 +26,7 @@ use crate::wire::Writer;
 mod objects;
 mod props;
 mod tables;
+mod writes;
 
 /// A ROP addresses the handle table with one byte, so a batch can hold this many slots.
 const MAX_SLOTS: usize = 256;

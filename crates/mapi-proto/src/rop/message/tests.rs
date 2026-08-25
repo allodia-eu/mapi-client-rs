@@ -1,4 +1,5 @@
 use super::*;
+use crate::oxcdata::RecipientType;
 
 #[test]
 fn open_message_request_matches_the_spec_layout() {
@@ -9,6 +10,7 @@ fn open_message_request_matches_the_spec_layout() {
         1,
         FolderId::new(0x0D01_0000_0000_0001),
         MessageId::new(0x0D01_0000_0000_0042),
+        MessageMode::ReadOnly,
     );
 
     #[rustfmt::skip]
@@ -203,4 +205,36 @@ fn truncated_message_responses_never_panic() {
         let _ = OpenMessageResponse::read(&mut Reader::new(&buf));
         let _ = OpenMessageResponse::read_embedded(&mut Reader::new(&buf));
     }
+}
+
+/// The three modes go on the wire as the three values the table gives them, in the one byte that
+/// decides whether a save will be allowed — and `is_writable` answers for the one the server has
+/// actually agreed to, which `BestAccess` is not.
+#[test]
+fn each_open_mode_sends_its_own_flag_byte() {
+    let flags = |mode| {
+        let mut w = Writer::new();
+        encode_open_message(
+            &mut w,
+            0,
+            1,
+            FolderId::new(0x0D01_0000_0000_0001),
+            MessageId::new(0x0D01_0000_0000_0042),
+            mode,
+        );
+        // `OpenModeFlags` sits between the two ids, fourteen bytes in.
+        w.finish().get(14).copied()
+    };
+
+    assert_eq!(flags(MessageMode::ReadOnly), Some(0x00));
+    assert_eq!(flags(MessageMode::ReadWrite), Some(0x01));
+    assert_eq!(flags(MessageMode::BestAccess), Some(0x03));
+
+    assert!(MessageMode::ReadWrite.is_writable());
+    assert!(!MessageMode::ReadOnly.is_writable());
+    assert!(
+        !MessageMode::BestAccess.is_writable(),
+        "BestAccess is a request, and the refusal arrives at the save"
+    );
+    assert_eq!(MessageMode::default(), MessageMode::ReadOnly);
 }

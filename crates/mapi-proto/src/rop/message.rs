@@ -21,7 +21,7 @@
 //! [MS-OXCMSG] §2.2.3 — semantics
 
 use crate::error::{Error, Result};
-use crate::oxcdata::{FolderId, MessageId};
+use crate::oxcdata::{FolderId, MessageId, RecipientType};
 use crate::rop::RopId;
 use crate::rop::batch::LOGON_ID;
 use crate::wire::{Reader, Writer};
@@ -34,16 +34,53 @@ use crate::wire::{Reader, Writer};
 /// [MS-OXCMSG] §2.2.3.1.1 — `CodePageId`
 const CODE_PAGE_FROM_LOGON: u16 = 0x0FFF;
 
-/// `OpenModeFlags`: read-only.
+/// How a message is opened, which decides what may then be done to it.
 ///
-/// Deliberate, and not merely conservative: nothing in this crate modifies a message yet, and a
-/// read/write open on a message another client already has open can be refused where a read-only
-/// open would have succeeded.
+/// **Not merely a permission.** A read/write open on a message another client already has open can
+/// be refused where a read-only open would have succeeded, so asking for write access a caller does
+/// not need turns a working read into an error — and asking for read-only access and then trying to
+/// save turns a working write into one.
 ///
 /// [MS-OXCMSG] §2.2.3.1.1 — `OpenModeFlags`
-const OPEN_MODE_READ_ONLY: u8 = 0x00;
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[non_exhaustive]
+pub enum MessageMode {
+    /// `0x00` — read the message and change nothing.
+    #[default]
+    ReadOnly,
+    /// `0x01` — read and write. Required before `RopSaveChangesMessage` will commit anything.
+    ReadWrite,
+    /// `0x03` — read/write where the folder's permissions allow it, read-only where they do not.
+    ///
+    /// The open succeeds either way, so what a caller gets is not knowable from the response — the
+    /// refusal arrives at the save instead. Offered because it is what a client that does not know
+    /// in advance whether it may write should ask for.
+    BestAccess,
+}
 
-/// `OpenAttachmentFlags`: read-only, as [`OPEN_MODE_READ_ONLY`].
+impl MessageMode {
+    /// The `OpenModeFlags` byte this is written as.
+    const fn flags(self) -> u8 {
+        match self {
+            Self::ReadOnly => 0x00,
+            Self::ReadWrite => 0x01,
+            Self::BestAccess => 0x03,
+        }
+    }
+
+    /// Whether a message opened this way is one the server has agreed to let this client write.
+    ///
+    /// `false` for [`BestAccess`](Self::BestAccess), which is a request rather than an answer.
+    #[must_use]
+    pub const fn is_writable(self) -> bool {
+        matches!(self, Self::ReadWrite)
+    }
+}
+
+/// `OpenAttachmentFlags`: read-only, as [`MessageMode::ReadOnly`].
+///
+/// Nothing in this crate opens an *existing* attachment to change it — an attachment is created,
+/// filled and saved in one go, so the write path never passes through here.
 ///
 /// [MS-OXCMSG] §2.2.3.12.1 — `OpenAttachmentFlags`
 const OPEN_ATTACHMENT_READ_ONLY: u8 = 0x00;
@@ -55,66 +92,6 @@ const OPEN_ATTACHMENT_READ_ONLY: u8 = 0x00;
 ///
 /// [MS-OXCMSG] §2.2.3.17.1 — `TableFlags`
 const ATTACHMENT_TABLE_UNICODE: u8 = 0x40;
-
-/// What kind of recipient one row of the recipient table describes.
-///
-/// A bitwise OR of at most one value from the type table with any number of the resend flags, so
-/// the type is the low nibble and the flags live above it.
-///
-/// [MS-OXCMSG] §2.2.3.1.2 — `RecipientType`
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub struct RecipientType(u8);
-
-impl RecipientType {
-    /// `0x03` — a blind carbon-copy recipient.
-    pub const BLIND_CARBON_COPY: Self = Self(0x03);
-    /// `0x02` — a carbon-copy recipient.
-    pub const CARBON_COPY: Self = Self(0x02);
-    /// `0x01` — a primary (To) recipient.
-    pub const PRIMARY: Self = Self(0x01);
-
-    /// Wraps the byte as received.
-    #[must_use]
-    pub const fn new(raw: u8) -> Self {
-        Self(raw)
-    }
-
-    /// The byte as the wire carries it, flags included.
-    #[must_use]
-    pub const fn as_u8(self) -> u8 {
-        self.0
-    }
-
-    /// The type alone, with the resend flags masked off.
-    ///
-    /// The flags are `0x10` and `0x80` ([MS-OXCMSG] §2.2.3.1.2), so a `To` recipient that failed on
-    /// a previous attempt arrives as `0x11` and would not compare equal to
-    /// [`PRIMARY`](Self::PRIMARY) without this.
-    #[must_use]
-    pub const fn kind(self) -> Self {
-        Self(self.0 & 0x0F)
-    }
-
-    /// The name of the kind, if it is one the document lists.
-    #[must_use]
-    pub const fn name(self) -> Option<&'static str> {
-        Some(match self.kind() {
-            Self::PRIMARY => "To",
-            Self::CARBON_COPY => "Cc",
-            Self::BLIND_CARBON_COPY => "Bcc",
-            _ => return None,
-        })
-    }
-}
-
-impl core::fmt::Display for RecipientType {
-    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        match self.name() {
-            Some(name) => f.pad(name),
-            None => write!(f, "recipient type 0x{:02X}", self.0),
-        }
-    }
-}
 
 /// One row of the recipient table a message open answers with.
 ///
@@ -337,6 +314,7 @@ pub(crate) fn encode_open_message(
     output: u8,
     folder: FolderId,
     message: MessageId,
+    mode: MessageMode,
 ) {
     w.u8(RopId::OPEN_MESSAGE.as_u8())
         .u8(LOGON_ID)
@@ -344,7 +322,7 @@ pub(crate) fn encode_open_message(
         .u8(output)
         .u16(CODE_PAGE_FROM_LOGON)
         .u64(folder.as_u64())
-        .u8(OPEN_MODE_READ_ONLY)
+        .u8(mode.flags())
         .u64(message.as_u64());
 }
 
@@ -373,6 +351,10 @@ pub(crate) fn encode_open_attachment(w: &mut Writer, input: u8, output: u8, numb
 
 /// Encodes a `RopOpenEmbeddedMessage` request.
 ///
+/// Read-only, and not parameterised: an embedded message is reached through its attachment and by
+/// no other route, so changing one means saving the attachment and then the message that holds it —
+/// a chain nothing in this crate offers.
+///
 /// [MS-OXCROPS] §2.2.6.16.1 — request buffer
 pub(crate) fn encode_open_embedded_message(w: &mut Writer, input: u8, output: u8) {
     w.u8(RopId::OPEN_EMBEDDED_MESSAGE.as_u8())
@@ -380,7 +362,7 @@ pub(crate) fn encode_open_embedded_message(w: &mut Writer, input: u8, output: u8
         .u8(input)
         .u8(output)
         .u16(CODE_PAGE_FROM_LOGON)
-        .u8(OPEN_MODE_READ_ONLY);
+        .u8(MessageMode::ReadOnly.flags());
 }
 
 #[cfg(test)]

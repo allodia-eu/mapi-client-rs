@@ -468,3 +468,54 @@ fn hostile_rop_streams_never_panic() {
         let _ = decode_all(stream, against(&hierarchy_columns_at(0)));
     }
 }
+
+/// So do the write accessors, and there is more riding on it: each of these payloads is a bare
+/// number, so a caller reaching for the wrong one would get a plausible message id, attachment
+/// number or byte count rather than nothing at all.
+#[test]
+fn the_write_accessors_answer_only_for_their_own_response() {
+    let mut w = Writer::new();
+    // A create that reported no id: `HasMessageId` is zero and the body ends there.
+    w.u8(RopId::CREATE_MESSAGE.as_u8()).u8(0).u32(0).u8(0);
+    w.u8(RopId::SAVE_CHANGES_MESSAGE.as_u8())
+        .u8(0)
+        .u32(0)
+        .u8(0)
+        .u64(0x0D01_0000_0000_0042);
+    w.u8(RopId::CREATE_ATTACHMENT.as_u8()).u8(0).u32(0).u32(2);
+
+    let responses = decode_all(&w.finish(), against(&no_columns())).unwrap();
+    let [created, saved, attached] = responses.as_slice() else {
+        panic!("expected three write responses, got {responses:?}");
+    };
+
+    assert!(created.as_created_message().is_some());
+    assert_eq!(
+        created
+            .as_created_message()
+            .and_then(CreateMessageResponse::message_id),
+        None
+    );
+    assert_eq!(
+        saved
+            .as_saved_message()
+            .map(SaveChangesResponse::message_id),
+        Some(crate::oxcdata::MessageId::new(0x0D01_0000_0000_0042))
+    );
+    assert_eq!(
+        attached
+            .as_created_attachment()
+            .map(CreateAttachmentResponse::number),
+        Some(crate::oxcdata::AttachmentNumber::new(2))
+    );
+
+    for other in [saved, attached] {
+        assert!(other.as_created_message().is_none());
+    }
+    for other in [created, attached] {
+        assert!(other.as_saved_message().is_none());
+    }
+    for other in [created, saved] {
+        assert!(other.as_created_attachment().is_none());
+    }
+}

@@ -8,6 +8,7 @@
 
 mod batch;
 mod buffer;
+mod create;
 mod folder;
 mod id;
 mod logon;
@@ -21,16 +22,19 @@ mod table;
 
 pub use batch::{HandleSlot, ObjectHandle, RopBatch};
 pub(crate) use buffer::RopBuffer;
+pub use create::{
+    CreateAttachmentResponse, CreateMessageResponse, DeleteMessagesResponse, SaveChangesResponse,
+};
 pub use folder::OpenFolderResponse;
 pub use id::RopId;
 pub use logon::{LogonResponse, WellKnownFolder};
 pub use longterm::{IdFromLongTermIdResponse, LongTermIdFromIdResponse};
-pub use message::{OpenMessageResponse, OpenRecipient, RecipientType};
+pub use message::{MessageMode, OpenMessageResponse, OpenRecipient};
 pub use named::{NameRegistration, PropertyIdsResponse, PropertyNamesResponse};
 pub use property::{GetPropertiesResponse, PropertyProblemsResponse};
 pub use response::RopResponse;
 pub(crate) use response::{Decoding, decode_all};
-pub use stream::{ReadStreamResponse, StreamSizeResponse};
+pub use stream::{ReadStreamResponse, StreamMode, StreamSizeResponse, WriteStreamResponse};
 pub use table::{
     Bookmark, FolderDepth, GetTableResponse, QueryRowsResponse, SetColumnsResponse, TableStatus,
     TableStatusResponse,
