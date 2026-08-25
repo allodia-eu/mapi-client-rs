@@ -54,8 +54,20 @@ powershell.exe -File scripts\Capture-Fixtures.ps1 -Mailbox developer,developer2 
 ```
 
 That single command asks Exchange for the deployment's details, derives the redaction rules from
-them, drives `mapi-cli capture` through three scenarios, rebuilds `fixtures/MANIFEST.toml`, and
-runs `Assert-NoSecrets.ps1` over the result. It refuses to finish if anything identifying survives.
+them, drives `mapi-cli capture` through every scenario, rebuilds `fixtures/MANIFEST.toml`, and runs
+`Assert-NoSecrets.ps1` over the result. It refuses to finish if anything identifying survives.
+
+**One of those scenarios writes.** `writes` creates a draft with an attachment in the mailbox, reads
+it back and deletes it, so a successful run leaves the mailbox exactly as it found it. A run that
+fails part way through says which draft it left behind — remove that before capturing again, because
+the next run would otherwise be capturing a mailbox that is not the one the other scenarios assert
+counts against.
+
+It is also the one scenario whose *requests* are not the same bytes every time: the server mints a
+message id for the draft, and the read and the delete carry it. The scenario declares that id, and
+the capture zeroes every occurrence of it in requests and responses alike — so a re-capture still
+agrees byte for byte, and the replay tests can still compare request bodies. Nothing is guessed:
+only values the run watched a server mint are touched.
 
 Then, always:
 
@@ -78,6 +90,14 @@ Any difference is a finding. That rule is only usable because capture already re
 things that genuinely differ every time — the clocks, the per-connection `RetryDelay`, the logon
 timestamps, and the response auxiliary buffer, whose length and contents change on every
 connection. Each capture's `.meta.txt` itemises exactly what was removed.
+
+Two more are removed by the *scenario* saying so rather than by an anchored offset: the message id a
+save mints, and **`PidTagMessageSizeExtended`**, which is how large the mailbox is at the moment of
+the capture. The second is not obvious and was found the hard way — a mailbox grows whenever
+anything writes to it, and `Test-Live.ps1` writes to it, so without this every verify run after a
+test run reported two differences and buried the one that meant something. `PidTagContentCount`
+beside it is deliberately *not* removed: the write scenario creates and deletes, so the count nets
+out, and a change in it would be a real finding.
 
 When it reports a difference, in rough order of likelihood:
 

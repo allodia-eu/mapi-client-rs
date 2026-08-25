@@ -17,6 +17,21 @@
 //! length preservingly — and through [`crate::normalise`], which removes the few fields that
 //! differ on every capture. Both are itemised in the `.meta.txt`, so nothing about a fixture is a
 //! change somebody has to take on trust.
+//!
+//! # What a write scenario adds
+//!
+//! A read scenario's requests are the same bytes every run. A write scenario's are not: the server
+//! mints an identifier for the item it created, and that identifier then travels in the *request*
+//! bodies of everything the scenario does with it afterwards. There is no anchor for it in the ROP
+//! buffer — a message id is eight bytes in the middle of a variable-length list — so
+//! [`crate::normalise`]'s offset-and-anchor approach cannot reach it.
+//!
+//! Instead the scenario says what the server gave it, through [`Recorder::server_assigned`], and
+//! every occurrence of those exact bytes is replaced with zeros of the same length. That is
+//! narrower than it sounds: nothing is guessed, only values the run itself watched a server mint
+//! are touched, and the replacement is length-preserving like every other one here. On replay the
+//! client reads the zero out of the fake server's answer and sends the same zero back, so the
+//! request bodies match byte for byte — which is the property the replay tests exist to check.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -57,6 +72,15 @@ impl Recorded {
     }
 }
 
+/// A value the server minted during a capture, which will differ on the next one.
+#[derive(Clone, Debug)]
+pub(crate) struct ServerAssigned {
+    /// What it is, for the `.meta.txt`. Never the value itself.
+    what: String,
+    /// The bytes as they appear on the wire.
+    bytes: Vec<u8>,
+}
+
 /// Keeps every exchange a client makes, in order.
 ///
 /// The label is set by whoever is driving the client, immediately before the call that will
@@ -66,6 +90,7 @@ impl Recorded {
 pub(crate) struct Recorder {
     label: Mutex<String>,
     exchanges: Mutex<Vec<Recorded>>,
+    assigned: Mutex<Vec<ServerAssigned>>,
 }
 
 impl Recorder {
@@ -76,12 +101,106 @@ impl Recorder {
         }
     }
 
+    /// Records a value the server minted, so the capture can zero it wherever it appears.
+    ///
+    /// Called by a scenario that has just been handed an identifier — a message id from a save —
+    /// and knows that the next run will be handed a different one. The name is for the `.meta.txt`;
+    /// the bytes never appear in it.
+    ///
+    /// **Declaring one is the scenario's job and nothing checks that it did.** If it forgets, the
+    /// capture still succeeds and `Verify-Fixtures.ps1` reports a difference on the very next run —
+    /// which is a loud failure at the right moment rather than a quiet one later.
+    ///
+    /// What *is* checked is the width: the replacement matches a byte sequence across the whole
+    /// capture, so anything under [`NARROWEST_ASSIGNED`] is refused before a file is written rather
+    /// than allowed to zero bytes nobody meant.
+    pub(crate) fn server_assigned(&self, what: &str, bytes: &[u8]) {
+        if let Ok(mut assigned) = self.assigned.lock() {
+            assigned.push(ServerAssigned {
+                what: what.to_owned(),
+                bytes: bytes.to_vec(),
+            });
+        }
+    }
+
     /// Everything recorded so far, in order.
     pub(crate) fn exchanges(&self) -> Vec<Recorded> {
         self.exchanges
             .lock()
             .map(|exchanges| exchanges.clone())
             .unwrap_or_default()
+    }
+
+    /// Every value a scenario said the server minted.
+    pub(crate) fn assigned(&self) -> Vec<ServerAssigned> {
+        self.assigned
+            .lock()
+            .map(|assigned| assigned.clone())
+            .unwrap_or_default()
+    }
+}
+
+/// The narrowest value a scenario may declare.
+///
+/// The replacement is a byte-sequence match across the whole capture, so a value narrow enough to
+/// occur by coincidence would zero something nobody meant. Eight bytes is what the two real cases
+/// are — a message id and a mailbox size — and is wide enough that an accidental match is not a
+/// thing to plan around. Four would not be: `PidTagContentCount` of 280 is `18 01 00 00`, which is
+/// exactly the sort of small integer a ROP buffer is full of.
+const NARROWEST_ASSIGNED: usize = 8;
+
+/// Refuses a declaration too narrow to match only what was meant.
+///
+/// A hard failure before anything is written, for the same reason a scrub rule that leaves a needle
+/// behind is one: a fixture that has had unrelated bytes zeroed is worse than no fixture, and it
+/// would be invisible.
+fn check_assigned(assigned: &[ServerAssigned]) -> Result<(), Failure> {
+    for value in assigned {
+        if value.bytes.len() < NARROWEST_ASSIGNED {
+            return Err(Failure::from(format!(
+                "the scenario declared {} as server-assigned, and it is {} byte(s). Anything under \
+                 {NARROWEST_ASSIGNED} is matched across the whole capture often enough to zero \
+                 bytes nobody meant, which is invisible once written. Declare a wider value, or \
+                 normalise this one against an anchor instead.",
+                value.what,
+                value.bytes.len()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Replaces every occurrence of each minted value with zeros of the same length.
+///
+/// Length-preserving, like every replacement in this pipeline: a fixture is read by byte offset,
+/// and a shifted offset fails somewhere unrelated to the change that caused it.
+fn zero_assigned(payload: &mut [u8], assigned: &[ServerAssigned], changes: &mut Vec<String>) {
+    for value in assigned {
+        let width = value.bytes.len();
+        if width == 0 {
+            continue;
+        }
+
+        let mut replaced = 0_usize;
+        let mut at = 0_usize;
+        while let Some(found) = payload
+            .get(at..)
+            .and_then(|rest| rest.windows(width).position(|window| window == value.bytes))
+        {
+            let start = at.saturating_add(found);
+            if let Some(field) = payload.get_mut(start..start.saturating_add(width)) {
+                field.fill(0);
+            }
+            replaced = replaced.saturating_add(1);
+            at = start.saturating_add(width);
+        }
+
+        if replaced > 0 {
+            changes.push(format!(
+                "{replaced} occurrence(s) of {} zeroed: {width} bytes minted by this capture",
+                value.what
+            ));
+        }
     }
 }
 
@@ -136,9 +255,12 @@ pub(crate) fn write_scenario(
     directory: &Path,
     endpoint: &str,
     exchanges: &[Recorded],
+    assigned: &[ServerAssigned],
     rules: &Rules,
     keep_raw: bool,
 ) -> Result<Vec<Written>, Failure> {
+    check_assigned(assigned)?;
+
     if directory.exists() {
         fs::remove_dir_all(directory)?;
     }
@@ -175,6 +297,11 @@ pub(crate) fn write_scenario(
         // between two captures of an unchanged server, and Verify-Fixtures.ps1 would report a
         // difference that says nothing about the protocol.
         let mut changes = normalise::response(exchange.request_type, &mut response_body);
+        // After the structural normalisation and before the scrub, for the same reason the scrub
+        // comes second: the auxiliary buffer is already gone, so nothing is counted inside bytes
+        // that never reach the file.
+        zero_assigned(&mut request_body, assigned, &mut changes);
+        zero_assigned(&mut response_body, assigned, &mut changes);
 
         let mut redactions = rules.apply(&mut request_body);
         merge(&mut redactions, rules.apply(&mut response_body));
@@ -319,6 +446,7 @@ mod tests {
             &directory,
             "https://win-m382a5je4u9/mapi/emsmdb/",
             &exchanges,
+            &[],
             &rules(),
             false,
         )
@@ -351,6 +479,7 @@ mod tests {
             &directory,
             "https://win-m382a5je4u9/mapi/emsmdb/?MailboxId=x@dev.local",
             &exchanges,
+            &[],
             &rules,
             true,
         )
@@ -403,6 +532,7 @@ mod tests {
                 recorded("", RequestType::Ping),
                 recorded("", RequestType::Connect),
             ],
+            &[],
             &rules(),
             false,
         )
@@ -413,6 +543,7 @@ mod tests {
             &directory,
             "https://exchange-lab-01/",
             &[recorded("", RequestType::Ping)],
+            &[],
             &rules(),
             false,
         )

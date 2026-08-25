@@ -9,7 +9,7 @@ name = 22-execute-body-stream
 request-type = Execute
 url = https://exchange-lab-01/mapi/emsmdb/?MailboxId=00000000-0000-0000-0000-000000000001@lab.local
 status = 200
-request-bytes = 78
+request-bytes = 75
 response-bytes = 16565
 
 [request-headers]

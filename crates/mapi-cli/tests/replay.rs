@@ -34,6 +34,7 @@
 mod corpus;
 mod items;
 mod replayed;
+mod writes;
 
 use std::sync::{Arc, Mutex};
 
@@ -59,6 +60,14 @@ const DEEP_PAGE: u16 = 20;
 /// contents pages and a release, and the `Disconnect` — which is `01-ping` through `22-disconnect`
 /// in either session directory.
 const SESSION_EXCHANGES: usize = 22;
+
+/// How many exchanges one captured item session holds, and one captured write session.
+///
+/// Named here as well as in the two modules that replay them because this is the file that counts
+/// the whole corpus against the manifest, and a scenario nothing counts is one a stale directory
+/// can hide in.
+const ITEM_EXCHANGES: usize = 27;
+const WRITE_EXCHANGES: usize = 18;
 
 /// The comment `mapi-cli capture` tried to set on the Store object, and which Exchange refused.
 /// Same reason as the page sizes: the request bodies only match if the replay sends the same
@@ -182,7 +191,7 @@ async fn replay(name: &str, locale: Lcid) -> Replayed {
     }
 }
 
-/// The named-property half of a captured session: the ten this crate catalogues plus a name no
+/// The named-property half of a captured session: every name this crate catalogues plus one no
 /// store has registered, then the ids that came back plus two the client never resolved.
 ///
 /// The order and the extras are not free choices — they are what `mapi-cli capture` sent, and the
@@ -352,7 +361,15 @@ fn every_committed_fixture_is_in_the_manifest() {
     );
 
     let mut counted = 0_usize;
-    for scenario in ["session-en-us", "session-nl-nl", "connect-refused"] {
+    for scenario in [
+        "session-en-us",
+        "session-nl-nl",
+        "items-en-us",
+        "items-nl-nl",
+        "writes-en-us",
+        "writes-nl-nl",
+        "connect-refused",
+    ] {
         let directory = fixtures().join("exchange-se").join(scenario);
         assert!(manifest.contains(&format!("[scenarios.\"exchange-se/{scenario}\"]")));
 
@@ -367,10 +384,15 @@ fn every_committed_fixture_is_in_the_manifest() {
         }
     }
 
-    // Three files per exchange, and every one of them accounted for. Both sessions run to the same
-    // number because both mailboxes are seeded from the same list and hold the same folders, so
-    // they page identically; the only thing that differs between them is what things are called.
-    assert_eq!(counted, (SESSION_EXCHANGES * 2 + 1) * 3);
+    // Three files per exchange, and every one of them accounted for. Each pair of scenarios runs
+    // to the same number because both mailboxes are seeded from the same list and hold the same
+    // folders, so they page identically; the only thing that differs between them is what things
+    // are called. The write scenarios match for a stronger reason: everything they send, this crate
+    // chose.
+    assert_eq!(
+        counted,
+        (SESSION_EXCHANGES * 2 + ITEM_EXCHANGES * 2 + WRITE_EXCHANGES * 2 + 1) * 3
+    );
 }
 
 /// A shared observer sees the same bytes the fixtures hold, which is the assumption the whole

@@ -127,6 +127,26 @@ async fn store_object(logon: &mut Logon, recorder: &Recorder) -> Result<(), Fail
             .count()
     );
 
+    // How large a mailbox is, is a measurement of the moment rather than a fact about the server —
+    // the same kind of thing as `RetryDelay` and `LogonTime`, which `normalise` already zeroes. It
+    // moves whenever anything writes to the mailbox, and the live write suite does exactly that, so
+    // leaving it in the corpus would have Verify-Fixtures.ps1 report a difference after every test
+    // run and bury the one that meant something.
+    //
+    // `PidTagContentCount` beside it is *not* declared, and the difference is the point: the write
+    // scenario creates and deletes, so the count nets out and a change in it would be a real
+    // finding. Measured across four captures — 280 in one lab mailbox and 312 in the other, both
+    // steady, while the size moved every time.
+    if let Some(size) = mailbox
+        .get(PropertyTag::MESSAGE_SIZE_EXTENDED)
+        .and_then(PropertyValue::as_u64)
+    {
+        recorder.server_assigned(
+            "PidTagMessageSizeExtended, the mailbox's size at the moment of the capture",
+            &size.to_le_bytes(),
+        );
+    }
+
     // A write the server refuses, which is why it is safe to capture. See `COMMENT_PROBE`.
     recorder.label("properties-refused");
     let problems = logon

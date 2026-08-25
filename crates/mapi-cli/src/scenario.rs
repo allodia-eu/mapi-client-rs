@@ -10,6 +10,7 @@
 
 mod items;
 mod session;
+mod writes;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -20,6 +21,7 @@ use mapi_client::MapiClient;
 use crate::capture::{Recorder, scenario_directory, write_scenario};
 use crate::scenario::items::items;
 use crate::scenario::session::session;
+use crate::scenario::writes::writes;
 use crate::scrub::Rules;
 use crate::settings::Connection;
 use crate::{Failure, report};
@@ -76,6 +78,12 @@ pub(crate) enum Scenario {
     /// Needs a mailbox seeded by `scripts\Add-LabItems.ps1`, and refuses to write a capture that
     /// would carry an empty calendar or a body small enough to fit one read.
     Items,
+    /// A draft created with a recipient and an attachment, read back, and deleted again.
+    ///
+    /// The only scenario in the corpus that writes. It is self-cleaning — the delete is the last
+    /// thing it does — and it declares the message id the server minted, so a re-capture of an
+    /// unchanged server produces the same bytes.
+    Writes,
     /// A `Connect` the server refuses because it cannot map the distinguished name.
     ///
     /// Needs `--user-dn-override` naming something the server has never heard of.
@@ -87,6 +95,7 @@ impl Scenario {
         match self {
             Self::Session => "session",
             Self::Items => "items",
+            Self::Writes => "writes",
             Self::ConnectRefused => "connect-refused",
         }
     }
@@ -110,6 +119,7 @@ pub(crate) async fn capture(
     match arguments.scenario {
         Scenario::Session => session(&client, &recorder).await?,
         Scenario::Items => items(&client, &recorder).await?,
+        Scenario::Writes => writes(&client, &recorder).await?,
         Scenario::ConnectRefused => connect_refused(&client, &recorder).await?,
     }
 
@@ -130,6 +140,7 @@ pub(crate) async fn capture(
         &directory,
         connection.endpoint()?,
         &exchanges,
+        &recorder.assigned(),
         &rules,
         arguments.raw,
     )?;
@@ -276,6 +287,7 @@ mod tests {
     fn each_scenario_has_its_own_directory_name() {
         assert_eq!(Scenario::Session.directory_name(), "session");
         assert_eq!(Scenario::Items.directory_name(), "items");
+        assert_eq!(Scenario::Writes.directory_name(), "writes");
         assert_eq!(Scenario::ConnectRefused.directory_name(), "connect-refused");
         assert_eq!(
             parse(&["connect-refused"]).scenario,
