@@ -15,12 +15,21 @@ Two conventions specific to this project:
 
 ## [Unreleased]
 
-Reading items. `0.2.0` could reach a calendar folder and say what its columns were called; this
-adds the message, the attachment, the message inside an attachment, and the body that does not fit
-in a response buffer. *List calendar events*, *list contacts*, *list messages* sorted and filtered
-by the server, and an attachment's bytes extracted are all delivered. Verified against Exchange
-Server SE `15.02.2562.045` against two mailboxes, with a new pair of captured scenarios — the corpus
-grows from 45 exchanges to 99.
+Items, read and written. `0.2.0` could reach a calendar folder and say what its columns were
+called; this adds the message, the attachment, the message inside an attachment, the body that does
+not fit in a response buffer — and then the other direction: *draft a message* with recipients and
+an attachment, *create a contact*, *create a single-instance appointment*, update one, and delete
+it again.
+
+Cumulatively the client now covers eleven of the eighteen operations the plan was written against —
+everything about folders, calendars, contacts and messages except *acting* on them. What is left is
+sending, moving, flagging and listing more than one mailbox, and each is named as a gap below rather
+than left to be discovered.
+
+Verified against Exchange Server SE `15.02.2562.045` against both lab mailboxes, with two new pairs
+of captured scenarios. The corpus grows from 45 exchanges to 135, and one of the new scenarios
+**writes** — which needed the fixture pipeline to learn three things it did not know, listed under
+*Measured*.
 
 ### Added
 
@@ -56,6 +65,49 @@ grows from 45 exchanges to 99.
   on a named-property tag, which is a different number in each mailbox.
 - **`scripts/Add-LabItems.ps1`**, which seeds a lab mailbox with the events, contacts and
   attachment-bearing message those captures need.
+- **The Message object write ROPs**: `RopCreateMessage`, `RopSaveChangesMessage`,
+  `RopModifyRecipients`, `RopCreateAttachment`, `RopSaveChangesAttachment` and `RopDeleteMessages`,
+  with `Folder::create_message()`, `NewMessage`, `NewAttachment`, `SavedMessage`,
+  `Message::update()` and `Folder::delete_messages()`. Two round trips to a saved draft, one more
+  per attachment and one more per 16 KiB of attachment content. Nothing exists until the save, so
+  every failure before it leaves the mailbox exactly as it was.
+- **The stream write ROPs**: `RopWriteStream` and `RopCommitStream`, with `StreamMode` on
+  `RopBatch::open_stream`. `Create` is the mode that matters — the only one that works on a property
+  nothing has ever set, and the one that *deletes* the value of a property that has one.
+- **One-off entry ids and recipient rows**: `OneOffEntryId` and `Recipient`, which is how a message
+  is addressed without the address book. NSPI is a separate endpoint and a separate protocol this
+  workspace does not implement; a one-off recipient needs no lookup at all.
+- **`MessageClass`**, the counterpart of `ContainerClass` one level down, and the property that
+  decides what an item *is*. Matching is case-insensitive here and case-sensitive for a folder's
+  class: [MS-OXCMSG] §2.2.1.3 requires it in as many words and nothing says it about
+  `PidTagContainerClass`.
+- **`MessageMode`** on `RopBatch::open_message`, so a message can be opened read/write — which is
+  what `Message::update()` needs and what the read path deliberately still does not ask for.
+- **Six more named properties** — `PidLidResponseStatus`, `PidLidAppointmentStateFlags`,
+  `PidLidSideEffects`, `PidLidFileUnder`, `PidLidEmail1OriginalDisplayName` and
+  `PidLidEmail1OriginalEntryId` — with `NEW_APPOINTMENT_PROPERTIES` and `NEW_CONTACT_PROPERTIES`
+  beside the read sets. Writing an item needs properties reading one has no reason to fetch, and
+  `PidLidSideEffects` is the first this crate has touched in `PSETID_Common`.
+- **Four more property tags** — `PidTagStartDate`, `PidTagEndDate`, `PidTagImportance` and
+  `PidTagAttachExtension` — and `FileTime::from_unix_seconds`, which is the bridge a `PtypTime`
+  cannot be written without.
+- **`mapi-cli draft`, `contact`, `event` and `delete`**, which between them are the three operations
+  this phase was written against and the way to undo them. `--folder` now accepts a special-folder
+  name as well as a well-known one, so `--folder drafts` resolves through the entry-id chain.
+- **A third pair of captured scenarios**, `writes-en-us` and `writes-nl-nl`, 18 exchanges each. The
+  first in the corpus that is not a read — and the first evidence that a `RopSetProperties` this
+  crate encodes is one a server *accepts*, since the only other one in the corpus was refused.
+
+### Fixed
+
+- **A stream read released the object it was reading from, in the same batch as the first read.**
+  Every value in the committed corpus fitted one 16 KiB chunk, so nothing ever reached the second
+  read to find out. A 40,000-byte attachment does: the second `RopReadStream` comes back as
+  `GeneralFailure` on the whole `Execute`, and at a 16 KiB chunk the server does not answer at
+  all — measured twice, against a 30-second client timeout and a 120-second one. `StreamRead::read`
+  now keeps the chain open for the length of the read and releases it, stream first, on the way out
+  of the success and the failure path alike. Nothing in [MS-OXCPRPT] says what a Stream object is
+  worth once the object it was opened on is released.
 
 ### Measured, and worth knowing
 
@@ -79,6 +131,35 @@ grows from 45 exchanges to 99.
   `RopOpenMessage`-shaped responses and taking the first reports the outer message's subject as the
   inner one's. `OpenMessageResponse::rop()` exists to tell them apart; the live suite asserts the
   distinction because it is a wrong answer that looks entirely right.
+- **[MS-OXCDATA] §2.2.5.1's flag word is big-endian and §2.8.3.1's is not** — two bitfields of the
+  same shape, in the same document, drawn in opposite byte orders. Reading the one-off flag word the
+  usual way does not fail: it clears the `U` bit, so plainly UTF-16LE strings get decoded as 8-bit
+  ones. Settled against Exchange Server SE `15.02.2562.045`, whose own
+  `PidLidEmail1OriginalEntryId` for `ada@example.test` carries `01 80` — read big-endian that is
+  `M` and `U` with every reserved bit zero; read little-endian it is `0x8001`, which sets both of
+  the structure's reserved fields. What this crate writes is byte-identical to what the server
+  writes, and a live test compares the two for every seeded contact rather than trusting the note.
+- **A `RecipientRow` with no columns still ends in a `PropertyRow`, and a `PropertyRow` is never
+  empty.** Leaving out its one-byte flag costs the *whole* `Execute`: Exchange answers
+  `ecRpcFormat` (`0x000004B6`) — "the server is unable to parse the ROP requests in the ROP input
+  buffer" — with nothing in the response naming the ROP that was wrong.
+- **[MS-OXCMSG] disagrees with itself about `SaveFlags`.** §2.2.3.3.1's table gives
+  `KeepOpenReadWrite` as `0x02`; every worked example in §4 sends `0x0A` and labels it with that
+  name. The documented value is what goes on the wire here, and it works.
+- **A write scenario can be a fixture, and the corpus still re-captures byte for byte.** Three
+  things made that true: the scenario deletes what it made, everything it writes is fixed text and
+  a fixed byte pattern rather than anything generated, and the message id the server mints is
+  declared to the capture and zeroed wherever it appears — in the responses that carry it and in
+  the two later *request* bodies that carry it too. Nothing is guessed: only values the run watched
+  a server mint are touched.
+- **A mailbox's size is a measurement of the moment, and the corpus was recording it.**
+  `PidTagMessageSizeExtended` moves whenever anything writes to the mailbox — and the live write
+  suite does exactly that, so a verify run after a test run reported two differences and buried any
+  that meant something. It is now declared volatile by the scenario that reads it, like the clocks
+  and the per-connection `RetryDelay` already were. `PidTagContentCount` beside it is deliberately
+  left alone: the write scenario creates and deletes, so the count nets out and a change in it is a
+  real finding. Measured across four captures — 280 and 312 in the two lab mailboxes, both steady,
+  while the size moved every time.
 
 ### Changed
 
@@ -87,8 +168,52 @@ grows from 45 exchanges to 99.
   response exceeded the buffer this crate asks for — measurement showed that claim to be false, and
   no longer suggests a remedy the server will not honour.
 - `PropertyTag`'s catalogue is split across three modules and `RopBatch`'s ROP-issuing methods
-  across three more, so that none of them outgrows the workspace's 500-line file limit. No public
+  across four more, so that none of them outgrows the workspace's 500-line file limit. No public
   item moved.
+- **`RopBatch::open_message` and `RopBatch::open_stream` take a mode.** Both defaulted to read-only
+  and now say so at the call site, because the write path needs the other values and a silent
+  default is not the place to decide which.
+- **`RecipientType` moved from `rop` to `oxcdata`**, beside the `RecipientRow` that writing one
+  produces. Its public path is unchanged.
+- `NamedProperty::ALL` is sixteen entries rather than ten, which changes its type. The captured
+  named-property exchanges changed with it.
+
+### Known gaps
+
+- **Nothing is sent.** `RopSubmitMessage` is not implemented, so a draft stays a draft. Neither is
+  `RopMoveCopyMessages`, so *archive a message* is not available either — a delete is, and it is a
+  soft delete rather than a move to Deleted Items.
+- **Nothing is flagged.** MAPI has two things where JMAP has one: the read bit of
+  `PidTagMessageFlags`, which has its own ROP, and the follow-up flag of [MS-OXOFLAG], which is a
+  set of ordinary properties. Neither is here, and conflating them would be worse than the gap.
+- **Recipients can be added and changed, not cleared.** `RopModifyRecipients` addresses each row by
+  a `RowId` that is its position in the list, so sending a shorter list leaves the surplus
+  recipients in place. `RopRemoveAllRecipients` is what clears them and is not implemented.
+- **Every recipient is a one-off.** An address is carried in the message rather than looked up, so
+  nothing resolves a display name against the directory. The address book is NSPI — a separate
+  endpoint and a separate protocol — and one-off addressing is what makes ordinary sending reachable
+  without it.
+- **A named property is still never registered.** `NameRegistration::CreateIfMissing` exists and is
+  encoded; every call this workspace makes passes `Existing`. That now matters more than it did: a
+  write needs its properties mapped, and a mailbox that has never held an appointment would answer
+  `0x0000` for the calendar ones. `mapi-cli` says which property was unmapped rather than writing an
+  item without it.
+- **An attachment's content is held in memory.** `NewAttachment` takes the bytes rather than a
+  reader. A value the caller cannot hold is one it could not send here anyway, but a streaming
+  source would be a real improvement.
+- **An embedded message cannot be created**, only read. `RopOpenEmbeddedMessage` is read-only here,
+  so a message cannot be attached to another message.
+- **A recurrence is still read rather than expanded**, and a meeting is still not a meeting.
+  `PidLidAppointmentRecur` is decoded as the blob it is; turning a pattern into a list of dates
+  depends on embedded timezone rules and each exception's overrides, and its failure mode is an
+  event reported at the wrong time with no error anywhere. Adding an attendee to an appointment is
+  not the same operation as inviting them, and this crate offers neither.
+- **`RopGetPropertiesAll` is still not in the fixture corpus.** The write-fixture harness now
+  exists, and it does not help here: it zeroes values a scenario *knows* the server minted, and a
+  tagged property list's dozen server clocks are not values any scenario is handed. Normalising
+  those needs a decoder in the capture pipeline, which is its own piece of work.
+- **`Negotiate` and `NTLM` are still not implemented.** Unchanged, and still the thing that decides
+  whether this crate can talk to a default-configured Exchange at all.
 
 ## [0.2.0] - 2026-08-03
 

@@ -29,17 +29,17 @@ discovering it in Phase 6.
 | Get mailbox metadata | `RopLogon` response (have it) + `RopGetPropertiesSpecific` on the Store object | Phase 1 |
 | List folders in mailbox | `RopGetHierarchyTable` with the `Depth` flag + `PidTagContainerClass` | **Done in Phase 2** |
 | List messages in folder | `RopGetContentsTable` | **Done in v0.1.0**; sorting and filtering done in Phase 4 |
-| Draft a new message | `RopCreateMessage` → `RopSetProperties` → `RopModifyRecipients` → `RopSaveChangesMessage` | Phase 5 |
+| Draft a new message | `RopCreateMessage` → `RopSetProperties` → `RopModifyRecipients` → `RopSaveChangesMessage` | **Done in Phase 5** |
 | Send a message | `RopSubmitMessage` | Phase 6 |
-| Archive / delete a message | `RopMoveCopyMessages` / `RopDeleteMessages` | Phase 6 |
+| Archive / delete a message | `RopMoveCopyMessages` / `RopDeleteMessages` | Delete done in Phase 5; the move is Phase 6 |
 | Flag a message | Two different things — read state is `RopSetReadFlags`, follow-up is `RopSetProperties` | Phase 6 |
 | List calendars | Folder hierarchy filtered on `PidTagContainerClass = "IPF.Appointment"` | **Done in Phase 2** |
 | Get calendar details | `RopGetPropertiesSpecific` on the folder | **Done in Phase 2** |
 | List calendar events | Contents table, but the useful columns are **named properties** | **Done in Phase 4** |
-| Create / update calendar event | `RopCreateMessage` / `RopOpenMessage` with `IPM.Appointment` | Phase 5–6 |
-| Delete calendar event | `RopDeleteMessages` | Phase 6 |
+| Create / update calendar event | `RopCreateMessage` / `RopOpenMessage` with `IPM.Appointment` | **Done in Phase 5** |
+| Delete calendar event | `RopDeleteMessages` | **Done in Phase 5**, which needed the delete for its fixtures |
 | List contacts | Contents table of an `IPF.Contact` folder | **Done in Phase 4** |
-| Create / update / delete contact | As for appointments, with `IPM.Contact` | Phase 5–6 |
+| Create / update / delete contact | As for appointments, with `IPM.Contact` | **Done in Phase 5** |
 
 The three that are not MAPI operations:
 
@@ -355,14 +355,63 @@ had to be authored for stability — fixed dates rather than "today", fixed text
 generated — because `Verify-Fixtures.ps1` demands byte equality on re-capture. It does get it: the
 whole corpus re-captured identical.
 
-**Phase 5 — Writing items.** `RopCreateMessage`, `RopSetProperties`, `RopSaveChangesMessage`,
-`RopModifyRecipients`, one-off EntryIDs, `RopWriteStream`, `RopCreateAttachment` and
-`RopSaveChangesAttachment`. Ends with *"draft a message"* — with an attachment — *"create a
-contact"* and *"create a single-instance appointment"*.
+**Phase 5 — Writing items. Done.** `RopCreateMessage`, `RopSaveChangesMessage`,
+`RopModifyRecipients`, one-off EntryIDs, `RopWriteStream`, `RopCommitStream`, `RopCreateAttachment`
+and `RopSaveChangesAttachment`. `mapi-cli draft --attach`, `mapi-cli contact` and `mapi-cli event`
+deliver the three endings this phase was written against; `Message::update()` and `mapi-cli delete`
+deliver the *update* half of two more rows and the way to undo any of it. Eight things the phase
+turned up:
 
-**Phase 6 — Acting on items.** `RopSubmitMessage`, `RopMoveCopyMessages`, `RopDeleteMessages`,
-`RopSetReadFlags`, and the follow-up flag properties. Ends with the remaining eight operations, and
-with mail actually sent between the two lab mailboxes.
+- **`RopDeleteMessages` came forward from Phase 6, and had to.** A write scenario that cannot delete
+  drifts the lab one item per capture, and `Verify-Fixtures.ps1` re-captures on every run — so the
+  delete is not an operation this phase chose to add early, it is the half of the write-fixture
+  harness without which there is no harness. The other Phase 6 ROPs stayed where they were.
+- **The one-off flag word is big-endian, and the `RecipientFlags` four pages away is not.**
+  [MS-OXCDATA] §2.2.5.1 and §2.8.3.1 are bitfields of the same shape in the same document, drawn in
+  opposite byte orders, with nothing saying they differ. The wrong reading does not fail: it clears
+  `U`, so UTF-16LE strings are decoded as 8-bit ones and an address comes back as every second
+  character. Settled by asking the server for one of its own — `PidLidEmail1OriginalEntryId` on a
+  contact EWS created — rather than by reading harder. The plan said one-off EntryIDs were "the far
+  cheaper path"; they are, and the cheapness is in the round trips rather than in the reading.
+- **A `RecipientRow` with no columns still ends in a `PropertyRow`.** §2.8.3.2 makes
+  `RecipientProperties` a `PropertyRow` rather than an optional field, and §2.8.1 gives every
+  `PropertyRow` a leading flag byte. Leaving out that one byte costs the *whole* `Execute`:
+  `ecRpcFormat`, "the server is unable to parse the ROP requests in the ROP input buffer", with
+  nothing naming the ROP that was wrong. An hour, and the fix is one byte.
+- **Phase 4's read path had a bug that only a write could find.** `StreamRead::read` released the
+  message and the attachment in the same batch as the first read, which is invisible for any value
+  that fits one 16 KiB chunk — and every value in the corpus did, because the largest seeded
+  attachment is 1,920 bytes. A 40,000-byte attachment this phase wrote does not: the second read is
+  answered with `GeneralFailure` on the whole `Execute`, and at a 16 KiB chunk the server does not
+  answer at all. **Writing a bigger thing than the corpus holds is a test the corpus cannot be.**
+- **The fixture problem was the size it looked**, and all three of its limbs needed the same answer.
+  Re-capture mutating the mailbox is solved by the scenario deleting what it made; server-assigned
+  values are solved by the scenario *declaring* what it was handed, so the capture zeroes those
+  exact bytes wherever they appear — including in the two later request bodies the replay compares;
+  and the redaction surface is solved by writing fixed text at a fixed length. The corpus
+  re-captures byte for byte with a write scenario in it, which is the claim that mattered.
+- **The plan's guess about `normalise.rs` was wrong in a useful way.** It expected the list of
+  normalised fields to "roughly triple". It did not grow at all: a message id has no anchor in a
+  ROP buffer — it is eight bytes in the middle of a variable-length list — so the offset-and-anchor
+  approach cannot reach it. What the capture gained instead is a way for a scenario to say *this
+  value came from the server*, which is narrower and needs no decoder.
+- **`RopSubmitMessage` sending real mail did not arise**, because nothing here submits. The write
+  scenario addresses its draft to `example.test`, which [RFC 6761] reserves and which resolves
+  nowhere, so a Phase 6 that grows a submit into this scenario cannot deliver anywhere by accident.
+- **Half of "create a contact" is not a ROP at all.** The properties are: `PidLidFileUnder`,
+  `PidLidEmail1OriginalDisplayName` and a one-off `PidLidEmail1OriginalEntryId` are what separate a
+  contact a client can act on from one it can only display, and [MS-OXOCNTC] leaves the choice of
+  each to the client. They live in `mapi-cli` rather than in the library, for the same reason the
+  calendar column set does: a crate that shipped `create_contact(name, email)` would be taking
+  positions the document leaves open, invisibly.
+
+**Phase 6 — Acting on items.** `RopSubmitMessage`, `RopMoveCopyMessages`, `RopSetReadFlags`, and
+the follow-up flag properties — `RopDeleteMessages` having come forward into Phase 5. Ends with the
+remaining operations, and with mail actually sent between the two lab mailboxes.
+
+Two things Phase 5 leaves it: `RopRemoveAllRecipients`, without which a recipient list can be added
+to and changed but not cleared; and the sender properties [MS-OXOMSG] §3.2.4.1.2 requires before a
+submit will be accepted.
 
 **Phase 7 — More than one mailbox.** `AlternativeMailbox` parsing in `mapi-autodiscover`, and
 opening a second mailbox on one set of credentials. Ends with *"list mailboxes"* as far as the
@@ -395,6 +444,19 @@ after itself on both sides.
 
 None of this is a reason not to do it. It is a reason to build the write-fixture harness in Phase 5
 as its own piece of work, rather than assuming the read harness stretches.
+
+**Built, and the read harness did not stretch — but it needed less than expected.** The three limbs
+above came out as: the scenario deletes what it made and the delete runs even when the scenario
+fails; `normalise.rs` gained nothing, because a message id has no anchor in a ROP buffer and the
+offset-and-anchor approach cannot reach it; and instead the scenario *declares* what the server
+minted, so the capture zeroes those exact bytes in requests and responses alike. Content is fixed
+text and a fixed byte pattern, authored for stability rather than scrubbed afterwards. The corpus
+re-captures byte for byte with a write scenario in it.
+
+One thing this did not anticipate: **the client's own read path had a bug the corpus could not
+find**, because the largest value in it fitted a single chunk. Writing something bigger than
+anything seeded is how it surfaced. A corpus proves what it contains and nothing else, which is an
+argument for a write scenario rather than against one.
 
 ## Deferred, and said so plainly
 

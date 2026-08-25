@@ -27,17 +27,19 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: `0.2.0` released; reading items is on `main`.** What works is what the corpus proves:
-> locate an endpoint by Autodiscover, connect, log on, walk the folder hierarchy — the whole of it in
-> one table, tagged by container class — read or write the Store object's and any folder's own
-> properties, find the Calendar, Contacts, Drafts, Tasks, Notes and Journal folders that the logon
-> does not name, resolve the `PidLid` properties a calendar entry is made of to the ids one store
-> uses for them, and page a contents table with the columns you choose, ordered and filtered by the
-> server. Since `0.2.0`: open a message, read its properties, list its attachments, extract one's
-> bytes, open the message inside another, and read a body far larger than a response buffer. All
-> verified against Exchange Server SE `15.02.2562.045`. What is missing is everything that *writes*
-> — drafting, sending, moving, flagging — and `Negotiate`/`NTLM` authentication. The gaps are stated
-> below and in the changelog rather than left to be discovered.
+> **Status: `0.2.0` released; reading and writing items is on `main`.** What works is what the
+> corpus proves: locate an endpoint by Autodiscover, connect, log on, walk the folder hierarchy —
+> the whole of it in one table, tagged by container class — read or write the Store object's and any
+> folder's own properties, find the Calendar, Contacts, Drafts, Tasks, Notes and Journal folders that
+> the logon does not name, resolve the `PidLid` properties a calendar entry is made of to the ids one
+> store uses for them, and page a contents table with the columns you choose, ordered and filtered by
+> the server. Since `0.2.0`: open a message, read its properties, list its attachments, extract one's
+> bytes, open the message inside another, and read a body far larger than a response buffer — and
+> then the other direction, **create** a message with recipients and an attachment, a contact or a
+> single-instance appointment, change one, and delete it again. All verified against Exchange Server
+> SE `15.02.2562.045`. What is missing is *acting* on a message — sending it, moving it, flagging it
+> — and `Negotiate`/`NTLM` authentication. The gaps are stated below and in the changelog rather than
+> left to be discovered.
 
 ## Install
 
@@ -67,6 +69,12 @@ What CI does with them is the part that matters: every captured exchange is repl
 real client against an endpoint that answers exactly what Exchange answered, and **every request
 body is compared byte for byte against the one a real server accepted**. A change to any encoding
 fails there rather than months later against somebody's deployment.
+
+One of the captured scenarios **writes**: it creates a draft with an attachment, reads it back and
+deletes it. That is worth more than a read capture rather than less. The outcome of a create lives
+in a mailbox CI cannot see, so the bytes that produced it are the only thing left to re-examine —
+and the corpus still re-captures byte for byte, because the scenario cleans up after itself and the
+one identifier the server mints is declared and zeroed wherever it appears.
 
 Two mailboxes are captured, in two languages, because a mailbox's folder names are localised to the
 language it was provisioned with — a Dutch mailbox calls its Inbox `Postvak IN`. A client that
@@ -149,10 +157,16 @@ resolve to those folders keep the mailbox GUID that issued them and `FolderEntry
 answers the question before a conversion is asked for.
 
 The same rule bites harder for named properties, and the lab says so both ways round. Every one of
-the ten `PidLid`s a calendar entry needs is numbered differently in the two lab mailboxes — and each
-of the first mailbox's ids names a real, different, registered property in the second, so the
-mistake is answered with a plausible value rather than an error. A `NamedPropertyId` therefore
-carries the store that issued it, and the map a `Logon` hands back cannot hold a foreign one at all.
+the sixteen `PidLid`s a calendar entry or a contact is made of is numbered differently in the two lab
+mailboxes — and each of the first mailbox's ids names a real, different, registered property in the
+second, so the mistake is answered with a plausible value rather than an error. A `NamedPropertyId`
+therefore carries the store that issued it, and the map a `Logon` hands back cannot hold a foreign
+one at all.
+
+Writing adds a third. An item's `PidTagMessageClass` is what decides whether it is a mail, a contact
+or an appointment, and [MS-OXCMSG] §2.2.1.3 requires every comparison against it to be
+case-insensitive — where the folder class two lines up is compared exactly. `MessageClass` is a type
+for that reason and not for tidiness: the two strings are the same shape and are not the same rule.
 
 **Failures name what to do about them.** A 401 reports the schemes the server offered alongside the
 one that was sent, because "the password is wrong" and "this client cannot speak any scheme this

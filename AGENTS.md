@@ -116,6 +116,15 @@ skill has the procedure. Three scrubbing rules, each already paid for:
 `Assert-NoSecrets.ps1` exists as an independent second look, and why it runs in CI on every pull
 request, where there is no lab at all. Never trust a scrub you have not grepped.
 
+**A scenario that writes has two more obligations, and both are load-bearing.** It must be
+self-cleaning — create, act, delete, with the delete running even when the scenario fails — because
+`Verify-Fixtures.ps1` re-captures against the live lab, and a scenario that leaves an item behind
+drifts the mailbox one item per run until the counts other scenarios assert stop holding. And it
+must **declare every value the server minted** through `Recorder::server_assigned`, because a
+message id travels in the *request* bodies of everything done with it afterwards and the replay
+tests compare those byte for byte. Nothing checks that a scenario declared one: forgetting shows up
+as a difference on the next `Verify-Fixtures.ps1`, which is the right place for it to show up.
+
 **Never edit a fixture by hand.** It breaks the hash in `MANIFEST.toml` and, if the edit is not
 length-preserving, every byte offset after it. Widen the rules and capture again.
 
