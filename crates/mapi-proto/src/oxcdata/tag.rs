@@ -42,6 +42,14 @@ impl PropertyTag {
     ///
     /// [MS-OXCMSG] §2.2.2.7
     pub const ATTACH_DATA_BINARY: Self = Self(0x3701_0102);
+    /// `PidTagAttachExtension`, `0x3703001F` — the file name extension, dot included.
+    ///
+    /// Set alongside the two file names when an attachment is created. Nothing computes it from
+    /// them: an attachment named `notes.txt` whose extension property says `.pdf` is what the
+    /// receiving client believes.
+    ///
+    /// [MS-OXCMSG] §2.2.2.12
+    pub const ATTACH_EXTENSION: Self = Self(0x3703_001F);
     /// `PidTagAttachFilename`, `0x3704001F` — the 8.3 form of the attachment's file name.
     ///
     /// [MS-OXCMSG] §2.2.2.11
@@ -146,6 +154,14 @@ impl PropertyTag {
     ///
     /// [MS-OXOMSG] §2.2.1.9
     pub const DISPLAY_TO: Self = Self(0x0E04_001F);
+    /// `PidTagEndDate`, `0x00610040` — an appointment's end, as a fixed-id property.
+    ///
+    /// The `PidTag` twin of `PidLidAppointmentEndWhole`, and [MS-OXOCAL] §2.2.1.31 requires the two
+    /// to be equal when this one is set. Worth setting: it is what a client that has not resolved
+    /// the named properties reads.
+    ///
+    /// [MS-OXOCAL] §2.2.1.31
+    pub const END_DATE: Self = Self(0x0061_0040);
     /// `PidTagExtendedRuleSizeLimit`, `0x0E9B0003` — bytes allowed for one extended rule.
     ///
     /// [MS-OXCSTOR] §2.2.2.1.1.1
@@ -179,6 +195,13 @@ impl PropertyTag {
     ///
     /// [MS-OXCMSG] §2.2.1.2
     pub const HAS_ATTACHMENTS: Self = Self(0x0E1B_000B);
+    /// `PidTagImportance`, `0x00170003` — low (`0x0`), normal (`0x1`) or high (`0x2`).
+    ///
+    /// `RopCreateMessage` initialises it to normal ([MS-OXCMSG] §3.2.5.2), so it is only worth
+    /// writing to say something else.
+    ///
+    /// [MS-OXCMSG] §2.2.1.11
+    pub const IMPORTANCE: Self = Self(0x0017_0003);
     /// `PidTagIpmAppointmentEntryId`, `0x36D00102` — the Calendar folder's entry id.
     ///
     /// [MS-OXOSFLD] §2.2.3
@@ -330,6 +353,12 @@ impl PropertyTag {
     ///
     /// [MS-OXCSTOR] §2.2.2.1.1.14
     pub const SORT_LOCALE_ID: Self = Self(0x6705_0003);
+    /// `PidTagStartDate`, `0x00600040` — an appointment's start, as a fixed-id property.
+    ///
+    /// The `PidTag` twin of `PidLidAppointmentStartWhole`; see [`END_DATE`](Self::END_DATE).
+    ///
+    /// [MS-OXOCAL] §2.2.1.30
+    pub const START_DATE: Self = Self(0x0060_0040);
     /// `PidTagStoreState`, `0x340E0003` — `0x01000000` if the mailbox has active search folders.
     ///
     /// Documented as a read-only property of every private mailbox logon; observed answering

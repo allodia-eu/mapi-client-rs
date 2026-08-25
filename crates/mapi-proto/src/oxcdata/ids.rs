@@ -190,6 +190,27 @@ impl FileTime {
         self.0
     }
 
+    /// The same instant, from Unix seconds.
+    ///
+    /// The bridge every date library in the ecosystem can reach: nothing here parses a calendar
+    /// date, and a `PtypTime` cannot be written without one. `None` for an instant before
+    /// 1601-01-01, which a `FILETIME` cannot express at all.
+    ///
+    /// ```
+    /// use mapi_proto::FileTime;
+    ///
+    /// let epoch = FileTime::from_unix_seconds(0).expect("the Unix epoch is after 1601");
+    /// assert_eq!(epoch.to_unix_seconds(), Some(0));
+    /// assert_eq!(FileTime::from_unix_seconds(i64::MIN), None);
+    /// ```
+    #[must_use]
+    pub fn from_unix_seconds(seconds: i64) -> Option<Self> {
+        let ticks = seconds
+            .checked_add(FILETIME_TO_UNIX_SECONDS)?
+            .checked_mul(i64::try_from(FILETIME_TICKS_PER_SECOND).ok()?)?;
+        u64::try_from(ticks).ok().map(Self)
+    }
+
     /// The same instant in Unix seconds, or `None` if it does not fit an `i64`.
     #[must_use]
     pub fn to_unix_seconds(self) -> Option<i64> {

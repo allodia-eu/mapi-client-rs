@@ -12,10 +12,13 @@ mod columns;
 mod entryid;
 mod ids;
 mod kind;
+mod msgclass;
 mod named;
+mod oneoff;
 mod properties;
 mod propname;
 mod propset;
+mod recipient;
 mod restrict;
 mod row;
 mod sort;
@@ -33,10 +36,16 @@ pub use entryid::{FolderEntryId, LongTermId, ShortTermId, StoreObjectType};
 pub use ids::{AttachmentNumber, FileTime, FolderId, Guid, LegacyDn, MessageId, ReplicaId};
 pub use kind::PropertyType;
 pub(crate) use kind::ValueContext;
-pub use named::{APPOINTMENT_PROPERTIES, CONTACT_PROPERTIES, NamedProperty};
+pub use msgclass::MessageClass;
+pub use named::{
+    APPOINTMENT_PROPERTIES, CONTACT_PROPERTIES, NEW_APPOINTMENT_PROPERTIES, NEW_CONTACT_PROPERTIES,
+    NamedProperty,
+};
+pub use oneoff::{OneOffEntryId, SMTP_ADDRESS_TYPE, one_off_provider};
 pub use properties::{PropertyProblem, PropertySet, PropertySetIter, TaggedValue};
 pub use propname::{NamedPropertyId, PropertyName, PropertyNameKind};
 pub use propset::PropertySetId;
+pub use recipient::{Recipient, RecipientType};
 pub use restrict::{FuzzyLevel, RelationalOperator, Restriction};
 pub use row::{Cell, PropertyRow, RowForm};
 pub use sort::{SortDirection, SortOrder, SortOrderSet};

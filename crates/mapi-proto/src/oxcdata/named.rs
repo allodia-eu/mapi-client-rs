@@ -10,17 +10,28 @@
 //! `PidLidAppointmentStartWhole` would ask the server to read eight bytes of `PtypTime` as a
 //! null-terminated string. Pairing the two here is what stops that.
 //!
+//! Reading and writing want different lists, which is why there are four constants rather than
+//! two. [`APPOINTMENT_PROPERTIES`] and [`CONTACT_PROPERTIES`] are what a *listing* needs;
+//! [`NEW_APPOINTMENT_PROPERTIES`] and [`NEW_CONTACT_PROPERTIES`] add the ones an item has to carry
+//! to be a well-formed item of its kind, which a reader has no reason to fetch.
+//!
 //! [MS-OXPROPS] §2 — every `PidLid`, with its set, its LID and its type
 //! [MS-OXOCAL] §2.2.1 — the appointment properties
 //! [MS-OXOCNTC] §2.2.1.2 — the electronic address properties
 
 use crate::oxcdata::{PropertyName, PropertySetId, PropertyType};
 
-/// How many appointment properties are catalogued here.
+/// How many appointment properties a listing reads.
 const APPOINTMENT_COUNT: usize = 7;
 
-/// How many contact properties are catalogued here.
+/// How many contact properties a listing reads.
 const CONTACT_COUNT: usize = 3;
+
+/// How many more an appointment has to carry to be a well-formed one.
+const NEW_APPOINTMENT_COUNT: usize = 3;
+
+/// How many more a contact has to carry to be a well-formed one.
+const NEW_CONTACT_COUNT: usize = 3;
 
 /// A named property [MS-OXPROPS] gives a canonical name, a set, a LID and a type.
 ///
@@ -46,6 +57,13 @@ pub enum NamedProperty {
     ///
     /// [MS-OXOCAL] §2.2.1.5
     AppointmentStartWhole,
+    /// `PidLidAppointmentStateFlags`, `PSETID_Appointment/0x8217`, `PtypInteger32` — whether the
+    /// object is a meeting, was received from somebody else, or has been cancelled.
+    ///
+    /// Zero is an appointment nobody was invited to, which is the only kind this crate creates.
+    ///
+    /// [MS-OXOCAL] §2.2.1.10
+    AppointmentStateFlags,
     /// `PidLidAppointmentSubType`, `PSETID_Appointment/0x8215`, `PtypBoolean` — whether the event
     /// is an all-day event.
     ///
@@ -69,6 +87,25 @@ pub enum NamedProperty {
     ///
     /// [MS-OXOCNTC] §2.2.1.2.3
     Email1EmailAddress,
+    /// `PidLidEmail1OriginalDisplayName`, `PSETID_Address/0x8084`, `PtypString` — the SMTP address
+    /// behind the display name.
+    ///
+    /// [MS-OXOCNTC] §2.2.1.2.4
+    Email1OriginalDisplayName,
+    /// `PidLidEmail1OriginalEntryId`, `PSETID_Address/0x8085`, `PtypBinary` — the address as an
+    /// identifier rather than as text.
+    ///
+    /// A [`OneOffEntryId`](crate::OneOffEntryId) for an address the directory does not hold, which
+    /// is what every SMTP address in a contact is. A contact saved without it has an email address
+    /// a client can display and cannot act on.
+    ///
+    /// [MS-OXOCNTC] §2.2.1.2.5
+    Email1OriginalEntryId,
+    /// `PidLidFileUnder`, `PSETID_Address/0x8005`, `PtypString` — the name a contact is filed
+    /// under, which is not necessarily its display name.
+    ///
+    /// [MS-OXOCNTC] §2.2.1.1.11
+    FileUnder,
     /// `PidLidLocation`, `PSETID_Appointment/0x8208`, `PtypString`.
     ///
     /// [MS-OXOCAL] §2.2.1.4
@@ -78,11 +115,29 @@ pub enum NamedProperty {
     ///
     /// [MS-OXOCAL] §2.2.1.12
     Recurring,
+    /// `PidLidResponseStatus`, `PSETID_Appointment/0x8218`, `PtypInteger32` — an attendee's
+    /// response.
+    ///
+    /// `respNone` (`0x0`) is the documented value for an Appointment object, as against a Meeting
+    /// object, and [MS-OXOCAL] §2.2.1.11 requires the property to hold one of its six values —
+    /// so an appointment that omits it is not one the document allows.
+    ///
+    /// [MS-OXOCAL] §2.2.1.11
+    ResponseStatus,
+    /// `PidLidSideEffects`, `PSETID_Common/0x8510`, `PtypInteger32` — what a client may do to the
+    /// item without asking.
+    ///
+    /// The one property here that is not in `PSETID_Appointment` or `PSETID_Address`. [MS-OXOCAL]
+    /// §2.2.2.2 has every Calendar object set five of its flags.
+    ///
+    /// [MS-OXCMSG] §2.2.1.16
+    SideEffects,
 }
 
 impl NamedProperty {
     /// Every one of them, appointment properties first.
-    pub const ALL: [Self; APPOINTMENT_COUNT + CONTACT_COUNT] = [
+    pub const ALL: [Self;
+        APPOINTMENT_COUNT + CONTACT_COUNT + NEW_APPOINTMENT_COUNT + NEW_CONTACT_COUNT] = [
         Self::AppointmentStartWhole,
         Self::AppointmentEndWhole,
         Self::Location,
@@ -90,9 +145,15 @@ impl NamedProperty {
         Self::AppointmentSubType,
         Self::Recurring,
         Self::AppointmentRecur,
+        Self::ResponseStatus,
+        Self::AppointmentStateFlags,
+        Self::SideEffects,
         Self::Email1DisplayName,
         Self::Email1AddressType,
         Self::Email1EmailAddress,
+        Self::Email1OriginalDisplayName,
+        Self::Email1OriginalEntryId,
+        Self::FileUnder,
     ];
 
     /// The set this property is named in.
@@ -102,13 +163,19 @@ impl NamedProperty {
             Self::AppointmentEndWhole
             | Self::AppointmentRecur
             | Self::AppointmentStartWhole
+            | Self::AppointmentStateFlags
             | Self::AppointmentSubType
             | Self::BusyStatus
             | Self::Location
-            | Self::Recurring => PropertySetId::APPOINTMENT,
-            Self::Email1AddressType | Self::Email1DisplayName | Self::Email1EmailAddress => {
-                PropertySetId::ADDRESS
-            }
+            | Self::Recurring
+            | Self::ResponseStatus => PropertySetId::APPOINTMENT,
+            Self::Email1AddressType
+            | Self::Email1DisplayName
+            | Self::Email1EmailAddress
+            | Self::Email1OriginalDisplayName
+            | Self::Email1OriginalEntryId
+            | Self::FileUnder => PropertySetId::ADDRESS,
+            Self::SideEffects => PropertySetId::COMMON,
         }
     }
 
@@ -122,10 +189,16 @@ impl NamedProperty {
             Self::AppointmentEndWhole => 0x0000_820E,
             Self::AppointmentSubType => 0x0000_8215,
             Self::AppointmentRecur => 0x0000_8216,
+            Self::AppointmentStateFlags => 0x0000_8217,
+            Self::ResponseStatus => 0x0000_8218,
             Self::Recurring => 0x0000_8223,
+            Self::SideEffects => 0x0000_8510,
+            Self::FileUnder => 0x0000_8005,
             Self::Email1DisplayName => 0x0000_8080,
             Self::Email1AddressType => 0x0000_8082,
             Self::Email1EmailAddress => 0x0000_8083,
+            Self::Email1OriginalDisplayName => 0x0000_8084,
+            Self::Email1OriginalEntryId => 0x0000_8085,
         }
     }
 
@@ -137,12 +210,17 @@ impl NamedProperty {
     pub const fn property_type(self) -> PropertyType {
         match self {
             Self::AppointmentEndWhole | Self::AppointmentStartWhole => PropertyType::Time,
-            Self::AppointmentRecur => PropertyType::Binary,
+            Self::AppointmentRecur | Self::Email1OriginalEntryId => PropertyType::Binary,
             Self::AppointmentSubType | Self::Recurring => PropertyType::Boolean,
-            Self::BusyStatus => PropertyType::Integer32,
+            Self::AppointmentStateFlags
+            | Self::BusyStatus
+            | Self::ResponseStatus
+            | Self::SideEffects => PropertyType::Integer32,
             Self::Email1AddressType
             | Self::Email1DisplayName
             | Self::Email1EmailAddress
+            | Self::Email1OriginalDisplayName
+            | Self::FileUnder
             | Self::Location => PropertyType::String,
         }
     }
@@ -154,13 +232,19 @@ impl NamedProperty {
             Self::AppointmentEndWhole => "PidLidAppointmentEndWhole",
             Self::AppointmentRecur => "PidLidAppointmentRecur",
             Self::AppointmentStartWhole => "PidLidAppointmentStartWhole",
+            Self::AppointmentStateFlags => "PidLidAppointmentStateFlags",
             Self::AppointmentSubType => "PidLidAppointmentSubType",
             Self::BusyStatus => "PidLidBusyStatus",
             Self::Email1AddressType => "PidLidEmail1AddressType",
             Self::Email1DisplayName => "PidLidEmail1DisplayName",
             Self::Email1EmailAddress => "PidLidEmail1EmailAddress",
+            Self::Email1OriginalDisplayName => "PidLidEmail1OriginalDisplayName",
+            Self::Email1OriginalEntryId => "PidLidEmail1OriginalEntryId",
+            Self::FileUnder => "PidLidFileUnder",
             Self::Location => "PidLidLocation",
             Self::Recurring => "PidLidRecurring",
+            Self::ResponseStatus => "PidLidResponseStatus",
+            Self::SideEffects => "PidLidSideEffects",
         }
     }
 
@@ -207,125 +291,38 @@ pub const CONTACT_PROPERTIES: [NamedProperty; CONTACT_COUNT] = [
     NamedProperty::Email1EmailAddress,
 ];
 
+/// The named properties **creating** an appointment needs, which is the read set plus three.
+///
+/// The three are not decoration. [MS-OXOCAL] §2.2.1.11 requires `PidLidResponseStatus` to hold one
+/// of six values, §2.2.2.2 has every Calendar object set five flags of `PidLidSideEffects`, and
+/// `PidLidAppointmentStateFlags` is what distinguishes an appointment from a meeting. An item
+/// missing them saves without complaint and is not the item the document describes.
+pub const NEW_APPOINTMENT_PROPERTIES: [NamedProperty; APPOINTMENT_COUNT + NEW_APPOINTMENT_COUNT] = [
+    NamedProperty::AppointmentStartWhole,
+    NamedProperty::AppointmentEndWhole,
+    NamedProperty::Location,
+    NamedProperty::BusyStatus,
+    NamedProperty::AppointmentSubType,
+    NamedProperty::Recurring,
+    NamedProperty::AppointmentRecur,
+    NamedProperty::ResponseStatus,
+    NamedProperty::AppointmentStateFlags,
+    NamedProperty::SideEffects,
+];
+
+/// The named properties **creating** a contact needs, which is the read set plus three.
+///
+/// `PidLidEmail1OriginalEntryId` is the one that costs something to get right: it is a
+/// [`OneOffEntryId`](crate::OneOffEntryId), and a contact saved without it has an address a client
+/// can show and cannot use.
+pub const NEW_CONTACT_PROPERTIES: [NamedProperty; CONTACT_COUNT + NEW_CONTACT_COUNT] = [
+    NamedProperty::Email1DisplayName,
+    NamedProperty::Email1AddressType,
+    NamedProperty::Email1EmailAddress,
+    NamedProperty::Email1OriginalDisplayName,
+    NamedProperty::Email1OriginalEntryId,
+    NamedProperty::FileUnder,
+];
+
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Each row transcribed from [MS-OXPROPS] §2 rather than from the code that would use it, so a
-    /// transposed digit is not confirmed by the thing it would break.
-    #[test]
-    fn each_property_matches_the_master_list() {
-        for (property, set, lid, property_type, name) in [
-            (
-                NamedProperty::AppointmentStartWhole,
-                PropertySetId::APPOINTMENT,
-                0x0000_820D_u32,
-                PropertyType::Time,
-                "PidLidAppointmentStartWhole",
-            ),
-            (
-                NamedProperty::AppointmentEndWhole,
-                PropertySetId::APPOINTMENT,
-                0x0000_820E,
-                PropertyType::Time,
-                "PidLidAppointmentEndWhole",
-            ),
-            (
-                NamedProperty::Location,
-                PropertySetId::APPOINTMENT,
-                0x0000_8208,
-                PropertyType::String,
-                "PidLidLocation",
-            ),
-            (
-                NamedProperty::BusyStatus,
-                PropertySetId::APPOINTMENT,
-                0x0000_8205,
-                PropertyType::Integer32,
-                "PidLidBusyStatus",
-            ),
-            (
-                NamedProperty::AppointmentSubType,
-                PropertySetId::APPOINTMENT,
-                0x0000_8215,
-                PropertyType::Boolean,
-                "PidLidAppointmentSubType",
-            ),
-            (
-                NamedProperty::Recurring,
-                PropertySetId::APPOINTMENT,
-                0x0000_8223,
-                PropertyType::Boolean,
-                "PidLidRecurring",
-            ),
-            (
-                NamedProperty::AppointmentRecur,
-                PropertySetId::APPOINTMENT,
-                0x0000_8216,
-                PropertyType::Binary,
-                "PidLidAppointmentRecur",
-            ),
-            (
-                NamedProperty::Email1DisplayName,
-                PropertySetId::ADDRESS,
-                0x0000_8080,
-                PropertyType::String,
-                "PidLidEmail1DisplayName",
-            ),
-            (
-                NamedProperty::Email1AddressType,
-                PropertySetId::ADDRESS,
-                0x0000_8082,
-                PropertyType::String,
-                "PidLidEmail1AddressType",
-            ),
-            (
-                NamedProperty::Email1EmailAddress,
-                PropertySetId::ADDRESS,
-                0x0000_8083,
-                PropertyType::String,
-                "PidLidEmail1EmailAddress",
-            ),
-        ] {
-            assert_eq!(property.set(), set, "{name}");
-            assert_eq!(property.lid(), lid, "{name}");
-            assert_eq!(property.property_type(), property_type, "{name}");
-            assert_eq!(property.canonical_name(), name);
-            assert_eq!(property.to_string(), name);
-            assert_eq!(PropertyName::from(property), PropertyName::lid(set, lid));
-            // A column of these is printed with a width, and `write_str` would ignore it.
-            assert_eq!(format!("{property:<32}").len(), 32, "{name}");
-        }
-    }
-
-    /// The two groups partition the catalogue, and no property appears twice. A duplicate LID would
-    /// resolve two entries to one id and quietly halve a fetch.
-    #[test]
-    fn the_two_groups_are_the_whole_catalogue_and_share_nothing() {
-        let mut grouped: Vec<NamedProperty> = APPOINTMENT_PROPERTIES.to_vec();
-        grouped.extend_from_slice(&CONTACT_PROPERTIES);
-        grouped.sort_unstable();
-
-        let mut all = NamedProperty::ALL.to_vec();
-        all.sort_unstable();
-        assert_eq!(grouped, all);
-
-        let mut names: Vec<PropertyName> = all.iter().copied().map(NamedProperty::name).collect();
-        names.sort_unstable();
-        names.dedup();
-        assert_eq!(names.len(), NamedProperty::ALL.len());
-    }
-
-    /// Every appointment property is in `PSETID_Appointment` and every contact one in
-    /// `PSETID_Address`. Resolving a name against the wrong set answers `0x0000` at best and a
-    /// different property at worst.
-    #[test]
-    fn each_group_stays_inside_its_own_set() {
-        for property in APPOINTMENT_PROPERTIES {
-            assert_eq!(property.set(), PropertySetId::APPOINTMENT, "{property}");
-        }
-        for property in CONTACT_PROPERTIES {
-            assert_eq!(property.set(), PropertySetId::ADDRESS, "{property}");
-        }
-    }
-}
+mod tests;

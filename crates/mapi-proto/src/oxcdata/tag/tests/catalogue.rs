@@ -6,7 +6,7 @@
 
 use crate::oxcdata::{PropertyTag, PropertyType};
 
-pub(super) const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 62] = [
+pub(super) const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 66] = [
     (
         PropertyTag::ADDITIONAL_REN_ENTRY_IDS,
         0x36D8,
@@ -18,6 +18,12 @@ pub(super) const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 62] = [
         0x3701,
         PropertyType::Binary,
         "PidTagAttachDataBinary",
+    ),
+    (
+        PropertyTag::ATTACH_EXTENSION,
+        0x3703,
+        PropertyType::String,
+        "PidTagAttachExtension",
     ),
     (
         PropertyTag::ATTACH_FILENAME,
@@ -134,6 +140,12 @@ pub(super) const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 62] = [
         "PidTagDisplayTo",
     ),
     (
+        PropertyTag::END_DATE,
+        0x0061,
+        PropertyType::Time,
+        "PidTagEndDate",
+    ),
+    (
         PropertyTag::EXTENDED_RULE_SIZE_LIMIT,
         0x0E9B,
         PropertyType::Integer32,
@@ -168,6 +180,12 @@ pub(super) const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 62] = [
         0x0E1B,
         PropertyType::Boolean,
         "PidTagHasAttachments",
+    ),
+    (
+        PropertyTag::IMPORTANCE,
+        0x0017,
+        PropertyType::Integer32,
+        "PidTagImportance",
     ),
     (
         PropertyTag::IPM_APPOINTMENT_ENTRY_ID,
@@ -342,6 +360,12 @@ pub(super) const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 62] = [
         0x6705,
         PropertyType::Integer32,
         "PidTagSortLocaleId",
+    ),
+    (
+        PropertyTag::START_DATE,
+        0x0060,
+        PropertyType::Time,
+        "PidTagStartDate",
     ),
     (
         PropertyTag::STORE_STATE,

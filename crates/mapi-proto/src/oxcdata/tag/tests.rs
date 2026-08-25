@@ -113,3 +113,26 @@ fn an_unknown_tag_still_prints_usefully() {
     assert_eq!(unknown.name(), None);
     assert_eq!(unknown.to_string(), "0x1234001F");
 }
+
+/// The catalogue is what checks the constants, so a constant it does not mention is a constant
+/// nothing checks — and the way that happens is somebody adding an arm to `names.rs` and stopping
+/// there, which is exactly what the four properties this file gained last did.
+///
+/// Counting the arms in the source is the only thing that can notice. There is no way to enumerate
+/// a type's associated constants at run time, and `name` returning `Some` for a tag proves only
+/// that the arm exists — not that anybody transcribed its id and its type from the document.
+#[test]
+fn the_catalogue_names_every_tag_the_crate_has_a_constant_for() {
+    let arms = include_str!("names.rs")
+        .lines()
+        .filter(|line| line.contains("=> ") && line.contains("PidTag"))
+        .count();
+
+    assert_eq!(
+        arms,
+        CATALOGUE.len(),
+        "names.rs has {arms} arms and the catalogue {}: nothing checks the id or the type of a \
+         constant the catalogue does not name",
+        CATALOGUE.len()
+    );
+}
