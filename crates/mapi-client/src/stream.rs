@@ -11,11 +11,24 @@
 //! signal there is. Trusting the reported size instead would truncate a property somebody else
 //! extended between the open and the read, which is the same silent data loss one layer up.
 //!
+//! # The object a stream hangs off outlives the batch that opened it
+//!
+//! Every other operation here opens its chain, does its work and releases the chain in one buffer.
+//! A stream cannot: a value larger than one chunk takes further round trips, and the Stream object
+//! is only meaningful while the object it was opened on is still open. Releasing the attachment in
+//! the same batch as the first read leaves the second read holding a stream whose parent is gone.
+//!
+//! Measured on Exchange Server SE `15.02.2562.045`, against a 40,000-byte
+//! `PidTagAttachDataBinary`: the second `RopReadStream` is answered with `GeneralFailure`
+//! (`0x80004005`) at the whole-`Execute` level rather than as a failed ROP — and at a 16 KiB chunk
+//! the server does not answer at all, for over two minutes. A one-chunk value never reaches the
+//! second read, which is why a corpus whose largest attachment is 1,920 bytes did not find this.
+//!
 //! [MS-OXCROPS] §2.2.9 — the stream ROPs
 //! [MS-OXCPRPT] §2.2.14 — semantics
 
 use mapi_proto::{
-    ObjectHandle, PropertyTag, PropertyType, ReadStreamResponse, RopBatch, RopResponse,
+    ObjectHandle, PropertyTag, PropertyType, ReadStreamResponse, RopBatch, RopResponse, StreamMode,
 };
 
 use crate::connection::Connection;
@@ -111,9 +124,10 @@ impl<'a> StreamRead<'a> {
 
         let mut batch = RopBatch::new();
         let opened = target.open(&mut batch);
-        let stream = batch.open_stream(opened.slot, tag);
+        let stream = batch.open_stream(opened.slot, tag, StreamMode::ReadOnly);
         batch.read_stream(stream, CHUNK);
-        opened.release(&mut batch);
+        // Nothing is released here. See the module documentation: the chain has to outlive the
+        // reads, and the second read is the one that finds out.
 
         let execution = connection
             .execute(batch, "opening a property stream")
@@ -125,9 +139,24 @@ impl<'a> StreamRead<'a> {
             .map(mapi_proto::StreamSizeResponse::size);
         let handle = execution.handle(stream).filter(|h| !h.is_none());
 
+        // The stream first, then the chain from the inside out — the order they were opened in
+        // reverse, which is the order a release has to take.
+        let mut open: Vec<ObjectHandle> = handle.into_iter().collect();
+        open.extend(
+            opened
+                .slots()
+                .iter()
+                .filter_map(|slot| execution.handle(*slot))
+                .filter(|handle| !handle.is_none()),
+        );
+
         let mut bytes = first_chunk(&execution);
-        let complete = read_rest(connection, handle, &mut bytes).await?;
-        release(connection, handle).await;
+        // Released whether the reads succeeded or not: a failed read still opened a message, an
+        // attachment and a stream, and a caller that read a hundred of them would leave three
+        // hundred handles behind.
+        let complete = read_rest(connection, handle, &mut bytes).await;
+        release(connection, &open).await;
+        let complete = complete?;
 
         Ok(StreamValue {
             tag,
@@ -195,15 +224,21 @@ async fn read_rest(
     Ok(false)
 }
 
-/// Gives the stream handle back, ignoring whether the server minded.
+/// Gives every handle the read opened back, ignoring whether the server minded.
 ///
 /// A failure here is not worth reporting over a value that was read successfully: the Session
-/// Context times the handle out on its own.
-async fn release(connection: &mut Connection, handle: Option<ObjectHandle>) {
-    let Some(handle) = handle else { return };
+/// Context times the handles out on its own. Not releasing them at all is a different matter —
+/// a caller reading one property of each of a hundred attachments would leave three hundred
+/// behind — which is why this runs on the way out of a successful read *and* a failed one.
+async fn release(connection: &mut Connection, handles: &[ObjectHandle]) {
+    if handles.is_empty() {
+        return;
+    }
     let mut batch = RopBatch::new();
-    let slot = batch.bind(handle);
-    batch.release(slot);
+    for handle in handles {
+        let slot = batch.bind(*handle);
+        batch.release(slot);
+    }
     let _ = connection.execute(batch, "releasing a stream").await;
 }
 
