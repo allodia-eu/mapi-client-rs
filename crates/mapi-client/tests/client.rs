@@ -10,16 +10,65 @@
 
 mod support;
 
-use mapi_client::{Credentials, FolderId, PropertyTag, WellKnownFolder};
+use mapi_client::{Credentials, FolderId, MessageId, PropertyTag, WellKnownFolder};
+use support::writes::open_message_response;
 use support::{
     BOOKMARK_END, LOGON_HANDLE, MapiServer, OPEN_FOLDER_SLOT, TABLE_HANDLE, connect_ok,
     contents_row, disconnect_body, execute_body, get_table_response, hierarchy_row, logon_response,
-    opcodes, open_folder_response, query_rows_response, set_columns_response, well_known_folder_id,
+    opcodes, open_folder_response, open_stream_response, query_rows_response, read_stream_response,
+    set_columns_response, well_known_folder_id,
 };
+
+/// What a handle-table entry holds for a slot the server did not fill.
+///
+/// [MS-OXCROPS] §3.1.4.1 — entries referenced only as output SHOULD be this
+const NO_HANDLE: u32 = 0xFFFF_FFFF;
 use wiremock::ResponseTemplate;
 
 /// The handle table an opened table read leaves behind.
 const OPENED: [u32; 3] = [LOGON_HANDLE, 0x0000_0001, TABLE_HANDLE];
+
+/// A chain that opened nothing still hands back the bytes the opening batch carried, and sends no
+/// release for handles that were never issued.
+///
+/// Every ROP here **succeeded**; only the handle table says the objects do not exist. Without the
+/// two guards this exercises, the read would go on to bind `0xFFFFFFFF` into a second batch and
+/// send a `RopRelease` against a slot the server never gave out.
+#[tokio::test]
+async fn a_read_whose_handles_never_arrived_costs_exactly_one_round_trip() {
+    let server = MapiServer::start().await;
+    server.reply(connect_ok("Alice Example"));
+    server.reply_ok(execute_body(&logon_response(0), &[LOGON_HANDLE]));
+
+    let mut opened = open_message_response(1);
+    opened.extend(open_stream_response(2, 4));
+    opened.extend(read_stream_response(2, b"body"));
+    server.reply_ok(execute_body(&opened, &[LOGON_HANDLE, NO_HANDLE, NO_HANDLE]));
+
+    let mut logon = server
+        .client()
+        .connect()
+        .await
+        .unwrap()
+        .logon()
+        .await
+        .unwrap();
+    let value = logon
+        .folder(FolderId::new(0x0D00_0000_0000_0042))
+        .message(MessageId::new(0x0D01_0000_0000_0042))
+        .stream(PropertyTag::BODY)
+        .read()
+        .await
+        .unwrap();
+
+    assert_eq!(value.as_bytes(), b"body");
+    assert_eq!(value.reported_size(), Some(4));
+    assert!(value.is_complete());
+
+    // Three requests: Connect, the logon, and the read. No fourth carrying a release.
+    assert_eq!(server.requests().await.len(), 3);
+    assert_eq!(opcodes(&server.rops(2).await), [0x03, 0x2B, 0x2C]);
+}
 
 /// A client reports what it was configured with, which is what a diagnostic is written from.
 #[tokio::test]

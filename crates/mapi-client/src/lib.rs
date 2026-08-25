@@ -107,6 +107,7 @@ mod builder;
 mod client;
 mod connection;
 mod credentials;
+mod draft;
 mod folder;
 mod logon;
 mod message;
@@ -139,22 +140,25 @@ pub use mapi_proto::{
     AttachMethod, AttachmentNumber, Bookmark, CONTACT_COLUMNS, CONTACT_PROPERTIES,
     CONTENTS_COLUMNS, Cell, Connected, ContainerClass, ErrorCode, FOLDER_PROPERTIES, FileTime,
     Floating64, FolderDepth, FolderEntryId, FolderId, FuzzyLevel, Guid, HIERARCHY_COLUMNS, Headers,
-    Lcid, LegacyDn, LogonResponse, LongTermId, MAILBOX_PROPERTIES, MESSAGE_PROPERTIES, MessageId,
-    NamedProperty, NamedPropertyId, OpenMessageResponse, OpenRecipient, PropertyName,
-    PropertyNameKind, PropertyProblem, PropertyRow, PropertySet, PropertySetId, PropertySetIter,
-    PropertyTag, PropertyType, PropertyValue, RecipientType, RelationalOperator, ReplicaId,
-    RequestType, Restriction, RowForm, ShortTermId, SortDirection, SortOrder, SortOrderSet,
-    SpecialFolder, StoreObjectType, TableStatus, TableString, TaggedValue, WellKnownFolder,
+    Lcid, LegacyDn, LogonResponse, LongTermId, MAILBOX_PROPERTIES, MESSAGE_PROPERTIES,
+    MessageClass, MessageId, MessageMode, NEW_APPOINTMENT_PROPERTIES, NEW_CONTACT_PROPERTIES,
+    NamedProperty, NamedPropertyId, OneOffEntryId, OpenMessageResponse, OpenRecipient,
+    PropertyName, PropertyNameKind, PropertyProblem, PropertyRow, PropertySet, PropertySetId,
+    PropertySetIter, PropertyTag, PropertyType, PropertyValue, Recipient, RecipientType,
+    RelationalOperator, ReplicaId, RequestType, Restriction, RowForm, SMTP_ADDRESS_TYPE,
+    ShortTermId, SortDirection, SortOrder, SortOrderSet, SpecialFolder, StoreObjectType,
+    TableStatus, TableString, TaggedValue, WellKnownFolder, one_off_provider,
 };
 
 pub use crate::builder::MapiClientBuilder;
 pub use crate::client::MapiClient;
 pub use crate::connection::Connection;
 pub use crate::credentials::Credentials;
+pub use crate::draft::{NewAttachment, NewMessage, SavedMessage};
 pub use crate::error::{Error, Result};
 pub use crate::folder::Folder;
 pub use crate::logon::Logon;
-pub use crate::message::{Attachment, EmbeddedMessage, Message};
+pub use crate::message::{Attachment, EmbeddedMessage, Message, MessageUpdate};
 pub use crate::named::{NamedProperties, NamedPropertiesIter, NamedPropertyEntry};
 pub use crate::observer::{Exchange, Observer};
 pub use crate::properties::Properties;
@@ -197,6 +201,10 @@ mod tests {
         assert::<TableRead<'_>>();
         assert::<Rows<'_>>();
         assert::<Message<'_>>();
+        assert::<MessageUpdate<'_>>();
+        assert::<NewMessage<'_>>();
+        assert::<NewAttachment>();
+        assert::<SavedMessage>();
         assert::<Attachment<'_>>();
         assert::<EmbeddedMessage<'_>>();
         assert::<StreamRead<'_>>();

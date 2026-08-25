@@ -40,6 +40,11 @@ mod items;
 /// Its own file for the same two reasons.
 mod named;
 
+/// Items this crate creates itself: a draft with an attachment, a contact, an appointment, and the
+/// delete that takes each of them out again. Every test in it is self-cleaning, because the counts
+/// the `items` suite asserts are exact.
+mod writes;
+
 /// Reads one of the variables that describe the lab, failing with the name of the missing one.
 ///
 /// Deliberately a hard failure rather than a skip: this test only runs when somebody asked for it
