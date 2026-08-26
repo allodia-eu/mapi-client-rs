@@ -91,7 +91,17 @@ catches a slice of this mechanically; the rest is this checklist, and it is a PR
   `expect_used` and `panic`.
 - **500 lines per file.** Enforced by `scripts/Check-FileLength.ps1`. It forces the module split
   that keeps each layer reviewable on its own.
-- **95% coverage.** Defined once in `codecov.yml`.
+- **95% coverage**, on the whole tree and on the diff alike. Defined once in `codecov.yml`, which
+  CI and `Invoke-Gate.ps1` both read rather than repeating. Every layer is reachable offline: the
+  `mapi-proto` codec is sans-io, and `mapi-client`'s round trips answer to the scripted server in
+  `crates/mapi-client/tests/support`. A short `RopWriteStream` or a handle that never arrives is a
+  test there, not a gap here — those succeed as ROPs, so no live server produces one on request.
+
+  The two Codecov statuses arrive as **checks** on the pull request, which needs the Codecov GitHub
+  App installed on the organisation. Without it Codecov still comments, but from a plain user
+  account that cannot create a check run — visible in that the comment's author is
+  `codecov-commenter` rather than `codecov[bot]`. Installing it is an organisation-owner action and
+  changes nothing in this repository.
 
 All of the above are relaxed inside `#[cfg(test)]` (see `clippy.toml`). A test that indexes a
 fixture at a known offset is saying something true about that fixture; the same code in the parser

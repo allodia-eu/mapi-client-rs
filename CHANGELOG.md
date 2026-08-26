@@ -65,6 +65,11 @@ of captured scenarios. The corpus grows from 45 exchanges to 135, and one of the
   on a named-property tag, which is a different number in each mailbox.
 - **`scripts/Add-LabItems.ps1`**, which seeds a lab mailbox with the events, contacts and
   attachment-bearing message those captures need.
+- **The coverage floor now applies to the diff as well as the whole tree**, and both arrive as
+  checks on the pull request rather than as a comment. The 95% is unchanged and still lives in one
+  place; what is new is that a change which clears the floor by leaving its own new lines untested
+  no longer passes silently. Needs the Codecov GitHub App installed on the organisation —
+  `CONTRIBUTING.md` says how to tell whether it is.
 - **The Message object write ROPs**: `RopCreateMessage`, `RopSaveChangesMessage`,
   `RopModifyRecipients`, `RopCreateAttachment`, `RopSaveChangesAttachment` and `RopDeleteMessages`,
   with `Folder::create_message()`, `NewMessage`, `NewAttachment`, `SavedMessage`,
@@ -108,6 +113,11 @@ of captured scenarios. The corpus grows from 45 exchanges to 135, and one of the
   now keeps the chain open for the length of the read and releases it, stream first, on the way out
   of the success and the failure path alike. Nothing in [MS-OXCPRPT] says what a Stream object is
   worth once the object it was opened on is released.
+- **A coverage exclusion that could never match.** `codecov.yml` excluded `**/tests/live/**` on
+  the grounds that CI has no Exchange server. Integration tests are not in the report at all —
+  `cargo llvm-cov` measures `src/` — so the rule did nothing while looking exactly like one that
+  worked, which is the same failure mode as a scrub rule that matches nothing. Removed, with the
+  reason recorded in its place so it does not come back.
 
 ### Measured, and worth knowing
 
