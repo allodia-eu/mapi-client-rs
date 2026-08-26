@@ -24,9 +24,16 @@ mapi-cli messages --newest-first       let the server sort it, and --subject to 
 mapi-cli events                        calendar entries with start, end, location and busy status
 mapi-cli contacts                      contacts with their email addresses
 mapi-cli message --id 0x... --body     one message: properties, body, attachments, embedded message
+mapi-cli draft --to ada@example.test   write into Drafts, with recipients and an attachment
+mapi-cli contact --name .. --email ..  create a contact, one-off entry id included
+mapi-cli event --subject .. --start .. create an appointment, both instants in UTC
+mapi-cli delete --folder drafts --id . take one back out again: a soft delete, by id
 mapi-cli properties                    dump every property of the Store object
 mapi-cli capture session --scrub r.tsv record a conversation as fixtures
 ```
+
+`--folder` takes one of the thirteen folders a logon names, one of the eight it does not —
+`drafts` resolves through the entry-id chain — or a raw folder id as `0x...`.
 
 Everything that identifies a deployment is read from the environment — the same four variables
 `scripts/Test-Live.ps1` uses — so nothing about anybody's lab has to be typed and a password never
@@ -34,7 +41,7 @@ reaches a shell history. Add `--dump` to any command to hex-dump every request a
 is the reason this binary exists: a wrong `RopBuffer` is not readable by inspection, and a decoded
 view of it is a view through the very code you are doubting.
 
-**Status:** tracks the workspace, at `0.2.0`. Never published: `cargo build -p mapi-cli` from the
+**Status:** tracks the workspace, at `0.3.0`. Never published: `cargo build -p mapi-cli` from the
 repository.
 
 ## Licence

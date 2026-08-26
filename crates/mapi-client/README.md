@@ -52,7 +52,7 @@ answer, and asking again for names already known sends nothing at all.
 ```rust
 use mapi_client::NamedProperty;
 
-// Or `NamedProperty::ALL`, the ten a calendar or contact read is made of.
+// Or `NamedProperty::ALL`, the sixteen a calendar or contact is read and written with.
 let names = logon.resolve_names([NamedProperty::Location, NamedProperty::BusyStatus]).await?;
 let location = names.get(&NamedProperty::Location.name());   // None if this store would not map it
 ```
@@ -97,6 +97,43 @@ let newest = logon.folder(inbox)
     .rows();
 ```
 
+Writing an item is the other direction, and its shape is fixed rather than chosen: an attachment's
+content goes through a stream, a stream write is bounded by a two-byte length field, and a message
+must be saved *after* every attachment it holds. So it is create, fill, attach, save — two round
+trips to a saved draft, one more per attachment and one more per 16 KiB of attachment content.
+
+**Nothing exists until the save.** [MS-OXCMSG] §3.2.5.2 has the server hold a new Message object
+until `RopSaveChangesMessage` arrives, so every failure before that point leaves the mailbox exactly
+as it was — which is what makes this safe to run against a real one.
+
+```rust
+use mapi_client::{MessageClass, NewAttachment, PropertyTag, PropertyValue, Recipient,
+                  SpecialFolder, TaggedValue};
+
+let drafts = logon.special_folder(SpecialFolder::Drafts).await?;
+let saved = logon.folder(drafts)
+    .create_message(MessageClass::Note)
+    .set([TaggedValue::new(PropertyTag::SUBJECT, PropertyValue::String("Notes".into()))?])
+    .to([Recipient::to("Ada Lovelace", "ada@example.test")?])   // one-off: nothing is looked up
+    .attach([NewAttachment::by_value("notes.txt", *b"one line\n")?])
+    .save()
+    .await?;
+
+// Changing one is a single round trip: opened read/write, written, saved and released in one
+// `Execute`. Taking it out again is a soft delete.
+logon.message(drafts, saved.id()).update()
+    .set([TaggedValue::new(PropertyTag::SUBJECT, PropertyValue::String("Revised".into()))?])
+    .save()
+    .await?;
+logon.folder(drafts).delete_messages(&[saved.id()]).await?;
+```
+
+A contact and a single-instance appointment are the same call with a different `MessageClass` and
+the named properties that make them what they are — `NEW_CONTACT_PROPERTIES` and
+`NEW_APPOINTMENT_PROPERTIES` name them. A recipient is addressed **one-off**: the address travels
+in the message rather than being resolved, because the address book is NSPI, a separate endpoint
+this workspace does not implement.
+
 ## What the types enforce
 
 - **One request in flight.** MAPI/HTTP allows exactly one per Session Context, and a violation
@@ -113,9 +150,9 @@ let newest = logon.folder(inbox)
   mailbox GUID that issued them, and `FolderEntryId::belongs_to` answers before a conversion is
   asked for.
 - **Nor does a named-property id.** Ids are allocated per store, and in the lab every one of one
-  mailbox's ten ids names a real, *different*, registered property in the other — so the mistake is
-  answered with a plausible value rather than an error. A `NamedProperties` map carries the store
-  that issued its ids and cannot be given a foreign one.
+  mailbox's sixteen ids names a real, *different*, registered property in the other — so the
+  mistake is answered with a plausible value rather than an error. A `NamedProperties` map carries
+  the store that issued its ids and cannot be given a foreign one.
 
 ## Transport and authentication
 
@@ -141,12 +178,14 @@ Part of [`mapi-client-rs`](https://github.com/allodia-eu/mapi-client-rs). Every 
 cites its Microsoft Open Specification section; see `SPEC.md` in the repository root for the pinned
 document versions.
 
-**Status:** `0.2.0`, plus reading items on `main`. Connect, logon, hierarchy and contents reads
-with paging — the hierarchy recursively, tagged by container class, the contents sorted and filtered
-by the server — the folders a logon does not name, property reads and writes on Store and Folder
-objects, named-property resolution cached per session, messages with their properties, attachments,
-embedded messages and streamed bodies, disconnect, and Autodiscover lookup are implemented. Nothing
-that creates, modifies or sends an item; no notifications, no ICS, no address book.
+**Status:** `0.3.0`. Connect, logon, hierarchy and contents reads with paging — the hierarchy
+recursively, tagged by container class, the contents sorted and filtered by the server — the
+folders a logon does not name, property reads and writes on Store and Folder objects,
+named-property resolution cached per session, messages with their properties, attachments, embedded
+messages and streamed bodies, disconnect, and Autodiscover lookup are implemented. `0.3.0` adds
+creating a message, a contact or a single-instance appointment, with recipients and attachments,
+changing one and deleting it. Nothing that **sends** an item, and nothing that moves or flags one;
+no notifications, no ICS, no address book.
 
 ## Licence
 

@@ -15,6 +15,10 @@ Two conventions specific to this project:
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.3.0] - 2026-08-26
+
 Items, read and written. `0.2.0` could reach a calendar folder and say what its columns were
 called; this adds the message, the attachment, the message inside an attachment, the body that does
 not fit in a response buffer — and then the other direction: *draft a message* with recipients and
@@ -30,6 +34,10 @@ Verified against Exchange Server SE `15.02.2562.045` against both lab mailboxes,
 of captured scenarios. The corpus grows from 45 exchanges to 135, and one of the new scenarios
 **writes** — which needed the fixture pipeline to learn three things it did not know, listed under
 *Measured*.
+
+**This is a breaking release**: four public items changed shape, listed under *Changed*.
+`mapi-autodiscover` is unchanged and is republished only because all four crates share one version
+number.
 
 ### Added
 
@@ -118,6 +126,14 @@ of captured scenarios. The corpus grows from 45 exchanges to 135, and one of the
   `cargo llvm-cov` measures `src/` — so the rule did nothing while looking exactly like one that
   worked, which is the same failure mode as a scrub rule that matches nothing. Removed, with the
   reason recorded in its place so it does not come back.
+
+### Security
+
+- **`h2` moved from `0.4.15` to `0.4.19` in the lockfile**, for RUSTSEC-2026-0258: empty DATA
+  frames queue without limit. Low severity, and patched upstream in `0.4.16`. Nothing in the
+  workspace names `h2` — it arrives under `reqwest`, so a consumer resolving `mapi-client` afresh
+  already picks a patched version without this. What the bump is for is `cargo deny`, which is a
+  gate here rather than advice, and `mapi-cli` built `--locked` from this repository.
 
 ### Measured, and worth knowing
 
@@ -444,6 +460,7 @@ to the repository.
   measured, so neither LZ77/DIRECT2 nor the `0xA5` XOR layer is implemented. A server that refuses
   those flags is not supported.
 
-[Unreleased]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/allodia-eu/mapi-client-rs/releases/tag/v0.1.0

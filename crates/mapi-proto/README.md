@@ -23,15 +23,18 @@ batch.set_columns(table, &HIERARCHY_COLUMNS).query_rows(table, 50);
 let request = session.execute(batch)?;   // one round trip for the whole chain
 ```
 
-**Status:** `0.2.0`, plus reading items on `main`. The transport envelope, the ROP layer, the
-OXCDATA structures and the session state machine are implemented. `Connect`, `Execute`, `Disconnect`
-and `PING` are the request types covered, with the logon, folder, table, property, long-term-id,
-named-property, message, attachment and stream ROPs on top — enough to walk a whole folder tree,
-read and write a Store or Folder object's properties, reach the folders a logon does not name, ask a
-store which id it has allocated for a `PidLid`, sort and filter a table on the server, and read a
-message down to its body and its attachments. Fifteen of the OXCDATA property types are modelled,
-and six of the twelve restriction formats. Nothing that creates, modifies or sends an item; no
-notifications, no ICS and no address book endpoint.
+**Status:** `0.3.0`. The transport envelope, the ROP layer, the OXCDATA structures and the session
+state machine are implemented. `Connect`, `Execute`, `Disconnect` and `PING` are the request types
+covered, with the logon, folder, table, property, long-term-id, named-property, message, attachment
+and stream ROPs on top — enough to walk a whole folder tree, read and write a Store or Folder
+object's properties, reach the folders a logon does not name, ask a store which id it has allocated
+for a `PidLid`, sort and filter a table on the server, and read a message down to its body and its
+attachments. `0.3.0` adds the other direction: `RopCreateMessage`, `RopModifyRecipients`,
+`RopCreateAttachment`, `RopWriteStream`, `RopSaveChangesMessage` and `RopDeleteMessages`, with the
+one-off entry ids that address a recipient without an address book. Fifteen of the OXCDATA property
+types are modelled, and six of the twelve restriction formats. Nothing that *sends* an item —
+`RopSubmitMessage` and `RopMoveCopyMessages` are not implemented — and no notifications, no ICS
+and no address book endpoint.
 
 ## Licence
 
