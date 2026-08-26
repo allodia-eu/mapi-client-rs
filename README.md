@@ -27,25 +27,25 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: `0.2.0` released; reading and writing items is on `main`.** What works is what the
-> corpus proves: locate an endpoint by Autodiscover, connect, log on, walk the folder hierarchy —
-> the whole of it in one table, tagged by container class — read or write the Store object's and any
-> folder's own properties, find the Calendar, Contacts, Drafts, Tasks, Notes and Journal folders that
-> the logon does not name, resolve the `PidLid` properties a calendar entry is made of to the ids one
-> store uses for them, and page a contents table with the columns you choose, ordered and filtered by
-> the server. Since `0.2.0`: open a message, read its properties, list its attachments, extract one's
-> bytes, open the message inside another, and read a body far larger than a response buffer — and
-> then the other direction, **create** a message with recipients and an attachment, a contact or a
+> **Status: `0.3.0` released.** What works is what the corpus proves: locate an endpoint by
+> Autodiscover, connect, log on, walk the folder hierarchy — the whole of it in one table, tagged
+> by container class — read or write the Store object's and any folder's own properties, find the
+> Calendar, Contacts, Drafts, Tasks, Notes and Journal folders that the logon does not name, resolve
+> the `PidLid` properties a calendar entry is made of to the ids one store uses for them, and page a
+> contents table with the columns you choose, ordered and filtered by the server. `0.3.0` adds the
+> item itself: open a message, read its properties, list its attachments, extract one's bytes, open
+> the message inside another, and read a body far larger than a response buffer — and then the
+> other direction, **create** a message with recipients and an attachment, a contact or a
 > single-instance appointment, change one, and delete it again. All verified against Exchange Server
-> SE `15.02.2562.045`. What is missing is *acting* on a message — sending it, moving it, flagging it
-> — and `Negotiate`/`NTLM` authentication. The gaps are stated below and in the changelog rather than
-> left to be discovered.
+> SE `15.02.2562.045`, in two mailboxes, in two languages. What is missing is *acting* on a message
+> — sending it, moving it, flagging it — and `Negotiate`/`NTLM` authentication. The gaps are
+> stated below and in the changelog rather than left to be discovered.
 
 ## Install
 
 ```toml
 [dependencies]
-mapi-client = "0.2"
+mapi-client = "0.3"
 ```
 
 `mapi-proto` and `mapi-autodiscover` are published separately and are useful on their own — the
@@ -139,12 +139,28 @@ while let Some(row) = rows.try_next().await? {
 logon.disconnect().await?;
 ```
 
+**Writing, in the one shape the protocol allows.** An attachment's content goes through a stream, a
+stream write is bounded by a two-byte length field, and a message must be saved *after* every
+attachment it holds — so it is create, fill, attach, save, and the round trips follow from that
+rather than from how the API is written. **Nothing exists until the save**, so every failure before
+it leaves the mailbox exactly as it was.
+
+```rust,ignore
+let saved = logon.folder(drafts)
+    .create_message(MessageClass::Note)          // or ::Contact, or ::Appointment
+    .set([TaggedValue::new(PropertyTag::SUBJECT, PropertyValue::String("Notes".into()))?])
+    .to([Recipient::to("Ada Lovelace", "ada@example.test")?])   // one-off: nothing is looked up
+    .attach([NewAttachment::by_value("notes.txt", *b"one line\n")?])
+    .save()
+    .await?;                                     // -> SavedMessage, with the id the server minted
+```
+
 Authentication is Basic or Bearer. **`Negotiate` and `NTLM` are not implemented** — a genuine gap,
 because a default-configured Exchange offers only those two. Both are multi-leg challenge/response
 handshakes bound to the connection, which a "compute one header" credential cannot express; see
 `mapi-client`'s documentation for the ways round it.
 
-**Two correctness traps encoded in the types, not the docs.**
+**Three correctness traps encoded in the types, not the docs.**
 
 Exchange silently truncates table string values at 255 characters with a literal `...` and no error
 flag. A `row.str()` that hands back a corrupted subject is a data-loss bug in the consumer's index,
@@ -199,7 +215,7 @@ observed deviation, with the server version that produced it.
 | Clippy | `all` + `pedantic` + `cargo`, plus `indexing_slicing`, `arithmetic_side_effects`, `unwrap_used`, `panic`, `as_conversions` and friends. Relaxed in `#[cfg(test)]` only |
 | rustdoc | `-D warnings`, `missing_docs` denied, every public item cites its spec section |
 | File length | 500 lines, CI-enforced |
-| Coverage | 95% floor, defined once in `codecov.yml`. Currently 98% of lines, excluding `mapi-cli` and the live tests |
+| Coverage | 95% floor, defined once in `codecov.yml`, and applied to a pull request's own diff as well as to the tree. Currently 98% of lines, excluding `mapi-cli` |
 | Licences | `cargo-deny` allowlist of permissive licences only |
 | API stability | `cargo-public-api` diff on every PR, `cargo-semver-checks` before publish |
 
