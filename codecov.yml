@@ -4,8 +4,33 @@
 # it to `cargo llvm-cov --fail-under-lines`, and scripts/Invoke-Gate.ps1 reads
 # the same key. There is no second copy of the number to drift.
 #
+# Those two parsers are regexes, not YAML readers, and both expect `project:`,
+# `default:` and `target:` on three consecutive lines. Comments go above the
+# block, never inside it. See Get-CoverageFloor in scripts/_Boot.ps1.
+#
 # 95% is achievable rather than aspirational specifically because mapi-proto is
-# sans-io: fixtures replay straight through it with no network to stub.
+# sans-io: fixtures replay straight through it with no network to stub. The
+# write path is the same story from the other side — a scripted server in
+# crates/mapi-client/tests/writing.rs produces the answers a real Exchange will
+# not give on request, so a short RopWriteStream is a test rather than a gap.
+
+codecov:
+  # Coverage that arrives before the build finished is coverage of a build that
+  # may yet fail. Waiting costs a minute and makes the two agree.
+  require_ci_to_pass: true
+  notify:
+    wait_for_ci: true
+
+# Report through the Checks API, so the two coverage statuses arrive as checks
+# alongside clippy and the rest rather than only as a comment somebody has to
+# scroll to — and so a missed line is annotated on the diff that added it.
+#
+# **This needs the Codecov GitHub App installed on the organisation.** Without
+# it the upload still works and the comment still appears, but it is posted by a
+# plain user account that cannot create a check run, so nothing here takes
+# effect. See CONTRIBUTING.md.
+github_checks:
+  annotations: true
 
 coverage:
   precision: 2
@@ -16,17 +41,29 @@ coverage:
       default:
         target: 95%
         threshold: 0.5%
+        # A red build measures a subset of the tests, and a coverage number from
+        # a subset is not a coverage number. Say so rather than reporting it.
+        if_ci_failed: error
     patch:
+      # No threshold: the floor is what the whole codebase already clears, so a
+      # diff that does not clear it is lowering the number on purpose.
       default:
         target: 95%
         threshold: 0%
+        if_ci_failed: error
 
 # Excluded from the metric, for the same reason a test harness excludes itself:
-#   - mapi-cli is diagnostic tooling, exercised by use rather than by unit test
-#   - live tests need the Exchange lab, which CI does not have
+# mapi-cli is diagnostic tooling, exercised by use rather than by unit test. The
+# CI job passes the matching --ignore-filename-regex, so these files are gone
+# before Codecov sees them; this is the second lock, for the day somebody drops
+# the flag.
+#
+# There is deliberately no rule here for the live tests. They are integration
+# tests, and cargo-llvm-cov does not put test code in the report at all — so a
+# pattern excluding them would match nothing while looking exactly like one that
+# worked. What CI measures is `src/` and only `src/`.
 ignore:
   - "crates/mapi-cli/**"
-  - "**/tests/live/**"
 
 comment:
   layout: "reach, diff, flags, files"
