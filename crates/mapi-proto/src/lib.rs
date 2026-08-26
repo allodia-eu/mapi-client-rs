@@ -55,11 +55,12 @@
 //!
 //! No compression (LZ77+DIRECT2), no `0xA5` obfuscation and no auxiliary buffers: every request
 //! asks the server to skip all three, and a server that ignores that is reported rather than
-//! guessed at. No Address Book endpoint, no notifications and no ICS, and nothing that creates,
-//! modifies or sends an item. What is covered: table reads — including the recursive folder walk,
-//! the entry-id chain that reaches the folders a logon does not name, and sorting and filtering on
-//! the server — the property layer, the named-property lookup every calendar read depends on, and
-//! the Message, Attachment and Stream objects that turn a row into an item.
+//! guessed at. No Address Book endpoint, no notifications and no ICS, and nothing that *sends* an
+//! item or moves one between folders. What is covered: table reads — including the recursive
+//! folder walk, the entry-id chain that reaches the folders a logon does not name, and sorting and
+//! filtering on the server — the property layer, the named-property lookup every calendar read
+//! depends on, the Message, Attachment and Stream objects that turn a row into an item, and the
+//! ROPs that put one into a mailbox: create, address, attach, save and delete.
 //!
 //! [`mapi-client`]: https://docs.rs/mapi-client
 //! [`mapi-autodiscover`]: https://docs.rs/mapi-autodiscover
