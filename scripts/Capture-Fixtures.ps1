@@ -41,8 +41,18 @@
 .PARAMETER Set
     The fixture set, which names the server family these came from.
 
+.PARAMETER SharedMailbox
+    A mailbox the *first* mailbox in -Mailbox has FullAccess to. Needed by the wrong-server
+    capture, and by nothing else.
+
+    Why a shared mailbox and not simply the second one: the access check and the endpoint/name
+    pairing check happen at different moments. Connect does the access check, so pointing one lab
+    mailbox at the other's distinguished name is refused there with LoginPermission and the pairing
+    error never happens. Only a mailbox this account may genuinely open gets as far as RopLogon,
+    which is what answers ecWrongServer.
+
 .PARAMETER SkipRefused
-    Do not capture the refused-Connect scenario.
+    Do not capture either refusal scenario: the refused Connect, or the wrong-server pairing.
 
 .PARAMETER KeepRaw
     Also write the unredacted originals to a gitignored raw\ directory, for debugging a scrub.
@@ -60,6 +70,7 @@ param(
     [string]   $HostName = $env:COMPUTERNAME,
     [string]   $Root,
     [string]   $Set = 'exchange-se',
+    [string]   $SharedMailbox,
     [switch]   $SkipRefused,
     [switch]   $KeepRaw
 )
@@ -191,6 +202,29 @@ foreach ($identity in $Mailbox) {
     Write-Host "    $identity  $language (LCID 0x$('{0:x4}' -f $lcid))  ->  session-$($language.ToLowerInvariant())"
 }
 
+# The shared mailbox, if one was named. It is not a capture target - no scenario is driven *as*
+# it - but it is a real mailbox whose GUID, distinguished-name blob and address all reach the
+# corpus through the wrong-server capture, so it needs the same scrub rules as a target does.
+$extras = New-Object System.Collections.Generic.List[psobject]
+
+if ($SharedMailbox) {
+    $box = Get-Mailbox -Identity $SharedMailbox
+    $domain = ([string]$box.PrimarySmtpAddress -split '@')[-1]
+    $blob = [regex]::Match([string]$box.LegacyExchangeDN, 'cn=([0-9a-fA-F]{32})-')
+
+    $extras.Add([pscustomobject]@{
+        Index    = $index + 1
+        Identity = $SharedMailbox
+        Smtp     = [string]$box.PrimarySmtpAddress
+        Dn       = [string]$box.LegacyExchangeDN
+        Guid     = [guid]$box.ExchangeGuid
+        Blob     = if ($blob.Success) { $blob.Groups[1].Value } else { $null }
+        Endpoint = "$($vdir.InternalUrl)/emsmdb/?MailboxId=$($box.ExchangeGuid)@$domain"
+    })
+
+    Write-Host "    $SharedMailbox  shared, for the wrong-server capture"
+}
+
 # The Exchange organisation, taken from any distinguished name: `/o=<org>/`.
 $organisation = [regex]::Match($targets[0].Dn, '^/o=([^/]+)/').Groups[1].Value
 
@@ -214,7 +248,8 @@ $rules.Add("text`t$hostShort`t$hostPlaceholder")
 # - and again in the X-CalculatedBETarget header, so a rule that only replaced the label would
 # leave the deployment's domain in the corpus. A capture should name nothing real, and half a name
 # is still a name.
-$domains = @($targets.Smtp | ForEach-Object { ($_ -split '@')[-1] } | Select-Object -Unique)
+$scrubbed = @($targets) + @($extras)
+$domains = @($scrubbed.Smtp | ForEach-Object { ($_ -split '@')[-1] } | Select-Object -Unique)
 foreach ($domain in $domains) {
     $rules.Add("text`t$domain`t$(New-Placeholder -Value $domain -Preferred 'lab.local')")
 }
@@ -224,7 +259,7 @@ if ($organisation) {
     $rules.Add("text`t/o=$organisation/`t/o=$orgPlaceholder/")
 }
 
-foreach ($target in $targets) {
+foreach ($target in $scrubbed) {
     $guidText = $target.Guid.ToString()
     $rules.Add("text`t$guidText`t$(New-ZeroGuid -Index $target.Index)")
 
@@ -334,6 +369,37 @@ try {
             MAPI_LIVE_USERNAME = $first.Smtp
             MAPI_LIVE_PASSWORD = $Password
             MAPI_LIVE_LOCALE   = "0x$('{0:x4}' -f $first.Lcid)"
+        }
+
+        # The other refusal, and the one that opening a second mailbox invites: the first
+        # mailbox's endpoint paired with a *different* mailbox's distinguished name. Both are
+        # real, and the mismatch is only in which ?MailboxId= serves which name. What it records
+        # is a Connect that SUCCEEDS, reporting the other mailbox's owner, and then a RopLogon
+        # answering ecWrongServer with a redirect naming the MailboxId that would have worked -
+        # which no HTTP-level check and no Connect-level check would ever see.
+        #
+        # It needs the SHARED mailbox rather than simply the second one, and finding that out cost
+        # a capture run. The two checks happen at different moments: Connect does the ACCESS check
+        # and RopLogon does the endpoint/name pairing check. Pointing the first mailbox at the
+        # second mailbox's name is refused at Connect with LoginPermission, because one lab
+        # mailbox has no rights over the other - so the pairing error never gets a chance to
+        # happen. Only a mailbox this account may genuinely open gets far enough to be told it is
+        # on the wrong server.
+        if ($SharedMailbox) {
+            $shared = $extras[0]
+            Write-Step 'Capturing wrong-server'
+            Invoke-Capture -Scenario 'wrong-server' -Name 'wrong-server' -Extra @(
+                '--user-dn-override', $shared.Dn
+            ) -Environment @{
+                MAPI_LIVE_ENDPOINT = $first.Endpoint
+                MAPI_LIVE_USER_DN  = $first.Dn
+                MAPI_LIVE_USERNAME = $first.Smtp
+                MAPI_LIVE_PASSWORD = $Password
+                MAPI_LIVE_LOCALE   = "0x$('{0:x4}' -f $first.Lcid)"
+            }
+        } else {
+            Write-Warn ('wrong-server needs -SharedMailbox naming a mailbox the first mailbox ' +
+                        'has FullAccess to; that capture was skipped')
         }
     }
 } finally {

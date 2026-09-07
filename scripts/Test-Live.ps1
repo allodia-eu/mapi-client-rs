@@ -21,6 +21,15 @@
 
         MAPI_LIVE_SECOND_ENDPOINT, MAPI_LIVE_SECOND_USER_DN, MAPI_LIVE_SECOND_USERNAME
 
+    One more is optional, and names a shared mailbox the run should be able to open:
+
+        MAPI_LIVE_SHARED_ADDRESS   its SMTP address, and nothing else
+
+    An address on its own is the whole of it, deliberately: finding the endpoint and the
+    distinguished name for a mailbox you do not own is exactly what those tests are testing, so
+    handing them over would test nothing. Exchange only advertises the mailbox if FullAccess was
+    granted with -AutoMapping $true; without automapping the access works and is never announced.
+
     That test needs them because RopSubmitMessage answers with nothing at all - the only evidence
     it did anything is in the recipient's mailbox, which the sender cannot read. Running with
     -Mailbox developer,developer2 sets them for each run in turn, so each mailbox sends to the
@@ -42,6 +51,11 @@
     Worth using more than one, and worth making them differ in language: a mailbox's folder names
     are localised to the language it was provisioned with, so a client that is subtly wrong about
     names passes against an English mailbox and fails against a Dutch one.
+
+.PARAMETER SharedMailbox
+    A shared mailbox every mailbox in -Mailbox has FullAccess to, with automapping on. Sets
+    MAPI_LIVE_SHARED_ADDRESS. Omit it and the shared-mailbox tests fail by name rather than being
+    skipped silently, which is the same choice the send test makes.
 
 .PARAMETER Endpoint
     Overrides MAPI_LIVE_ENDPOINT.
@@ -67,6 +81,7 @@
 [CmdletBinding()]
 param(
     [string[]] $Mailbox = @(),
+    [string]   $SharedMailbox,
     [string]   $Endpoint,
     [string]   $UserDn,
     [string]   $Username,
@@ -80,6 +95,12 @@ Assert-BootLoaded   # a dot-sourced file that fails to parse does not stop us; t
 # See Capture-Fixtures.ps1: `powershell.exe -File` hands an array over as one comma-joined string.
 $Mailbox = @($Mailbox | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } |
     Where-Object { $_ })
+
+# The shared mailbox is named by address alone: resolving it is what the tests do.
+if ($SharedMailbox) {
+    $env:MAPI_LIVE_SHARED_ADDRESS = (Get-LabMailbox -Identity $SharedMailbox).Smtp
+    Write-Step "Shared mailbox for this run: $env:MAPI_LIVE_SHARED_ADDRESS"
+}
 
 if ($Endpoint) { $env:MAPI_LIVE_ENDPOINT = $Endpoint }
 if ($UserDn)   { $env:MAPI_LIVE_USER_DN  = $UserDn }

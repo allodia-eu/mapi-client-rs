@@ -26,18 +26,18 @@ use mapi_client::{
     PropertyValue, TableString, TaggedValue, WellKnownFolder,
 };
 
+// Each suite below is its own file for two reasons that apply to all of them: each asks its own
+// question, and this file is at the workspace's 500-line limit.
+
 /// The entry-id chain, the `Depth` flag and the identifier conversions — the folders `RopLogon`
-/// never names. Its own file because it is its own question, and because this one is at the
-/// workspace's 500-line limit.
+/// never names.
 mod folders;
 
 /// Calendar events, contacts, a body larger than a response buffer, and both kinds of attachment.
-/// Its own file for the same two reasons, and because it is the only one that needs a mailbox
-/// seeded by `scripts\Add-LabItems.ps1`.
+/// The only suite that needs a mailbox seeded by `scripts\Add-LabItems.ps1`.
 mod items;
 
 /// The ids a store allocates for named properties, and what carrying one across mailboxes costs.
-/// Its own file for the same two reasons.
 mod named;
 
 /// Items this crate creates itself: a draft with an attachment, a contact, an appointment, and the
@@ -46,9 +46,12 @@ mod named;
 mod writes;
 
 /// Acting on an item once it exists: sending mail to the other lab mailbox, archiving a message,
-/// and marking one read. Self-cleaning like `writes`, and in both mailboxes rather than one —
-/// which is what makes it the only suite here that needs the second set of variables.
+/// and marking one read. Self-cleaning like `writes`, and the only suite needing two mailboxes.
 mod acts;
+
+/// A mailbox the authenticated account does not own: listing it, opening it, and the pairing
+/// mistake that opening one invites. The only suite whose subject is not a ROP.
+mod shared;
 
 /// Reads one of the variables that describe the lab, failing with the name of the missing one.
 ///

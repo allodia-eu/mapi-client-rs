@@ -15,6 +15,9 @@
         another. `Postvak IN` is not `Inbox`, and a client that assumed otherwise would be wrong in
         a way no English-language test could catch.
 
+    And one a lab wants as soon as it has to prove anything about mailboxes an account does not
+    own: a shared mailbox, granted to every mailbox in -Mailbox. See -SharedMailbox.
+
     Everything here is idempotent: existing mailboxes are reported and left alone.
 
 .PARAMETER Mailbox
@@ -40,16 +43,37 @@
     clear the Inbox first; otherwise the capture describes a mailbox nothing in this repository
     can reproduce.
 
+.PARAMETER SharedMailbox
+    A shared mailbox to create, and grant FullAccess over to every mailbox in -Mailbox.
+
+    Two things about it are load-bearing rather than incidental, and both were measured:
+
+      * The grant MUST use -AutoMapping $true. Automapping is what puts the mailbox into the
+        AlternativeMailbox element of each grantee's Autodiscover response, and that element is
+        the *only* place MAPI/HTTP ever names a mailbox you do not own - there is no ROP that
+        enumerates them. Granted without it, the access works perfectly and no client can discover
+        it.
+      * Exchange names the mailbox by SmtpAddress rather than by LegacyDN, so opening it costs a
+        second Autodiscover lookup and lands on a different ?MailboxId= endpoint. Nothing here has
+        to do anything about that; it is why crates\mapi-client	ests\shared exists.
+
 .EXAMPLE
     powershell.exe -File scripts\Initialize-ExchangeLab.ps1 -EnableBasic
 
 .EXAMPLE
     powershell.exe -File scripts\Initialize-ExchangeLab.ps1 `
         -Mailbox developer:en-US,developer2:nl-NL -Password '<password>' -EnableBasic -Seed
+
+.EXAMPLE
+    powershell.exe -File scripts\Initialize-ExchangeLab.ps1 `
+        -Mailbox developer:en-US,developer2:nl-NL -SharedMailbox shared
+
+    Adds a shared mailbox both of them can open, which is what the shared-mailbox live tests need.
 #>
 [CmdletBinding(SupportsShouldProcess)]
 param(
     [string[]] $Mailbox = @(),
+    [string]   $SharedMailbox,
     [string]   $Password,
     [string]   $OrganizationalUnit,
     [switch]   $EnableBasic,
@@ -139,6 +163,53 @@ foreach ($specification in $Mailbox) {
         Set-MailboxRegionalConfiguration -Identity $alias -Language $language -LocalizeDefaultFolderName:$true
         Write-Ok "language set to $language; folder names follow on the next logon"
     }
+}
+
+# ---------------------------------------------------------------------------
+# A mailbox nobody owns
+# ---------------------------------------------------------------------------
+
+if ($SharedMailbox) {
+    Write-Step "Shared mailbox $SharedMailbox"
+
+    $shared = Get-Mailbox -Identity $SharedMailbox -ErrorAction SilentlyContinue
+    if ($shared) {
+        Write-Ok "already exists: $($shared.PrimarySmtpAddress)"
+    } elseif ($PSCmdlet.ShouldProcess($SharedMailbox, 'create shared mailbox')) {
+        $domain = (Get-AcceptedDomain | Where-Object { $_.Default }).DomainName
+        $arguments = @{
+            Name  = $SharedMailbox
+            Alias = $SharedMailbox
+            Shared = $true
+            PrimarySmtpAddress = "$SharedMailbox@$domain"
+        }
+        if ($OrganizationalUnit) { $arguments['OrganizationalUnit'] = $OrganizationalUnit }
+
+        $shared = New-Mailbox @arguments -ErrorAction Stop
+        Write-Ok "created $($shared.PrimarySmtpAddress)"
+    }
+
+    foreach ($specification in $Mailbox) {
+        $alias = ($specification -split ':', 2)[0]
+
+        $granted = @(Get-MailboxPermission -Identity $SharedMailbox -User $alias -ErrorAction SilentlyContinue |
+            Where-Object { -not $_.IsInherited -and $_.AccessRights -contains 'FullAccess' })
+
+        if ($granted.Count -gt 0) {
+            Write-Ok "$alias already has FullAccess"
+        } elseif ($PSCmdlet.ShouldProcess($SharedMailbox, "grant FullAccess to $alias")) {
+            # -AutoMapping $true is the whole point. Without it the access is granted and never
+            # advertised, and no client can find the mailbox: Autodiscover's AlternativeMailbox
+            # element is the only place MAPI/HTTP names a mailbox you do not own.
+            Add-MailboxPermission -Identity $SharedMailbox -User $alias `
+                -AccessRights FullAccess -AutoMapping $true -InheritanceType All |
+                Out-Null
+            Write-Ok "granted FullAccess to $alias, with automapping"
+        }
+    }
+
+    Write-Host ('    Automapping can take a few minutes to reach Autodiscover. Check with ' +
+                'mapi-cli mailboxes.') -ForegroundColor DarkGray
 }
 
 # ---------------------------------------------------------------------------
