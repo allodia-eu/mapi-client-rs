@@ -1,0 +1,69 @@
+# Captured from a real Exchange Server by `mapi-cli capture`.
+# Byte-exact apart from the two sections at the end of this file, which itemise every
+# change: identities redacted length-preservingly, and the few fields that differ on
+# every capture zeroed. See fixtures/MANIFEST.toml for the server version and the hash
+# of each file.
+
+[exchange]
+name = 01-connect
+request-type = Connect
+url = https://exchange-lab-01/mapi/emsmdb/?MailboxId=00000000-0000-0000-0000-000000000001@lab.local
+status = 200
+request-bytes = 143
+response-bytes = 109
+
+[request-headers]
+Content-Type: application/mapi-http
+X-RequestType: Connect
+X-RequestId: {00000000-0000-0000-0000-000000000000}:1
+X-ClientApplication: Outlook/15.00.0847.4040
+X-ClientInfo: {00000000-0000-0000-0000-000000000000}:0
+
+[response-headers]
+cache-control: private
+content-type: application/mapi-http
+server: Microsoft-IIS/10.0
+request-id: <normalised by capture>
+x-calculatedbetarget: exchange-lab-01.lab.local
+x-serverapplication: Exchange/15.02.2562.045
+x-requestid: {00000000-0000-0000-0000-000000000000}:1
+x-clientinfo: {00000000-0000-0000-0000-000000000000}:0
+x-requesttype: Connect
+x-tunnelexpirationtime: 1800000
+x-pendingperiod: 30000
+x-expirationinfo: 300000
+x-responsecode: 0
+x-diaginfo: EXCHANGE-LAB-01
+x-beserver: EXCHANGE-LAB-01
+x-aspnet-version: 4.0.30319
+set-cookie: MapiRouting=<normalised>; path=/mapi/; secure; HttpOnly
+set-cookie: MapiContext=<normalised>; path=/mapi/emsmdb; secure; HttpOnly
+set-cookie: MapiSequence=<normalised>; path=/mapi/emsmdb; secure; HttpOnly
+set-cookie: X-BackEndCookie=<normalised>; expires=<normalised>; path=/mapi; secure; HttpOnly
+x-powered-by: ASP.NET
+x-feserver: EXCHANGE-LAB-01
+date: <normalised by capture>
+
+[normalised]
+- response preamble: `X-StartTime` value replaced with `0` ([MS-OXCMAPIHTTP] §2.2.7)
+- response preamble: `X-ElapsedTime` value replaced with `0` ([MS-OXCMAPIHTTP] §2.2.7)
+- response body: `RetryDelay` zeroed, because the server re-rolls it for every connection ([MS-OXCMAPIHTTP] §2.2.4.1.2)
+- response body: the auxiliary buffer was replaced with an empty one. A real server sends one carrying its own fully qualified name and per-connection timings, which vary in both content and length; the codec reads `AuxiliaryBufferSize` and stops, so this decodes identically ([MS-OXCMAPIHTTP] §2.2.4.1.2)
+- header `X-RequestId`: GUID replaced
+- header `X-ClientInfo`: GUID replaced
+- header `request-id`: value replaced
+- header `x-requestid`: GUID replaced
+- header `x-clientinfo`: GUID replaced
+- header `set-cookie`: value replaced
+- header `set-cookie`: value replaced
+- header `set-cookie`: value replaced
+- header `set-cookie`: value replaced
+- header `date`: value replaced
+
+[redacted]
+- text:/o=Lab/ x1
+- text:00000000000000000000000000000001 x1
+- text:00000000-0000-0000-0000-000000000001 x2
+- text:exchange-lab-01 x2
+- text:lab.local x2
+- text:EXCHANGE-LAB-01 x3

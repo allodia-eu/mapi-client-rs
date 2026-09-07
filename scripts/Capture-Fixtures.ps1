@@ -185,6 +185,7 @@ foreach ($identity in $Mailbox) {
         Scenario  = "session-$($language.ToLowerInvariant())"
         Items     = "items-$($language.ToLowerInvariant())"
         Writes    = "writes-$($language.ToLowerInvariant())"
+        Acts      = "acts-$($language.ToLowerInvariant())"
     })
 
     Write-Host "    $identity  $language (LCID 0x$('{0:x4}' -f $lcid))  ->  session-$($language.ToLowerInvariant())"
@@ -304,6 +305,16 @@ try {
         # fails part way it says so and names the draft it left behind.
         Write-Step "Capturing $($target.Writes) from $($target.Identity)"
         Invoke-Capture -Scenario 'writes' -Name $target.Writes -Environment $environment
+
+        # The second scenario that writes: a message whose recipients are replaced, marked read and
+        # unread, submitted, moved and swept up. Self-cleaning like the first, and it declares two
+        # server-assigned ids rather than one, because a move mints a new one and says so nowhere.
+        #
+        # Its RopSubmitMessage is captured as a *refusal*. A successful submit would send real mail
+        # on every Verify-Fixtures.ps1 run and settle on its own schedule, which no byte-for-byte
+        # corpus can hold; the successful send is in mapi-client's live suite instead.
+        Write-Step "Capturing $($target.Acts) from $($target.Identity)"
+        Invoke-Capture -Scenario 'acts' -Name $target.Acts -Environment $environment
     }
 
     if (-not $SkipRefused) {

@@ -279,6 +279,21 @@ pub(crate) enum Command {
         discard: bool,
     },
 
+    /// Hand a message that is already in the mailbox to the transport.
+    ///
+    /// The other half of `send`, for a draft written earlier — by `mapi-cli draft`, by Outlook, or
+    /// by anything else. **This sends real mail** to whatever recipients the draft already carries.
+    /// [MS-OXCROPS] §2.2.7.1
+    Submit {
+        /// Which folder it is in.
+        #[arg(long, value_name = "FOLDER", default_value = "drafts")]
+        folder: String,
+
+        /// The message id, as `0x...`.
+        #[arg(long, value_name = "ID")]
+        id: String,
+    },
+
     /// Move or copy messages between two folders.
     ///
     /// *Archiving*, as far as MAPI has such an operation. Both folders are opened in the same ROP

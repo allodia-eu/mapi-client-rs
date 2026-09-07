@@ -8,6 +8,7 @@
 //! This file is the arguments, the redaction rules and the dispatch. The conversation itself is in
 //! [`mod@session`], which is the half that grows with every phase.
 
+mod acts;
 mod items;
 mod session;
 mod writes;
@@ -19,6 +20,7 @@ use clap::Args;
 use mapi_client::MapiClient;
 
 use crate::capture::{Recorder, scenario_directory, write_scenario};
+use crate::scenario::acts::acts;
 use crate::scenario::items::items;
 use crate::scenario::session::session;
 use crate::scenario::writes::writes;
@@ -80,10 +82,21 @@ pub(crate) enum Scenario {
     Items,
     /// A draft created with a recipient and an attachment, read back, and deleted again.
     ///
-    /// The only scenario in the corpus that writes. It is self-cleaning — the delete is the last
+    /// The first scenario in the corpus that writes. It is self-cleaning — the delete is the last
     /// thing it does — and it declares the message id the server minted, so a re-capture of an
     /// unchanged server produces the same bytes.
     Writes,
+    /// A message whose recipients are replaced, marked read and unread, submitted, moved, and
+    /// swept up.
+    ///
+    /// The second scenario that writes, and the only one that captures a `RopSubmitMessage` — as a
+    /// **refusal**, because a successful submit sends real mail on every re-capture and settles on
+    /// its own schedule. The successful send is in `mapi-client`'s live suite instead.
+    ///
+    /// Declares two server-assigned identifiers rather than one: a move mints a new message id and
+    /// reports it nowhere, so the scenario reads the destination folder to find out what the
+    /// message is now called.
+    Acts,
     /// A `Connect` the server refuses because it cannot map the distinguished name.
     ///
     /// Needs `--user-dn-override` naming something the server has never heard of.
@@ -96,6 +109,7 @@ impl Scenario {
             Self::Session => "session",
             Self::Items => "items",
             Self::Writes => "writes",
+            Self::Acts => "acts",
             Self::ConnectRefused => "connect-refused",
         }
     }
@@ -120,6 +134,7 @@ pub(crate) async fn capture(
         Scenario::Session => session(&client, &recorder).await?,
         Scenario::Items => items(&client, &recorder).await?,
         Scenario::Writes => writes(&client, &recorder).await?,
+        Scenario::Acts => acts(&client, &recorder).await?,
         Scenario::ConnectRefused => connect_refused(&client, &recorder).await?,
     }
 

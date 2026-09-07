@@ -29,6 +29,11 @@ fn known_codes_carry_the_specs_own_names() {
             0x0000_0503,
         ),
         (ErrorCode::TOO_MANY_RECIPIENTS, "TooManyRecips", 0x0000_0505),
+        (
+            ErrorCode::INVALID_RECIPIENTS,
+            "InvalidRecipients",
+            0x0000_0467,
+        ),
     ] {
         assert_eq!(code.as_u32(), raw);
         assert_eq!(code.name(), Some(name));

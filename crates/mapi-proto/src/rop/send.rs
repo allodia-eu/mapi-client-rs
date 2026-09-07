@@ -19,8 +19,8 @@
 //!   desynchronise the buffer, so [`ProgressResponse`] exists to be recognised rather than to be
 //!   driven.
 //! * **`RopSubmitMessage` is the one with no partial answer at all**, and the compensation is that
-//!   a message has to be *complete* before it is accepted. What "complete" means is
-//!   [MS-OXOMSG] §3.2.4.1's, not this layer's.
+//!   a message has to be *complete* before it is accepted. What "complete" means is [MS-OXOMSG]
+//!   §3.2.4.1's, not this layer's.
 //!
 //! [MS-OXCROPS] §2.2.7.1 — `RopSubmitMessage`
 //! [MS-OXCROPS] §2.2.4.6 — `RopMoveCopyMessages`
@@ -119,12 +119,12 @@ pub enum ReadFlags {
 }
 
 impl ReadFlags {
-    /// `rfSuppressReceipt`, `0x01`.
-    const SUPPRESS_RECEIPT: u8 = 0x01;
     /// `rfClearReadFlag`, `0x04`.
     const CLEAR_READ_FLAG: u8 = 0x04;
     /// `rfGenerateReceiptOnly`, `0x10`.
     const GENERATE_RECEIPT_ONLY: u8 = 0x10;
+    /// `rfSuppressReceipt`, `0x01`.
+    const SUPPRESS_RECEIPT: u8 = 0x01;
 
     /// The byte this is written as.
     #[must_use]

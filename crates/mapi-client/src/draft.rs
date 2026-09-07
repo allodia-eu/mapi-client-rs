@@ -181,12 +181,15 @@ impl<'a> NewMessage<'a> {
     /// **Where the message ends up afterwards is two properties, and they interact.** Measured on
     /// Exchange Server SE `15.02.2562.045` across all four combinations:
     ///
-    /// | [`keep_copy_in`](Self::keep_copy_in) | [`deleting_the_original`](Self::deleting_the_original) | where it ends up |
+    /// | [`keep_copy_in`] | [`deleting_the_original`] | where it ends up |
     /// |---|---|---|
     /// | set | unset | the folder named |
     /// | set | set | nowhere |
     /// | unset | unset | still where it was created |
     /// | unset | set | nowhere |
+    ///
+    /// [`keep_copy_in`]: Self::keep_copy_in
+    /// [`deleting_the_original`]: Self::deleting_the_original
     ///
     /// [MS-OXOMSG] §3.3.5.1.3 lists the two as independent, and they are not: the delete wins, and
     /// the "copy" is a move. A caller that sets both to be safe keeps no record at all.

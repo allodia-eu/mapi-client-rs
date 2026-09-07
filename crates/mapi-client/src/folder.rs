@@ -236,7 +236,10 @@ impl<'a> Folder<'a> {
     /// let inbox = logon.folder_id(WellKnownFolder::Inbox)?;
     /// let complete = logon
     ///     .folder(inbox)
-    ///     .set_read(&[MessageId::new(0x0100_0000_0000_0001)], ReadFlags::ReadQuietly)
+    ///     .set_read(
+    ///         &[MessageId::new(0x0100_0000_0000_0001)],
+    ///         ReadFlags::ReadQuietly,
+    ///     )
     ///     .await?;
     /// assert!(complete, "some of those messages are still unread");
     /// # Ok(())
