@@ -416,3 +416,80 @@ function Get-CargoPath {
 
     throw "cargo.exe not found on PATH or at $fallback. Is the Rust toolchain installed?"
 }
+
+# The MAPI virtual directory, resolved once per run. It does not change while a script is running,
+# and Get-MapiVirtualDirectory is slow enough that four calls are noticeable.
+$script:MapiVirtualDirectory = $null
+
+function Get-LabMailbox {
+    <#
+    .SYNOPSIS
+        Everything a live run needs about one mailbox, asked of Exchange rather than typed.
+
+    .DESCRIPTION
+        The endpoint, the distinguished name, the SMTP address and the session LCID, derived from
+        the Exchange management snapin. Nothing about anybody's deployment is committed to this
+        repository, so every script that talks to the lab starts here.
+
+        Shared because there were two copies and a third was about to appear. Capture-Fixtures.ps1
+        keeps its own: it needs the mailbox GUID and the blob inside the distinguished name to build
+        the scrub rules, which nothing else does, and pairing that down to this shape would leave it
+        deriving half its material twice.
+
+        The endpoint's ?MailboxId= parameter is not optional. Without it Exchange answers HTTP 400
+        with no X-ResponseCode header at all, which reads like the URL being wrong rather than
+        incomplete.
+
+    .PARAMETER Identity
+        The mailbox to ask about, as Get-Mailbox takes it.
+
+    .OUTPUTS
+        A PSCustomObject with Identity, Smtp, Dn, Guid, Endpoint, Language and Lcid.
+    #>
+    [CmdletBinding()]
+    [OutputType([psobject])]
+    param(
+        [Parameter(Mandatory)][string] $Identity
+    )
+
+    if (-not (Get-PSSnapin -Name 'Microsoft.Exchange.Management.PowerShell.SnapIn' -ErrorAction SilentlyContinue)) {
+        Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn
+    }
+
+    if (-not $script:MapiVirtualDirectory) {
+        $script:MapiVirtualDirectory = @(Get-MapiVirtualDirectory -Server $env:COMPUTERNAME)[0]
+        if (-not $script:MapiVirtualDirectory) {
+            throw "No MAPI virtual directory on $env:COMPUTERNAME."
+        }
+    }
+
+    $box = Get-Mailbox -Identity $Identity
+    $domain = ([string]$box.PrimarySmtpAddress -split '@')[-1]
+
+    # The session locale, matched to the mailbox so the run is coherent. It does not translate
+    # anything: folder names come back in whatever language the mailbox already holds them.
+    #
+    # Resolved defensively. A mailbox with no regional configuration reports no language at all,
+    # and casting a name that is not a culture throws - which would abort a whole run before a
+    # single request had been made, over a setting that only picks an LCID.
+    $regional = Get-MailboxRegionalConfiguration -Identity $Identity -ErrorAction SilentlyContinue
+    $language = if ($regional -and $regional.Language) { $regional.Language.Name } else { $null }
+    $lcid = 0x0409
+    if ($language) {
+        try {
+            $lcid = ([System.Globalization.CultureInfo]$language).LCID
+        } catch {
+            Write-Warn "$Identity reports language '$language', which is not a culture; using en-US."
+        }
+    }
+
+    [pscustomobject]@{
+        Identity = $Identity
+        Smtp     = [string]$box.PrimarySmtpAddress
+        Dn       = [string]$box.LegacyExchangeDN
+        Guid     = [guid]$box.ExchangeGuid
+        Endpoint = "$($script:MapiVirtualDirectory.InternalUrl)/emsmdb/?MailboxId=$($box.ExchangeGuid)@$domain"
+        Language = $language
+        Lcid     = $lcid
+    }
+}

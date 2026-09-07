@@ -166,6 +166,11 @@ caller, the script then runs with no helpers defined and exits 0. `Invoke-Gate.p
   ever disagree, that is a bug in the gate worth fixing before the change that exposed it.
 - **A green CI badge never means "verified against Exchange."** Live verification is
   `scripts\Test-Live.ps1`, run deliberately, on a machine that has the lab.
+- **Measure with `scripts\Invoke-Cli.ps1`, and read the item back.** It runs one `mapi-cli` command
+  against a named mailbox with everything but the password derived from Exchange, which is how a
+  claim in a doc comment gets made. The operations that change a mailbox report almost nothing — a
+  bare `ReturnValue`, or one byte — so what a response says is not evidence that the operation did
+  what it says. `mapi-cli state` is.
 - **Commit messages explain why, not what.** The diff already says what changed; the message says
   what was measured, what it cost, and what would otherwise be re-derived. See `git log`.
 - **Review fixes belong in the commit that introduced the code**, then restack — not in a follow-up

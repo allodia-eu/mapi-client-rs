@@ -8,8 +8,14 @@
     reading it as a whole and starts reading it as a diff. Capping the file forces the module split
     that keeps each layer — wire, http, rop, oxcdata — reviewable on its own.
 
-    Counts every line, including comments and blank lines. Comments are the spec citations; a file
-    that is 300 lines of code and 400 lines of citation is still 700 lines to read.
+    Counts every non-blank line, comments included. Comments are the spec citations; a file that is
+    300 lines of code and 400 lines of citation is still 700 lines to read.
+
+    Blank lines are not counted, because Measure-Object -Line does not count empty strings. That is
+    worth stating rather than leaving to be discovered: roughly a tenth of a well-commented file
+    here is blank, so `wc -l` overstates by that much, and planning a module split from it wastes
+    effort on files that are sixty lines under the limit. From Bash the equivalent is
+    `grep -cve '^[[:space:]]*$'`.
 
 .PARAMETER MaxLines
     The limit. Defaults to 500 and should not be raised without a good reason.
@@ -33,7 +39,7 @@ Assert-BootLoaded   # a dot-sourced file that fails to parse does not stop us; t
 if (-not $Path) { $Path = Get-RepoRoot }
 $root = (Resolve-Path -LiteralPath $Path).Path
 
-Write-Step "Checking Rust source files against the $MaxLines-line limit"
+Write-Step "Checking Rust source files against the $MaxLines-line limit (blank lines not counted)"
 
 $files = Get-ChildItem -Path $root -Filter '*.rs' -Recurse -File |
     Where-Object { $_.FullName -notmatch '\\target\\' }
@@ -67,6 +73,6 @@ if ($violations.Count -gt 0) {
 if ($files.Count -eq 0) {
     Write-Ok 'No Rust source files yet'
 } else {
-    Write-Ok "$($files.Count) file(s), longest is $longest lines ($longestOne)"
+    Write-Ok "$($files.Count) file(s), longest is $longest non-blank lines ($longestOne)"
 }
 exit 0
