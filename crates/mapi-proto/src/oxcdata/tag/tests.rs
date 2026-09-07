@@ -1,6 +1,6 @@
 mod catalogue;
 
-use catalogue::CATALOGUE;
+use catalogue::{CATALOGUE, MAIL_CATALOGUE};
 
 use super::*;
 use crate::oxcdata::columns::{
@@ -19,9 +19,14 @@ fn a_tag_is_type_then_id_on_the_wire() {
     assert_eq!(PropertyTag::SUBJECT.property_type(), PropertyType::String);
 }
 
+/// Both halves of the catalogue, which between them cover both halves of the constants.
+fn catalogued() -> impl Iterator<Item = (PropertyTag, u16, PropertyType, &'static str)> {
+    CATALOGUE.into_iter().chain(MAIL_CATALOGUE)
+}
+
 #[test]
 fn every_named_tag_carries_the_id_and_type_its_document_gives_it() {
-    for (tag, id, property_type, name) in CATALOGUE {
+    for (tag, id, property_type, name) in catalogued() {
         assert_eq!(tag.id(), id, "{name}");
         assert_eq!(tag.property_type(), property_type, "{name}");
         assert_eq!(tag.name(), Some(name));
@@ -34,7 +39,7 @@ fn every_named_tag_carries_the_id_and_type_its_document_gives_it() {
 /// impossible to see: the duplicate would simply shadow the first arm of `name`.
 #[test]
 fn no_two_constants_are_the_same_tag() {
-    let mut seen: Vec<u32> = CATALOGUE.iter().map(|(tag, ..)| tag.as_u32()).collect();
+    let mut seen: Vec<u32> = catalogued().map(|(tag, ..)| tag.as_u32()).collect();
     seen.sort_unstable();
     let count = seen.len();
     seen.dedup();
@@ -127,12 +132,11 @@ fn the_catalogue_names_every_tag_the_crate_has_a_constant_for() {
         .lines()
         .filter(|line| line.contains("=> ") && line.contains("PidTag"))
         .count();
+    let catalogued = catalogued().count();
 
     assert_eq!(
-        arms,
-        CATALOGUE.len(),
-        "names.rs has {arms} arms and the catalogue {}: nothing checks the id or the type of a \
-         constant the catalogue does not name",
-        CATALOGUE.len()
+        arms, catalogued,
+        "names.rs has {arms} arms and the catalogue {catalogued}: nothing checks the id or the \
+         type of a constant the catalogue does not name"
     );
 }

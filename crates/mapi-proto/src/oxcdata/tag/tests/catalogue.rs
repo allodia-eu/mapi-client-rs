@@ -2,9 +2,14 @@
 //!
 //! Transcribed from the specification rather than derived from the constant, so a mistyped constant
 //! is not confirmed by the test that checks it. Its own file because the table grows with every
-//! property and the behavioural tests do not.
+//! property and the behavioural tests do not — and its own [`mail`] submodule for the same reason,
+//! covering the tags [`tag::mail`](super::super) declares.
 
 use crate::oxcdata::{PropertyTag, PropertyType};
+
+mod mail;
+
+pub(super) use mail::MAIL_CATALOGUE;
 
 pub(super) const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 66] = [
     (

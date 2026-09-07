@@ -1,0 +1,107 @@
+//! The tags [`tag::mail`](crate::PropertyTag) declares, with the id and type [MS-OXPROPS] gives
+//! each.
+//!
+//! Split from its sibling for the same reason the constants themselves are: the table grows with
+//! every operation, and a file the reviewer skims is a file that stops checking anything.
+
+use crate::oxcdata::{PropertyTag, PropertyType};
+
+pub(in crate::oxcdata::tag::tests) const MAIL_CATALOGUE: [(PropertyTag, u16, PropertyType, &str);
+    16] = [
+    (
+        PropertyTag::CLIENT_SUBMIT_TIME,
+        0x0039,
+        PropertyType::Time,
+        "PidTagClientSubmitTime",
+    ),
+    (
+        PropertyTag::FLAG_COMPLETE_TIME,
+        0x1091,
+        PropertyType::Time,
+        "PidTagFlagCompleteTime",
+    ),
+    (
+        PropertyTag::FLAG_STATUS,
+        0x1090,
+        PropertyType::Integer32,
+        "PidTagFlagStatus",
+    ),
+    (
+        PropertyTag::FOLLOWUP_ICON,
+        0x1095,
+        PropertyType::Integer32,
+        "PidTagFollowupIcon",
+    ),
+    (
+        PropertyTag::REPLY_REQUESTED,
+        0x0C17,
+        PropertyType::Boolean,
+        "PidTagReplyRequested",
+    ),
+    (
+        PropertyTag::RESPONSE_REQUESTED,
+        0x0063,
+        PropertyType::Boolean,
+        "PidTagResponseRequested",
+    ),
+    (
+        PropertyTag::SENDER_ADDRESS_TYPE,
+        0x0C1E,
+        PropertyType::String,
+        "PidTagSenderAddressType",
+    ),
+    (
+        PropertyTag::SENDER_ENTRY_ID,
+        0x0C19,
+        PropertyType::Binary,
+        "PidTagSenderEntryId",
+    ),
+    (
+        PropertyTag::SENDER_SEARCH_KEY,
+        0x0C1D,
+        PropertyType::Binary,
+        "PidTagSenderSearchKey",
+    ),
+    (
+        PropertyTag::SENT_MAIL_SVR_EID,
+        0x6740,
+        PropertyType::ServerId,
+        "PidTagSentMailSvrEID",
+    ),
+    (
+        PropertyTag::SENT_REPRESENTING_ADDRESS_TYPE,
+        0x0064,
+        PropertyType::String,
+        "PidTagSentRepresentingAddressType",
+    ),
+    (
+        PropertyTag::SENT_REPRESENTING_EMAIL_ADDRESS,
+        0x0065,
+        PropertyType::String,
+        "PidTagSentRepresentingEmailAddress",
+    ),
+    (
+        PropertyTag::SENT_REPRESENTING_ENTRY_ID,
+        0x0041,
+        PropertyType::Binary,
+        "PidTagSentRepresentingEntryId",
+    ),
+    (
+        PropertyTag::SENT_REPRESENTING_NAME,
+        0x0042,
+        PropertyType::String,
+        "PidTagSentRepresentingName",
+    ),
+    (
+        PropertyTag::SENT_REPRESENTING_SEARCH_KEY,
+        0x003B,
+        PropertyType::Binary,
+        "PidTagSentRepresentingSearchKey",
+    ),
+    (
+        PropertyTag::TODO_ITEM_FLAGS,
+        0x0E2B,
+        PropertyType::Integer32,
+        "PidTagToDoItemFlags",
+    ),
+];
