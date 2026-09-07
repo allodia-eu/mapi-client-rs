@@ -42,15 +42,21 @@ pub(crate) fn rop_list(rops: &[u8]) -> Vec<(u8, &[u8])> {
             // front of them, which is the field an implementation gets wrong by exactly two.
             0x0A => 5 + u16_at(at + 3),
             0x0C | 0x25 => 5, // RopSaveChangesMessage / RopSaveChangesAttachment
+            0x0D => 7,        // RopRemoveAllRecipients: a four-byte Reserved the server ignores
             0x0E => modify_recipients(rops, at),
             0x1E => 7 + 8 * u16_at(at + 5), // RopDeleteMessages: MessageIdCount, then the ids
             0x23 => 4,                      // RopCreateAttachment
             0x2B => 9,                      // RopOpenStream: a PropertyTag and an OpenModeFlags
             0x2C => 5,                      // RopReadStream: a two-byte ByteCount
             0x2D => 5 + u16_at(at + 3),     // RopWriteStream: DataSize, then the data
+            0x32 => 4,                      // RopSubmitMessage: a SubmitFlags byte
+            // RopMoveCopyMessages: two handle indices, MessageIdCount, the ids, then
+            // WantAsynchronous and WantCopy at the *end* rather than in front of the list.
+            0x33 => 8 + 8 * u16_at(at + 4),
             0x43 => 11,                     // RopLongTermIdFromId: an 8-byte ObjectId
             0x44 => 27,                     // RopIdFromLongTermId: a 24-byte LongTermID
             0x5D => 3,                      // RopCommitStream
+            0x66 => 7 + 8 * u16_at(at + 5), // RopSetReadFlags: ReadFlags, a count, then the ids
             0xFE => 14 + u16_at(at + 12),   // RopLogon: EssdnSize counts the NUL
             other => panic!("ROP 0x{other:02X} is not one this crate sends"),
         };

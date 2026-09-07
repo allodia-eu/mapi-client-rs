@@ -16,7 +16,8 @@
 
 use mapi_proto::{
     AttachmentNumber, FolderId, MessageClass, MessageId, ObjectHandle, PropertyProblem,
-    PropertyTag, PropertyValue, RopBatch, RopResponse, TaggedValue,
+    PropertyTag, PropertyValue, RopBatch, RopId, RopResponse, ServerEntryId, SubmitFlags,
+    TaggedValue,
 };
 
 use crate::connection::Connection;
@@ -58,6 +59,9 @@ pub struct NewMessage<'a> {
     properties: Vec<TaggedValue>,
     recipients: Vec<mapi_proto::Recipient>,
     attachments: Vec<NewAttachment>,
+    sent_items: Option<FolderId>,
+    delete_after_submit: bool,
+    submit: bool,
 }
 
 impl<'a> NewMessage<'a> {
@@ -75,6 +79,9 @@ impl<'a> NewMessage<'a> {
             properties: Vec::new(),
             recipients: Vec::new(),
             attachments: Vec::new(),
+            sent_items: None,
+            delete_after_submit: false,
+            submit: false,
         }
     }
 
@@ -115,6 +122,72 @@ impl<'a> NewMessage<'a> {
         self
     }
 
+    /// Keeps a copy of the sent message in a folder — Sent Items, ordinarily.
+    ///
+    /// `PidTagSentMailSvrEID`, and a builder method rather than a property a caller remembers
+    /// because of what forgetting it does: [MS-OXOMSG] §2.2.3.10 makes the copy conditional on the
+    /// property being present, so a message sent without it is delivered and leaves no record of
+    /// having been sent. That is a surprise to a user and not to the protocol.
+    ///
+    /// The folder must not be a search folder, and the account needs write permission on it.
+    ///
+    /// Ignored by [`save`](Self::save), which submits nothing.
+    ///
+    /// [MS-OXOMSG] §2.2.3.10 — `PidTagSentMailSvrEID`
+    #[must_use]
+    pub const fn keep_copy_in(mut self, folder: FolderId) -> Self {
+        self.sent_items = Some(folder);
+        self
+    }
+
+    /// Removes the original once the message has gone.
+    ///
+    /// `PidTagDeleteAfterSubmit`. The other half of what makes sending tidy: without it the
+    /// message stays in the folder it was created in as well as being sent, so a client that
+    /// drafts into Drafts and sends leaves the draft behind for good.
+    ///
+    /// Ignored by [`save`](Self::save), which submits nothing — and the property is written all
+    /// the same, because a draft saved now and sent later means the same thing by it.
+    ///
+    /// [MS-OXOMSG] §2.2.3.8 — `PidTagDeleteAfterSubmit`
+    #[must_use]
+    pub const fn deleting_the_original(mut self) -> Self {
+        self.delete_after_submit = true;
+        self
+    }
+
+    /// Creates the item, commits it and hands it to the transport.
+    ///
+    /// *"Send a message"*. Everything [`save`](Self::save) does, and then a `RopSubmitMessage` in
+    /// the same buffer as the final save — which is the only order that works, because the submit
+    /// acts on what is in the store rather than on the handle's uncommitted state.
+    ///
+    /// **This sends real mail**, and what comes back says only that the server accepted it. A bad
+    /// address produces a non-delivery report in the sender's Inbox some time later, not an error
+    /// here.
+    ///
+    /// The message has to be complete before the server will take it, and what "complete" means is
+    /// [MS-OXOMSG] §3.2.4.1's — recipients, and the sender properties. This crate does not decide
+    /// which of those to write for a caller, for the same reason it does not decide what makes a
+    /// contact a contact.
+    ///
+    /// # Errors
+    ///
+    /// As [`save`](Self::save), plus whatever the submit is refused with —
+    /// [`ecTooManyRecips`](mapi_proto::ErrorCode::TOO_MANY_RECIPIENTS), which means **none** of the
+    /// recipients got it, and
+    /// [`ecMaxSubmissionExceeded`](mapi_proto::ErrorCode::MAX_SUBMISSION_EXCEEDED) for a message
+    /// larger than `PidTagMaximumSubmitMessageSize` on the Store object.
+    ///
+    /// **A refused submit leaves the message saved.** The save happened; only the sending did not,
+    /// so what is left behind is an ordinary draft rather than nothing.
+    ///
+    /// [MS-OXCROPS] §2.2.7.1 — `RopSubmitMessage`
+    pub async fn send(mut self) -> Result<SavedMessage> {
+        self.submit = true;
+        self.write().await
+    }
+
     /// Creates the item and commits it, reporting the id it was given.
     ///
     /// **Two round trips, plus one per attachment and one more per 16 KiB of attachment content.**
@@ -132,6 +205,10 @@ impl<'a> NewMessage<'a> {
     /// A refusal before the final save leaves the mailbox unchanged. A refusal *of* the final save
     /// does too, for the same reason.
     pub async fn save(self) -> Result<SavedMessage> {
+        self.write().await
+    }
+
+    async fn write(self) -> Result<SavedMessage> {
         let Self {
             connection,
             logon,
@@ -140,12 +217,27 @@ impl<'a> NewMessage<'a> {
             properties,
             recipients,
             attachments,
+            sent_items,
+            delete_after_submit,
+            submit,
         } = self;
 
         let mut values = vec![TaggedValue::new(
             PropertyTag::MESSAGE_CLASS,
             PropertyValue::String(class.as_str().into()),
         )?];
+        if let Some(folder) = sent_items {
+            values.push(TaggedValue::new(
+                PropertyTag::SENT_MAIL_SVR_EID,
+                PropertyValue::ServerId(ServerEntryId::folder(folder)),
+            )?);
+        }
+        if delete_after_submit {
+            values.push(TaggedValue::new(
+                PropertyTag::DELETE_AFTER_SUBMIT,
+                PropertyValue::Boolean(true),
+            )?);
+        }
         values.extend(properties);
 
         let mut batch = RopBatch::new();
@@ -193,11 +285,12 @@ impl<'a> NewMessage<'a> {
         // refused save is very likely followed by a release that ran. Releasing again would hand
         // back a handle value the server is free to have reissued, which is worse than leaking
         // one the Session Context reclaims at disconnect anyway.
-        let id = commit(connection, handle).await?;
+        let id = commit(connection, handle, submit).await?;
         Ok(SavedMessage {
             id,
             attachments: numbers,
             problems,
+            sent: submit,
         })
     }
 }
@@ -213,13 +306,41 @@ async fn abandon(connection: &mut Connection, handle: ObjectHandle) {
     let _ = connection.execute(batch, "releasing a message").await;
 }
 
-/// Saves the message and gives its handle back, in one round trip.
-async fn commit(connection: &mut Connection, handle: ObjectHandle) -> Result<MessageId> {
+/// Saves the message, optionally submits it, and gives its handle back — all in one round trip.
+///
+/// The order is the whole point. `RopSubmitMessage` acts on what is in the store, so a submit
+/// before the save sends the message as it was before the properties, the recipients and the
+/// attachments were written — which is to say an empty one, successfully.
+async fn commit(
+    connection: &mut Connection,
+    handle: ObjectHandle,
+    submit: bool,
+) -> Result<MessageId> {
     let mut batch = RopBatch::new();
     let message = batch.bind(handle);
-    batch.save_message(message).release(message);
+    batch.save_message(message);
+    if submit {
+        batch.submit_message(message, SubmitFlags::None);
+    }
+    batch.release(message);
 
-    let execution = connection.execute(batch, "saving a message").await?;
+    let what = if submit {
+        "sending a message"
+    } else {
+        "saving a message"
+    };
+    let execution = connection.execute(batch, what).await?;
+    if submit
+        && !execution
+            .responses()
+            .iter()
+            .any(|response| response.succeeded(RopId::SUBMIT_MESSAGE))
+    {
+        return Err(Error::Unexpected {
+            expected: "a RopSubmitMessage response",
+            found: "no submission in the batch's responses",
+        });
+    }
     execution
         .responses()
         .iter()
@@ -237,6 +358,7 @@ pub struct SavedMessage {
     id: MessageId,
     attachments: Vec<AttachmentNumber>,
     problems: Vec<PropertyProblem>,
+    sent: bool,
 }
 
 impl SavedMessage {
@@ -267,6 +389,15 @@ impl SavedMessage {
     pub fn is_clean(&self) -> bool {
         self.problems.is_empty()
     }
+
+    /// Whether the message was handed to the transport as well as saved.
+    ///
+    /// `true` only after [`NewMessage::send`]. It says the server accepted the message, which is
+    /// all a `RopSubmitMessage` response says — delivery arrives in a mailbox, not in a response.
+    #[must_use]
+    pub const fn is_sent(&self) -> bool {
+        self.sent
+    }
 }
 
 #[cfg(test)]
@@ -279,10 +410,21 @@ mod tests {
             id: MessageId::new(0x0D01_0000_0000_0042),
             attachments: vec![AttachmentNumber::new(0)],
             problems: Vec::new(),
+            sent: false,
         };
         assert_eq!(saved.id(), MessageId::new(0x0D01_0000_0000_0042));
         assert_eq!(saved.attachments(), [AttachmentNumber::new(0)]);
         assert!(saved.is_clean());
         assert!(saved.problems().is_empty());
+        // A save is not a send, and the difference is worth being able to print: the two paths
+        // differ by one ROP and produce the same id.
+        assert!(!saved.is_sent());
+        assert!(
+            SavedMessage {
+                sent: true,
+                ..saved
+            }
+            .is_sent()
+        );
     }
 }

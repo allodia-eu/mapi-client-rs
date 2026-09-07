@@ -91,6 +91,81 @@ pub(crate) fn delete_messages_response(slot: u8, partial: bool) -> Vec<u8> {
         .done()
 }
 
+/// A `RopSubmitMessage` success response, which has no body at all.
+///
+/// The whole of what the protocol says about a send: the server took the message.
+///
+/// [MS-OXCROPS] §2.2.7.1.2
+pub(crate) fn submit_message_response(slot: u8) -> Vec<u8> {
+    Bytes::new().u8(0x32).u8(slot).u32(0).done()
+}
+
+/// A `RopRemoveAllRecipients` success response, which has no body either.
+///
+/// [MS-OXCROPS] §2.2.6.4.2
+pub(crate) fn remove_all_recipients_response(slot: u8) -> Vec<u8> {
+    Bytes::new().u8(0x0D).u8(slot).u32(0).done()
+}
+
+/// A `RopMoveCopyMessages` success response, whose one byte says whether it moved everything.
+///
+/// [MS-OXCROPS] §2.2.4.6.2
+pub(crate) fn move_copy_messages_response(slot: u8, partial: bool) -> Vec<u8> {
+    Bytes::new()
+        .u8(0x33)
+        .u8(slot)
+        .u32(0)
+        .u8(u8::from(partial))
+        .done()
+}
+
+/// The `RopMoveCopyMessages` **null-destination failure**, which carries a body where a refusal is
+/// supposed to stop — and whose `DestHandleIndex` is four bytes where the request's is one.
+///
+/// Only a scripted server can produce this: a live one answers it for a destination handle that
+/// resolved to nothing, which is a state a working client never reaches.
+///
+/// [MS-OXCROPS] §2.2.4.6.3
+pub(crate) fn move_copy_null_destination(slot: u8, destination: u32, partial: bool) -> Vec<u8> {
+    Bytes::new()
+        .u8(0x33)
+        .u8(slot)
+        .u32(0x0000_0503)
+        .u32(destination)
+        .u8(u8::from(partial))
+        .done()
+}
+
+/// A `RopSetReadFlags` success response, whose one byte says whether it changed everything.
+///
+/// [MS-OXCROPS] §2.2.6.10.2
+pub(crate) fn set_read_flags_response(slot: u8, partial: bool) -> Vec<u8> {
+    Bytes::new()
+        .u8(0x66)
+        .u8(slot)
+        .u32(0)
+        .u8(u8::from(partial))
+        .done()
+}
+
+/// A `RopProgress` response, which arrives in place of a result the client asked for
+/// synchronously.
+///
+/// Nothing this crate sends asks for one — every such ROP carries `WantAsynchronous = 0` — so a
+/// scripted server is the only way to see what happens when a server sends one anyway.
+///
+/// [MS-OXCROPS] §2.2.8.13.2
+pub(crate) fn progress_response(slot: u8, completed: u32, total: u32) -> Vec<u8> {
+    Bytes::new()
+        .u8(0x50)
+        .u8(slot)
+        .u32(0)
+        .u8(0) // LogonId
+        .u32(completed)
+        .u32(total)
+        .done()
+}
+
 /// A `RopSetProperties` success response, listing the properties the server refused.
 ///
 /// A `RopSetProperties` that refused every property still succeeds, which is why the list travels

@@ -5,8 +5,8 @@
 //! read that follows, so naming a folder costs nothing and reading one costs a single round trip.
 
 use mapi_proto::{
-    DeleteMessagesResponse, FolderDepth, FolderId, MessageClass, MessageId, ObjectHandle, RopBatch,
-    RopResponse,
+    DeleteMessagesResponse, FolderDepth, FolderId, MessageClass, MessageId,
+    MoveCopyMessagesResponse, ObjectHandle, ReadFlags, RopBatch, RopResponse, SetReadFlagsResponse,
 };
 
 use crate::connection::Connection;
@@ -149,6 +149,108 @@ impl<'a> Folder<'a> {
             })
     }
 
+    /// Moves messages out of this folder and into another.
+    ///
+    /// *"Archive a message"*: the two folders are opened in the same buffer as the move, so this
+    /// is one round trip however far apart they are in the hierarchy.
+    ///
+    /// **The answer is not the return value**, as for [`delete_messages`](Self::delete_messages).
+    /// `RopMoveCopyMessages` succeeds whether or not it moved everything it was given, and reports
+    /// the difference in a flag — so this hands back whether the move was complete.
+    ///
+    /// Sent synchronously. A server that ran it asynchronously anyway would answer
+    /// [`RopProgress`](mapi_proto::RopResponse::Progress) instead of a result, and that is
+    /// reported as [`Error::Unexpected`] rather than read as success.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Rop`] if the server refused the move — `ecAccessDenied` for a destination this
+    /// account may not write to, and
+    /// [`ecDstNullObject`](mapi_proto::ErrorCode::NULL_DESTINATION_OBJECT) for a destination folder
+    /// that could not be opened at all — plus whatever the round trip failed with.
+    ///
+    /// [MS-OXCROPS] §2.2.4.6 — `RopMoveCopyMessages`
+    pub async fn move_messages(self, messages: &[MessageId], to: FolderId) -> Result<bool> {
+        self.move_or_copy(messages, to, false).await
+    }
+
+    /// Copies messages from this folder into another, leaving the originals in place.
+    ///
+    /// One byte of the request apart from [`move_messages`](Self::move_messages), and the same
+    /// caveats.
+    ///
+    /// # Errors
+    ///
+    /// As [`move_messages`](Self::move_messages).
+    pub async fn copy_messages(self, messages: &[MessageId], to: FolderId) -> Result<bool> {
+        self.move_or_copy(messages, to, true).await
+    }
+
+    async fn move_or_copy(self, messages: &[MessageId], to: FolderId, copy: bool) -> Result<bool> {
+        let mut batch = RopBatch::new();
+        let logon = batch.bind(self.logon);
+        let source = batch.open_folder(logon, self.id);
+        let destination = batch.open_folder(logon, to);
+        batch
+            .move_copy_messages(source, destination, messages, copy)
+            .release(source)
+            .release(destination);
+
+        let what = if copy {
+            "copying messages"
+        } else {
+            "moving messages"
+        };
+        let execution = self.connection.execute(batch, what).await?;
+        complete(execution.responses(), what)
+    }
+
+    /// Marks messages in this folder read or unread.
+    ///
+    /// *"Flag a message"* in the read-state sense, which in MAPI is a different operation from the
+    /// follow-up flag — see [`FlagStatus`](mapi_proto::FlagStatus) for the other one.
+    ///
+    /// **This is not only a property write.** [MS-OXCMSG] §2.2.3.10 has the server send the read
+    /// receipt the sender asked for as part of marking a message read, so a client doing it on a
+    /// user's behalf wants [`ReadFlags::ReadQuietly`] rather than the default — telling a sender
+    /// the user has read something they have not looked at is not a thing to do by accident.
+    ///
+    /// Addressed at the folder and a list of ids rather than at each message, so marking a whole
+    /// page of a contents table read is one ROP.
+    ///
+    /// **The answer is not the return value.** As with the move and the delete, the ROP succeeds
+    /// whether or not it changed everything it was given, so this hands back whether it did.
+    ///
+    /// ```no_run
+    /// # use mapi_client::{Logon, MessageId, ReadFlags, WellKnownFolder};
+    /// # async fn example(logon: &mut Logon) -> Result<(), mapi_client::Error> {
+    /// let inbox = logon.folder_id(WellKnownFolder::Inbox)?;
+    /// let complete = logon
+    ///     .folder(inbox)
+    ///     .set_read(&[MessageId::new(0x0100_0000_0000_0001)], ReadFlags::ReadQuietly)
+    ///     .await?;
+    /// assert!(complete, "some of those messages are still unread");
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Rop`] if the server refused it, plus whatever the round trip failed with.
+    ///
+    /// [MS-OXCROPS] §2.2.6.10 — `RopSetReadFlags`
+    pub async fn set_read(self, messages: &[MessageId], flags: ReadFlags) -> Result<bool> {
+        let mut batch = RopBatch::new();
+        let logon = batch.bind(self.logon);
+        let folder = batch.open_folder(logon, self.id);
+        batch
+            .set_read_flags(folder, flags, messages)
+            .release(folder);
+
+        let execution = self.connection.execute(batch, "setting read flags").await?;
+        complete(execution.responses(), "setting read flags")
+    }
+
     /// The folders directly inside this one — its hierarchy table.
     ///
     /// Immediate children only. For everything below, at every level, see
@@ -238,4 +340,44 @@ impl<'a> Folder<'a> {
             id: self.id,
         }
     }
+}
+
+/// Whether an operation over a list of messages did all of it.
+///
+/// The three ROPs that take a list of message ids — move, copy and set-read — each report this the
+/// same way, in a `PartialCompletion` byte the return value says nothing about. A caller that read
+/// only the return value would report messages that are still where they were as moved.
+///
+/// A [`RopProgress`](RopResponse::Progress) is reported rather than counted as either answer:
+/// every one of these is sent with `WantAsynchronous = 0`, so one arriving means the server ran the
+/// operation on its own schedule and the flag this function looks for was never sent.
+fn complete(responses: &[RopResponse], what: &'static str) -> Result<bool> {
+    if let Some(progress) = responses.iter().find_map(RopResponse::as_progress) {
+        return Err(Error::Unexpected {
+            expected: "a result, because the request said WantAsynchronous = 0",
+            found: if progress.total() == 0 {
+                "a RopProgress: the server ran it asynchronously anyway"
+            } else {
+                "a RopProgress: the server ran it asynchronously anyway, and it is still running"
+            },
+        });
+    }
+
+    let partial = responses
+        .iter()
+        .find_map(|response| {
+            response
+                .as_moved_messages()
+                .map(MoveCopyMessagesResponse::is_partial)
+                .or_else(|| {
+                    response
+                        .as_read_flags()
+                        .map(SetReadFlagsResponse::is_partial)
+                })
+        })
+        .ok_or(Error::Unexpected {
+            expected: what,
+            found: "no outcome for it in the batch's responses",
+        })?;
+    Ok(!partial)
 }
