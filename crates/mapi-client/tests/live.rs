@@ -45,6 +45,11 @@ mod named;
 /// the `items` suite asserts are exact.
 mod writes;
 
+/// Acting on an item once it exists: sending mail to the other lab mailbox, archiving a message,
+/// and marking one read. Self-cleaning like `writes`, and in both mailboxes rather than one —
+/// which is what makes it the only suite here that needs the second set of variables.
+mod acts;
+
 /// Reads one of the variables that describe the lab, failing with the name of the missing one.
 ///
 /// Deliberately a hard failure rather than a skip: this test only runs when somebody asked for it
@@ -69,12 +74,15 @@ fn builder() -> MapiClientBuilder {
             required("MAPI_LIVE_USERNAME"),
             required("MAPI_LIVE_PASSWORD"),
         ))
-        .timeout(Duration::from_secs(30))
+        .timeout(LIVE_TIMEOUT)
 }
 
 fn client() -> MapiClient {
     builder().build().expect("a client")
 }
+
+/// How long a live request is given before it is called a failure.
+const LIVE_TIMEOUT: Duration = Duration::from_secs(30);
 
 /// `Connect`, `RopLogon`, both kinds of table, paging, and `Disconnect` — the whole path this
 /// crate claims to implement, against a server that has never heard of it.
@@ -527,7 +535,7 @@ async fn a_wrong_password_is_reported_as_a_refusal_not_a_mystery() {
             required("MAPI_LIVE_USERNAME"),
             "definitely-not-the-password",
         ))
-        .timeout(Duration::from_secs(30))
+        .timeout(LIVE_TIMEOUT)
         .build()
         .expect("a client");
 

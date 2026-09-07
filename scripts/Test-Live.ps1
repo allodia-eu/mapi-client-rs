@@ -17,6 +17,15 @@
         MAPI_LIVE_USERNAME   an account with rights to that mailbox.
         MAPI_LIVE_PASSWORD   its password.
 
+    Three more are optional, and name a *second* mailbox for the send test to deliver to:
+
+        MAPI_LIVE_SECOND_ENDPOINT, MAPI_LIVE_SECOND_USER_DN, MAPI_LIVE_SECOND_USERNAME
+
+    That test needs them because RopSubmitMessage answers with nothing at all - the only evidence
+    it did anything is in the recipient's mailbox, which the sender cannot read. Running with
+    -Mailbox developer,developer2 sets them for each run in turn, so each mailbox sends to the
+    other. The password is the one already given.
+
     Two traps worth not rediscovering:
 
       * Basic authentication must be enabled on the MAPI virtual directory, because that is the
@@ -112,6 +121,18 @@ if ($Mailbox.Count -gt 0) {
     $vdir = @(Get-MapiVirtualDirectory -Server $env:COMPUTERNAME)[0]
     if (-not $vdir) { throw "No MAPI virtual directory on $env:COMPUTERNAME." }
 
+    # The send test needs a second mailbox, because the evidence that a RopSubmitMessage did
+    # anything is in the mailbox it was sent to and the sender cannot read it. Every run addresses
+    # the *next* mailbox in the list, wrapping - so with two mailboxes each sends to the other, and
+    # with one there is nothing to set and the send test says so by name rather than being skipped
+    # silently.
+    $partners = @{}
+    for ($i = 0; $i -lt $Mailbox.Count; $i++) {
+        if ($Mailbox.Count -gt 1) {
+            $partners[$Mailbox[$i]] = $Mailbox[($i + 1) % $Mailbox.Count]
+        }
+    }
+
     foreach ($identity in $Mailbox) {
         $box = Get-Mailbox -Identity $identity
         $regional = Get-MailboxRegionalConfiguration -Identity $identity -ErrorAction SilentlyContinue
@@ -138,8 +159,21 @@ if ($Mailbox.Count -gt 0) {
         }
         $env:MAPI_LIVE_LOCALE = '0x{0:x4}' -f $lcid
 
+        # Whom this run sends to. The same password: the lab's mailboxes share one, and a second
+        # place to type a password is not an improvement.
+        foreach ($name in 'MAPI_LIVE_SECOND_ENDPOINT', 'MAPI_LIVE_SECOND_USER_DN', 'MAPI_LIVE_SECOND_USERNAME') {
+            Remove-Item "env:$name" -ErrorAction SilentlyContinue
+        }
+        if ($partners.ContainsKey($identity)) {
+            $other = Get-Mailbox -Identity $partners[$identity]
+            $otherDomain = ([string]$other.PrimarySmtpAddress -split '@')[-1]
+            $env:MAPI_LIVE_SECOND_ENDPOINT = "$($vdir.InternalUrl)/emsmdb/?MailboxId=$($other.ExchangeGuid)@$otherDomain"
+            $env:MAPI_LIVE_SECOND_USER_DN  = [string]$other.LegacyExchangeDN
+            $env:MAPI_LIVE_SECOND_USERNAME = [string]$other.PrimarySmtpAddress
+        }
+
         Write-Host ''
-        Write-Host "  == $identity ($(if ($language) { $language } else { 'no language set' })) ==" -ForegroundColor White
+        Write-Host "  == $identity ($(if ($language) { $language } else { 'no language set' }))$(if ($partners.ContainsKey($identity)) { ", sending to $($partners[$identity])" }) ==" -ForegroundColor White
         Invoke-LiveSuite
     }
 

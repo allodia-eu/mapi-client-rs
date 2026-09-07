@@ -48,8 +48,13 @@ async fn every_catalogued_property_resolves_and_round_trips() {
         .expect("RopLogon");
     let mailbox = logon.mailbox().mailbox_guid();
 
+    // Registered rather than resolved. A store allocates an id the first time something writes the
+    // property, so a mailbox that has never held a flagged message has no id for
+    // `PidLidToDoTitle` — and this test would then be asserting how the mailbox had been used
+    // rather than anything about the client. Asking with `CreateIfMissing` writes to the store's
+    // mapping table, once, which is a deliberate act on a lab mailbox.
     let resolved = logon
-        .resolve_names(NamedProperty::ALL)
+        .register_names(NamedProperty::ALL)
         .await
         .expect("RopGetPropertyIdsFromNames");
     let entries: Vec<NamedPropertyEntry> = resolved.iter().cloned().collect();
@@ -114,7 +119,7 @@ async fn a_stores_ids_are_its_own_and_distinct_within_it() {
         .expect("RopLogon");
 
     let resolved = logon
-        .resolve_names(NamedProperty::ALL)
+        .register_names(NamedProperty::ALL)
         .await
         .expect("RopGetPropertyIdsFromNames");
 
