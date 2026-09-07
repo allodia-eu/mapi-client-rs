@@ -28,9 +28,15 @@ use crate::oxcdata::PropertyTag;
 impl PropertyTag {
     /// `PidTagClientSubmitTime`, `0x00390040` — when the message was submitted, in UTC.
     ///
-    /// Written by the server at submit time, not by the client ([MS-OXOMSG] §3.3.5.1.3), so it is
-    /// the cheapest evidence that a `RopSubmitMessage` did something: a draft that was never
-    /// submitted does not have it.
+    /// Written by the server rather than by the client ([MS-OXOMSG] §3.3.5.1.3).
+    ///
+    /// **It is not evidence that anything was submitted.** [MS-OXOMSG] §2.2.3.11 has the server set
+    /// it "when the e-mail message is submitted", which invites reading its presence as a send. On
+    /// Exchange Server SE `15.02.2562.045` a draft created by `RopCreateMessage` and committed by
+    /// `RopSaveChangesMessage`, with no `RopSubmitMessage` anywhere near it, already carries one —
+    /// so the property is set at save time. `mfUnsent` and `mfSubmitted` in
+    /// [`MESSAGE_FLAGS`](Self::MESSAGE_FLAGS) are what actually answer the question; see
+    /// [`MessageFlags::is_submitted`](crate::MessageFlags::is_submitted).
     ///
     /// [MS-OXOMSG] §2.2.3.11
     pub const CLIENT_SUBMIT_TIME: Self = Self(0x0039_0040);

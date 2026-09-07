@@ -3,11 +3,13 @@
 //! Every one of these is an ordinary use of `mapi-client` with nothing stubbed, which is the
 //! property that makes this binary worth having: what it prints is what the library saw.
 
+mod acts;
 mod items;
 mod writes;
 
 use std::collections::HashMap;
 
+pub(crate) use acts::{flag, mark, move_messages, send, state};
 pub(crate) use items::{contacts, events, message, messages};
 use mapi_client::{
     ContainerClass, EmailAddress, FOLDER_PROPERTIES, FolderId, Logon, NamedProperty,

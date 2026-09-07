@@ -8,6 +8,8 @@
 //!
 //! [MS-OXCMSG] — Message and Attachment Object Protocol
 
+use core::borrow::Borrow;
+
 use mapi_proto::{
     AttachmentNumber, FolderId, MessageId, MessageMode, ObjectHandle, OpenMessageResponse,
     PropertyProblem, PropertyTag, Recipient, RopBatch, RopId, RopResponse, SubmitFlags,
@@ -20,6 +22,11 @@ use crate::properties::Properties;
 use crate::stream::StreamRead;
 use crate::table::{TableKind, TableRead};
 use crate::target::{MessagePath, Target};
+
+/// An attachment of a message, and the message an attachment can turn out to be.
+mod attachment;
+
+pub use attachment::{Attachment, EmbeddedMessage};
 
 /// A message that has been named but not yet opened.
 #[derive(Debug)]
@@ -151,6 +158,7 @@ impl<'a> Message<'a> {
             connection: self.connection,
             path: self.path,
             properties: Vec::new(),
+            deletions: Vec::new(),
             recipients: Vec::new(),
             replace_recipients: false,
             submit: false,
@@ -225,11 +233,7 @@ impl<'a> Message<'a> {
     /// another message's table opens a different attachment or none at all.
     #[must_use]
     pub fn attachment(self, number: AttachmentNumber) -> Attachment<'a> {
-        Attachment {
-            connection: self.connection,
-            message: self.path,
-            number,
-        }
+        Attachment::new(self.connection, self.path, number)
     }
 }
 
@@ -239,6 +243,7 @@ pub struct MessageUpdate<'a> {
     connection: &'a mut Connection,
     path: MessagePath,
     properties: Vec<TaggedValue>,
+    deletions: Vec<PropertyTag>,
     recipients: Vec<Recipient>,
     replace_recipients: bool,
     submit: bool,
@@ -267,6 +272,31 @@ impl MessageUpdate<'_> {
         I: IntoIterator<Item = Recipient>,
     {
         self.recipients.extend(recipients);
+        self
+    }
+
+    /// Properties to remove, in the same round trip as the ones being written.
+    ///
+    /// **Removing is not writing a zero.** A property some protocols define by its *absence* has to
+    /// actually be absent: [MS-OXOFLAG] §2.2.1.1 has `PidTagFlagStatus` "present on the Message
+    /// object only if the object has been flagged", so a message carrying a zero there is a message
+    /// a conforming reader has no rule for. `RopDeleteProperties` is what makes it absent, and
+    /// [MS-OXCPRPT] §3.2.5.5 has the server answer `NotFound` for it afterwards rather than an
+    /// empty value.
+    ///
+    /// The deletes are sent after the writes and before the save, so "set these and remove those"
+    /// is one round trip and one commit — a caller doing it in two would leave the message in an
+    /// intermediate state that a reader could see.
+    ///
+    /// [MS-OXCROPS] §2.2.8.8 — `RopDeleteProperties`
+    #[must_use]
+    pub fn delete<I>(mut self, tags: I) -> Self
+    where
+        I: IntoIterator,
+        I::Item: Borrow<PropertyTag>,
+    {
+        self.deletions
+            .extend(tags.into_iter().map(|tag| *tag.borrow()));
         self
     }
 
@@ -320,6 +350,9 @@ impl MessageUpdate<'_> {
             MessageMode::ReadWrite,
         );
         batch.set_properties(message, &self.properties);
+        if !self.deletions.is_empty() {
+            batch.delete_properties(message, &self.deletions);
+        }
         if self.replace_recipients {
             batch.remove_all_recipients(message);
         }
@@ -370,146 +403,6 @@ fn submitted(responses: &[RopResponse]) -> Result<()> {
         expected: "a RopSubmitMessage response",
         found: "no submission in the batch's responses",
     })
-}
-
-/// One attachment of a message, named but not yet opened.
-#[derive(Debug)]
-pub struct Attachment<'a> {
-    connection: &'a mut Connection,
-    message: MessagePath,
-    number: AttachmentNumber,
-}
-
-impl<'a> Attachment<'a> {
-    /// Which attachment this is, within its message.
-    #[must_use]
-    pub const fn number(&self) -> AttachmentNumber {
-        self.number
-    }
-
-    /// The message it belongs to.
-    #[must_use]
-    pub const fn message_id(&self) -> MessageId {
-        self.message.id
-    }
-
-    /// The attachment's own properties: name, size, MIME type, and how its content is reached.
-    ///
-    /// Read [`PidTagAttachMethod`](mapi_proto::PropertyTag::ATTACH_METHOD) before anything else.
-    /// See [`AttachMethod`](mapi_proto::AttachMethod).
-    ///
-    /// [MS-OXCMSG] §2.2.2 — Attachment object properties
-    #[must_use]
-    pub fn properties(self) -> Properties<'a> {
-        Properties::for_target(self.connection, self.target())
-    }
-
-    /// The attachment's bytes.
-    ///
-    /// **Only correct when `PidTagAttachMethod` is `afByValue`.** An attachment whose method is
-    /// `afEmbeddedMessage` does not hold `PidTagAttachDataBinary` at all, and this then reports the
-    /// server's `NotFound` rather than an empty file — see [`embedded`](Self::embedded) for what to
-    /// do instead.
-    ///
-    /// [MS-OXCMSG] §2.2.2.7 — `PidTagAttachDataBinary`
-    #[must_use]
-    pub fn content(self) -> StreamRead<'a> {
-        self.stream(PropertyTag::ATTACH_DATA_BINARY)
-    }
-
-    /// Reads one property of the attachment whole.
-    #[must_use]
-    pub fn stream(self, tag: PropertyTag) -> StreamRead<'a> {
-        StreamRead::new(self.connection, self.target(), tag)
-    }
-
-    /// The message this attachment *is*, for an `afEmbeddedMessage` attachment.
-    ///
-    /// A forwarded mail is carried this way: the attachment has no bytes, and its content is
-    /// another Message object with its own subject, its own properties and its own attachments.
-    /// A client that only ever read [`content`](Self::content) would report it as empty.
-    ///
-    /// [MS-OXCROPS] §2.2.6.16 — `RopOpenEmbeddedMessage`
-    #[must_use]
-    pub fn embedded(self) -> EmbeddedMessage<'a> {
-        EmbeddedMessage {
-            connection: self.connection,
-            message: self.message,
-            number: self.number,
-        }
-    }
-
-    const fn target(&self) -> Target {
-        Target::Attachment {
-            message: self.message,
-            number: self.number,
-        }
-    }
-}
-
-/// The message inside an attachment.
-///
-/// Separate from [`Message`] because it is not named the same way: an embedded message has no
-/// folder and no id a caller could hold, only the attachment it lives in. Its id is reported by the
-/// open — see [`OpenMessageResponse::embedded_id`].
-#[derive(Debug)]
-pub struct EmbeddedMessage<'a> {
-    connection: &'a mut Connection,
-    message: MessagePath,
-    number: AttachmentNumber,
-}
-
-impl<'a> EmbeddedMessage<'a> {
-    /// Opens it, and reports its subject, its recipient count and the id it turned out to have.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Rop`] if the server refused any step of the chain. An attachment whose
-    /// `PidTagAttachMethod` is not `afEmbeddedMessage` is refused here rather than answered.
-    pub async fn open(self) -> Result<OpenMessageResponse> {
-        let mut batch = RopBatch::new();
-        let opened = self.target().open(&mut batch);
-        opened.release(&mut batch);
-
-        let execution = self
-            .connection
-            .execute(batch, "opening an embedded message")
-            .await?;
-        execution
-            .responses()
-            .iter()
-            .find_map(|response| response.as_open_message(RopId::OPEN_EMBEDDED_MESSAGE))
-            .cloned()
-            .ok_or(Error::Unexpected {
-                expected: "a RopOpenEmbeddedMessage response",
-                found: "no opened message in the batch's responses",
-            })
-    }
-
-    /// The embedded message's own properties.
-    #[must_use]
-    pub fn properties(self) -> Properties<'a> {
-        Properties::for_target(self.connection, self.target())
-    }
-
-    /// Reads one property of the embedded message whole — its body, most usefully.
-    #[must_use]
-    pub fn stream(self, tag: PropertyTag) -> StreamRead<'a> {
-        StreamRead::new(self.connection, self.target(), tag)
-    }
-
-    /// The embedded message's own attachment table — an attachment of an attachment.
-    #[must_use]
-    pub fn attachments(self) -> TableRead<'a> {
-        TableRead::new(self.connection, self.target(), TableKind::Attachments)
-    }
-
-    const fn target(&self) -> Target {
-        Target::Embedded {
-            message: self.message,
-            number: self.number,
-        }
-    }
 }
 
 #[cfg(test)]

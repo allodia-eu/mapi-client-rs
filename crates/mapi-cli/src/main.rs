@@ -23,6 +23,10 @@
 //! mapi-cli draft --subject Hi --to a@b.test --attach notes.txt   write one into Drafts
 //! mapi-cli contact --name 'Ada Lovelace' --email ada@example.test create a contact
 //! mapi-cli event --subject Review --start 2026-09-10T09:00:00Z --end 2026-09-10T10:00:00Z
+//! mapi-cli send --subject Hi --to a@b.test   write one and hand it to the transport
+//! mapi-cli move --from inbox --to deleted-items --id 0x...   archive one
+//! mapi-cli mark --folder inbox --id 0x... --unread   the read bit of PidTagMessageFlags
+//! mapi-cli flag --folder inbox --id 0x... --colour red   the follow-up flag, which is not that
 //! mapi-cli delete --folder drafts --id 0x...   take one back out again
 //! mapi-cli properties                 dump every property of the Store object
 //! mapi-cli capture session --out fixtures/exchange-se/session-en-us --scrub rules.tsv
@@ -42,6 +46,7 @@
 )]
 
 mod capture;
+mod cli;
 mod command;
 mod meta;
 mod normalise;
@@ -52,8 +57,9 @@ mod settings;
 
 use std::process::ExitCode;
 
-use clap::{Parser, Subcommand};
+use clap::Parser as _;
 
+use crate::cli::{Cli, Command};
 use crate::settings::Connection;
 
 /// Anything that stopped a command finishing.
@@ -62,273 +68,6 @@ use crate::settings::Connection;
 /// person and then the process exits. What matters is that the whole chain of causes is printed,
 /// which [`report_failure`] does.
 pub(crate) type Failure = Box<dyn core::error::Error + Send + Sync>;
-
-#[derive(Debug, Parser)]
-#[command(
-    name = "mapi-cli",
-    version,
-    about = "Diagnostic client for MAPI over HTTP, and the fixture capture tool.",
-    long_about = None,
-)]
-struct Cli {
-    #[command(flatten)]
-    connection: Connection,
-
-    #[command(subcommand)]
-    command: Command,
-}
-
-#[derive(Debug, Subcommand)]
-enum Command {
-    /// Ask the endpoint whether it is there, without establishing anything.
-    ///
-    /// The cheapest check that the URL is right, that the credentials work and that whatever
-    /// answers speaks MAPI/HTTP. [MS-OXCMAPIHTTP] §2.2.6
-    Ping,
-
-    /// Establish a Session Context and report what the server said about the mailbox.
-    Connect,
-
-    /// Walk a folder's hierarchy table.
-    Folders {
-        /// Which folder to list the children of. One of the thirteen a logon names, or a folder id
-        /// as `0x...`. Defaults to the IPM subtree, which is the user-visible root.
-        #[arg(long, value_name = "FOLDER", default_value = "ipm-subtree")]
-        folder: String,
-
-        /// Rows per round trip.
-        #[arg(long, value_name = "ROWS", default_value_t = 50)]
-        page_size: u16,
-
-        /// List every folder below this one rather than its immediate children.
-        ///
-        /// Sets the `Depth` bit of `TableFlags`, so the whole tree arrives in one table.
-        /// [MS-OXCFOLD] §2.2.1.13.1
-        #[arg(long)]
-        recursive: bool,
-
-        /// Show only folders of this container class, and its refinements.
-        ///
-        /// `IPF.Appointment` lists the calendars; `IPF.Contact` lists the contact folders, its
-        /// `IPF.Contact.MOC.QuickContacts` kind included. [MS-OXCFOLD] §2.2.2.2.2.3
-        #[arg(long, value_name = "CLASS")]
-        class: Option<String>,
-    },
-
-    /// Find the folders a logon does not name: Calendar, Contacts, Drafts and the rest.
-    ///
-    /// Two round trips: the entry ids come from binary properties on the Inbox, and only the
-    /// server can turn a long-term entry id into an id `RopOpenFolder` takes.
-    /// [MS-OXOSFLD] §2.2.3
-    Special {
-        /// Also open each one and report what it is: name, class, item count, and whether it is a
-        /// search folder rather than a real one.
-        #[arg(long)]
-        details: bool,
-    },
-
-    /// Resolve the calendar and contact properties to the ids this mailbox uses for them.
-    ///
-    /// Named properties have no fixed id: each store allocates one from `0x8000` upwards the first
-    /// time it needs the property, so the numbers this prints are meaningful only in the mailbox
-    /// that answered. Run it against two mailboxes to see that. [MS-OXCPRPT] §3.1.2
-    Named {
-        /// Ask the store back what each resolved id is called, and fail if any disagrees.
-        ///
-        /// `RopGetNamesFromPropertyIds`, which is the only check on the response ordering that
-        /// does not come from the same answer being checked. [MS-OXCROPS] §2.2.8.2
-        #[arg(long)]
-        verify: bool,
-
-        /// Also ask what an id is called *here*, written as `0x8186`. Repeatable.
-        ///
-        /// Point it at an id another mailbox reported to see what the cross-store mistake actually
-        /// costs: the same number is a different property, or none at all.
-        #[arg(long = "id", value_name = "ID")]
-        ids: Vec<String>,
-    },
-
-    /// Read a folder's contents table.
-    Messages {
-        /// Which folder to read. One of the thirteen a logon names, or a folder id as `0x...`.
-        #[arg(long, value_name = "FOLDER", default_value = "inbox")]
-        folder: String,
-
-        /// Rows per round trip.
-        #[arg(long, value_name = "ROWS", default_value_t = 50)]
-        page_size: u16,
-
-        /// How many rows to print. The rest are still read.
-        #[arg(long, value_name = "ROWS", default_value_t = 20)]
-        limit: usize,
-
-        /// Order by delivery time, newest first, on the server.
-        ///
-        /// `RopSortTable`. The sort key has to be among the columns read, which
-        /// [MS-OXCTABL] §2.2.2.3 requires and this client checks before sending.
-        #[arg(long)]
-        newest_first: bool,
-
-        /// Show only messages whose subject contains this, matched by the server.
-        ///
-        /// `RopRestrict` with a content restriction, paired with an existence test because
-        /// [MS-OXCDATA] §2.12.9.1 leaves the result on an item with no subject undefined.
-        #[arg(long, value_name = "TEXT")]
-        subject: Option<String>,
-    },
-
-    /// List a calendar's events, with real start times, end times and locations.
-    ///
-    /// Every one of those is a named property with no fixed id, so this resolves them against the
-    /// store first and builds its column set from the answer. [MS-OXOCAL] §2.2.1
-    Events {
-        /// Which folder to read, as `0x...`. Defaults to the Calendar the entry-id chain finds.
-        #[arg(long, value_name = "FOLDER")]
-        folder: Option<String>,
-
-        /// How many events to print. The rest are still read.
-        #[arg(long, value_name = "ROWS", default_value_t = 20)]
-        limit: usize,
-    },
-
-    /// List a contacts folder, with the email addresses that make it worth listing.
-    ///
-    /// `PidLidEmail1EmailAddress` is a named property, so this costs the same lookup `events` does.
-    /// [MS-OXOCNTC] §2.2.1.2
-    Contacts {
-        /// Which folder to read, as `0x...`. Defaults to the Contacts folder.
-        #[arg(long, value_name = "FOLDER")]
-        folder: Option<String>,
-
-        /// How many contacts to print. The rest are still read.
-        #[arg(long, value_name = "ROWS", default_value_t = 20)]
-        limit: usize,
-    },
-
-    /// Open one message: its properties, its recipients, its body and its attachments.
-    ///
-    /// The body is read with `RopOpenStream`, which is the only reading that works for a message of
-    /// any size — a property fetch answers anything past the response buffer with an error rather
-    /// than with the value. [MS-OXCPRPT] §2.2.3.2
-    Message {
-        /// Which folder it lives in. `RopOpenMessage` needs both ids.
-        #[arg(long, value_name = "FOLDER", default_value = "inbox")]
-        folder: String,
-
-        /// The message id, as `0x...`. `mapi-cli messages` prints these.
-        #[arg(long, value_name = "ID")]
-        id: String,
-
-        /// Also stream the plain-text and HTML bodies, and report how long each is.
-        #[arg(long)]
-        body: bool,
-    },
-
-    /// Write a message into Drafts, with recipients and an attachment.
-    ///
-    /// The recipients are addressed one-off — an SMTP address and nothing looked up — because the
-    /// address book is NSPI, a separate endpoint this workspace does not implement.
-    /// [MS-OXCDATA] §2.2.5.1
-    Draft {
-        /// The subject.
-        #[arg(long, value_name = "TEXT", default_value = "Drafted by mapi-cli")]
-        subject: String,
-
-        /// The plain-text body.
-        #[arg(long, value_name = "TEXT", default_value = "")]
-        body: String,
-
-        /// An SMTP address to address it to. Repeatable.
-        #[arg(long = "to", value_name = "ADDRESS")]
-        to: Vec<String>,
-
-        /// A file to attach. Its bytes go through `RopWriteStream`, 16 KiB at a time.
-        #[arg(long, value_name = "FILE")]
-        attach: Option<std::path::PathBuf>,
-    },
-
-    /// Create a contact in the Contacts folder.
-    ///
-    /// Half of what makes a contact a contact is named properties, and one of those is a one-off
-    /// entry id — without it a client shows the address and will not send to it.
-    /// [MS-OXOCNTC] §2.2.1.2
-    Contact {
-        /// The display name. Split on its last space into a given name and a surname.
-        #[arg(long, value_name = "NAME")]
-        name: String,
-
-        /// The SMTP address.
-        #[arg(long, value_name = "ADDRESS")]
-        email: String,
-
-        /// The company name.
-        #[arg(long, value_name = "NAME")]
-        company: Option<String>,
-
-        /// The business telephone number.
-        #[arg(long, value_name = "NUMBER")]
-        phone: Option<String>,
-    },
-
-    /// Create a single-instance appointment in the Calendar.
-    ///
-    /// Both instants are UTC and the `Z` is required: [MS-OXOCAL] §2.2.1.5 specifies the start in
-    /// UTC, and this tool will not guess a time zone.
-    Event {
-        /// The subject.
-        #[arg(long, value_name = "TEXT")]
-        subject: String,
-
-        /// When it starts, as `2026-09-10T09:00:00Z`.
-        #[arg(long, value_name = "INSTANT")]
-        start: String,
-
-        /// When it ends, as `2026-09-10T10:00:00Z`.
-        #[arg(long, value_name = "INSTANT")]
-        end: String,
-
-        /// Where it is.
-        #[arg(long, value_name = "TEXT")]
-        location: Option<String>,
-    },
-
-    /// Delete messages from a folder, by id.
-    ///
-    /// A soft delete: the server keeps a back-up copy. `RopDeleteMessages` succeeds whether or not
-    /// it deleted anything, so this reports what the `PartialCompletion` flag said.
-    /// [MS-OXCROPS] §2.2.4.11
-    Delete {
-        /// Which folder they are in. One of the thirteen a logon names, or a folder id as `0x...`.
-        #[arg(long, value_name = "FOLDER", default_value = "drafts")]
-        folder: String,
-
-        /// A message id, as `0x...`. Repeatable.
-        #[arg(long = "id", value_name = "ID", required = true)]
-        ids: Vec<String>,
-    },
-
-    /// Dump the Store object's properties: display name, owner, size and quotas.
-    ///
-    /// With no `--tag`, this asks for everything the object holds, which is the only way to see
-    /// what a deployment actually carries as against what [MS-OXCSTOR] §2.2.2.1 documents.
-    Properties {
-        /// A property tag to read, written id-first as `0x3001001F`. Repeatable. Without any,
-        /// every property the Store object has is read.
-        #[arg(long, value_name = "TAG")]
-        tag: Vec<String>,
-    },
-
-    /// Locate a mailbox with Autodiscover.
-    ///
-    /// Needs no endpoint and no distinguished name — finding those is what it does.
-    Discover {
-        /// The email address to look up.
-        address: String,
-    },
-
-    /// Drive a scenario against the live server and write it out as fixtures.
-    Capture(scenario::CaptureArguments),
-}
 
 fn main() -> ExitCode {
     let cli = Cli::parse();
@@ -350,6 +89,12 @@ fn main() -> ExitCode {
     }
 }
 
+/// Dispatches the subcommands that only read, and hands the rest to [`run_changing`].
+///
+/// Two functions rather than one because the file limit and the lint on function length both bite
+/// here, and the seam they force is the one the `command` module already draws: reading a mailbox
+/// and changing one are different undertakings, and a reader looking for "what can this tool do to
+/// my mailbox" should find the list in one place.
 async fn run(cli: Cli) -> Result<(), Failure> {
     let connection = cli.connection;
 
@@ -390,6 +135,17 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         Command::Message { folder, id, body } => {
             command::message(&connection, &folder, &id, body).await
         }
+        Command::State { folder, id } => command::state(&connection, &folder, &id).await,
+        Command::Properties { tag } => command::properties(&connection, &tag).await,
+        Command::Discover { address } => command::discover(&connection, &address).await,
+        Command::Capture(arguments) => scenario::capture(&connection, &arguments).await,
+        changing => run_changing(connection, changing).await,
+    }
+}
+
+/// Dispatches every subcommand that writes to a mailbox.
+async fn run_changing(connection: Connection, command: Command) -> Result<(), Failure> {
+    match command {
         Command::Draft {
             subject,
             body,
@@ -417,10 +173,62 @@ async fn run(cli: Cli) -> Result<(), Failure> {
             end,
             location,
         } => command::event(&connection, &subject, &start, &end, location.as_deref()).await,
+        Command::Send {
+            subject,
+            body,
+            to,
+            attach,
+            no_copy,
+            discard,
+        } => {
+            command::send(
+                &connection,
+                &subject,
+                &body,
+                &to,
+                attach.as_deref(),
+                !no_copy && !discard,
+                discard,
+            )
+            .await
+        }
+        Command::Move {
+            from,
+            to,
+            ids,
+            copy,
+        } => command::move_messages(&connection, &from, &to, &ids, copy).await,
+        Command::Mark {
+            folder,
+            ids,
+            unread,
+            receipt,
+        } => command::mark(&connection, &folder, &ids, unread, receipt).await,
+        Command::Flag {
+            folder,
+            id,
+            text,
+            colour,
+            complete,
+            clear,
+        } => {
+            command::flag(
+                &connection,
+                &folder,
+                &id,
+                &text,
+                colour.as_deref(),
+                complete,
+                clear,
+            )
+            .await
+        }
         Command::Delete { folder, ids } => command::delete(&connection, &folder, &ids).await,
-        Command::Properties { tag } => command::properties(&connection, &tag).await,
-        Command::Discover { address } => command::discover(&connection, &address).await,
-        Command::Capture(arguments) => scenario::capture(&connection, &arguments).await,
+        // Unreachable: `run` handles every other variant itself. A `match` that named them again
+        // here would be a second list to keep in step with the first.
+        reading => Err(Failure::from(format!(
+            "{reading:?} does not change a mailbox and should not have reached here"
+        ))),
     }
 }
 
@@ -499,9 +307,104 @@ mod tests {
             other => panic!("{other:?}"),
         }
 
-        // A delete with no id is refused rather than defaulted, because the default would be
-        // "delete nothing" and a command that quietly does nothing is worse than one that fails.
+        assert!(Cli::try_parse_from([&common[..], &["ping"]].concat()).is_ok());
+    }
+
+    /// The subcommands that change a mailbox, and what each of them refuses to guess.
+    ///
+    /// Every argument checked here has an obvious default that would be **wrong**: delete nothing,
+    /// send it nowhere, move it into the folder it is already in, mark nothing. A command that
+    /// quietly does nothing is worse than one that fails, and one that quietly does the wrong thing
+    /// to a mailbox is worse again.
+    #[test]
+    fn the_commands_that_change_a_mailbox_refuse_to_guess() {
+        let endpoint = "https://mail.example.test/mapi/emsmdb/?MailboxId=x@example.test";
+        let common = ["mapi-cli", "--endpoint", endpoint, "--user-dn", "/o=X/cn=a"];
+
         assert!(Cli::try_parse_from([&common[..], &["delete"]].concat()).is_err());
+
+        // Nor a send with no recipient, nor a move with no destination, nor a mark with no id.
+        // Every one of those has an obvious default that would be wrong: send it nowhere, move it
+        // to the folder it is in, mark nothing.
+        assert!(Cli::try_parse_from([&common[..], &["send"]].concat()).is_err());
+        assert!(
+            Cli::try_parse_from([&common[..], &["move", "--to", "inbox"]].concat()).is_err(),
+            "a move with no id"
+        );
+        assert!(Cli::try_parse_from([&common[..], &["mark"]].concat()).is_err());
+
+        let cli =
+            Cli::try_parse_from([&common[..], &["send", "--to", "a@b.test", "--no-copy"]].concat())
+                .expect("send");
+        match cli.command {
+            Command::Send {
+                to,
+                no_copy,
+                discard,
+                ..
+            } => {
+                assert_eq!(to, ["a@b.test"]);
+                assert!(no_copy);
+                assert!(!discard, "a send keeps the message unless told not to");
+            }
+            other => panic!("{other:?}"),
+        }
+
+        // The two are refused together rather than resolved: on Exchange the delete suppresses the
+        // Sent Items copy, so "no copy, and also delete" is one outcome asked for twice.
+        assert!(
+            Cli::try_parse_from(
+                [
+                    &common[..],
+                    &["send", "--to", "a@b.test", "--no-copy", "--discard"]
+                ]
+                .concat()
+            )
+            .is_err()
+        );
+
+        // Marking a message read and sending the sender a receipt for it are one ROP, and the
+        // receipt is off unless asked for. Marking it unread cannot ask for one at all.
+        let cli =
+            Cli::try_parse_from([&common[..], &["mark", "--id", "0x42", "--unread"]].concat())
+                .expect("mark");
+        match cli.command {
+            Command::Mark {
+                folder,
+                unread,
+                receipt,
+                ..
+            } => {
+                assert_eq!(folder, "inbox");
+                assert!(unread);
+                assert!(!receipt);
+            }
+            other => panic!("{other:?}"),
+        }
+        assert!(
+            Cli::try_parse_from(
+                [
+                    &common[..],
+                    &["mark", "--id", "0x42", "--unread", "--receipt"]
+                ]
+                .concat()
+            )
+            .is_err(),
+            "a receipt for a message being marked unread is not a thing"
+        );
+
+        // `--complete` and `--clear` are opposite instructions, so asking for both is refused
+        // rather than resolved to whichever the match arm happens to test first.
+        assert!(
+            Cli::try_parse_from(
+                [
+                    &common[..],
+                    &["flag", "--id", "0x42", "--complete", "--clear"]
+                ]
+                .concat()
+            )
+            .is_err()
+        );
     }
 
     /// A failure prints its causes, because the cause is usually the actionable half.
