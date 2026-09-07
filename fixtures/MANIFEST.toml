@@ -344,7 +344,7 @@ exchanges = ["01-ping", "02-connect", "03-execute-logon", "04-execute-properties
 "03-execute-logon.response.bin" = { bytes = 254, sha256 = "c034718fc5ed3ca1502fef63974263850d410f26cfc8011a25960879bc0c995b" }
 "04-execute-properties.meta.txt" = { bytes = 2733, sha256 = "1fa9ce58c55a5a1f914dc24fd4cd620660497693ebf90c62d5ae2a8ea937e23f" }
 "04-execute-properties.request.bin" = { bytes = 79, sha256 = "6a7781241358a6160fd35a6afc654bba0f6c682ce0fa6bb22fd440b6a8ab83b7" }
-"04-execute-properties.response.bin" = { bytes = 350, sha256 = "b5fb25e6e215b255ee7b962d99421f43a994a783453a15a1e2314834db156482" }
+"04-execute-properties.response.bin" = { bytes = 350, sha256 = "e84586515ce0f168aa108e1f34cb89bc8e257b968f89bd9da1c0abc456c50c51" }
 "05-execute-properties-refused.meta.txt" = { bytes = 2545, sha256 = "405853a1c6b8dc8fd3e0b6682075811055b1ebc31011aba2eeeb28f4a5fe310a" }
 "05-execute-properties-refused.request.bin" = { bytes = 83, sha256 = "a35b99be59dad5f837888db741e6c3b3868f5825d3f61f38c4098ef15950a1d8" }
 "05-execute-properties-refused.response.bin" = { bytes = 106, sha256 = "c3310bdc5f3d7d655178a42fba31959bd06af37f4cec01d58b347125ce205f27" }
@@ -368,7 +368,7 @@ exchanges = ["01-ping", "02-connect", "03-execute-logon", "04-execute-properties
 "11-execute-hierarchy-release.response.bin" = { bytes = 88, sha256 = "2ad47438ab0ef39edfe2d2ebedde53fd8f607ae52da8b630569ab41db2670a52" }
 "12-execute-hierarchy-deep.meta.txt" = { bytes = 2544, sha256 = "d6f28592174a3043a032dc417428ff295cf2225dd9d7bd049d4037db8d73e668" }
 "12-execute-hierarchy-deep.request.bin" = { bytes = 96, sha256 = "25208213f9597b0dba2c0016cfb0d56521fb9c5a5efb01550d769606b6750501" }
-"12-execute-hierarchy-deep.response.bin" = { bytes = 1950, sha256 = "0d1d83aa4338d772945f0bf365d520ff4eca2d10d50e1106dcb27ea274d323cc" }
+"12-execute-hierarchy-deep.response.bin" = { bytes = 1950, sha256 = "69451a217b50321a825e56ac9bd309bd77635e44388a3fa9a3a6792b3576e1fa" }
 "13-execute-hierarchy-deep.meta.txt" = { bytes = 2543, sha256 = "5aadd4f5d1f5e5e70cc756e61ae2fedb0be03673b69f60f7279a06e15f77e9f7" }
 "13-execute-hierarchy-deep.request.bin" = { bytes = 37, sha256 = "007265531a52e1f2f7459b908ae9053909e71300c67babff9dee7c4ba9042949" }
 "13-execute-hierarchy-deep.response.bin" = { bytes = 401, sha256 = "ea097306e1e6fd446c63f26e056fce90c33b8fda89630dbb0b928ba1b3546ac6" }
@@ -594,3 +594,17 @@ exchanges = ["01-connect", "02-execute-logon", "03-execute-drafts-folder", "04-e
 "18-disconnect.meta.txt" = { bytes = 2538, sha256 = "fd7bb9fc986574c09b400a25bb047317794040eb18be7425ac5d67d0a2446157" }
 "18-disconnect.request.bin" = { bytes = 4, sha256 = "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119" }
 "18-disconnect.response.bin" = { bytes = 66, sha256 = "3bacb11ee5d82a48df45bced7d01897e31c286439c01d7d8206130f0479a7fda" }
+
+[scenarios."exchange-se/wrong-server"]
+exchanges = ["01-connect", "02-execute-logon-redirect", "03-disconnect-logon-redirect"]
+
+[scenarios."exchange-se/wrong-server".files]
+"01-connect.meta.txt" = { bytes = 2898, sha256 = "883e493bc97005880e89fed0bac377214a864c7503a8c3b7b09cc1e52cf62ce3" }
+"01-connect.request.bin" = { bytes = 143, sha256 = "ed2cc34db6db24b41c9a790448aff2960d72275fafef229538a4ddc2ead9a2ab" }
+"01-connect.response.bin" = { bytes = 109, sha256 = "e00fa79b6b50c883726376b8f6d5f01b4612865598e93332c0f127180a2924f6" }
+"02-execute-logon-redirect.meta.txt" = { bytes = 2650, sha256 = "bf35cf44a8ee7e98fe1d44e00bc57ba3c85d5f7f17237b75c933212cffe83af0" }
+"02-execute-logon-redirect.request.bin" = { bytes = 167, sha256 = "b84c36181b31a55ecac034d17d7c21d18612abdd15c6e9bf24ff122841325046" }
+"02-execute-logon-redirect.response.bin" = { bytes = 232, sha256 = "6d4ba054c7d8ba6af9cc21b74523890ead4e0e54c81e672489a71aee815a60be" }
+"03-disconnect-logon-redirect.meta.txt" = { bytes = 2551, sha256 = "5ac45734c4343d27842969b63ffec6de77eee18a8da30426823357916acbc48c" }
+"03-disconnect-logon-redirect.request.bin" = { bytes = 4, sha256 = "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119" }
+"03-disconnect-logon-redirect.response.bin" = { bytes = 66, sha256 = "3bacb11ee5d82a48df45bced7d01897e31c286439c01d7d8206130f0479a7fda" }
