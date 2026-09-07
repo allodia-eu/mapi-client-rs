@@ -110,7 +110,7 @@ pub(crate) async fn contact(
     let (given, surname) = split_name(name);
     let one_off = OneOffEntryId::smtp(email, email)?;
 
-    let named = logon.resolve_names(NEW_CONTACT_PROPERTIES).await?.clone();
+    let named = logon.register_names(NEW_CONTACT_PROPERTIES).await?.clone();
     let tag = |property| tag_of(&named, property);
 
     let mut values = vec![
@@ -184,7 +184,7 @@ pub(crate) async fn event(
     let calendar = logon.special_folder(SpecialFolder::Calendar).await?;
 
     let named = logon
-        .resolve_names(NEW_APPOINTMENT_PROPERTIES)
+        .register_names(NEW_APPOINTMENT_PROPERTIES)
         .await?
         .clone();
     let tag = |property| tag_of(&named, property);
@@ -303,7 +303,7 @@ fn report_saved(kind: &str, folder: FolderId, saved: &SavedMessage) {
 }
 
 /// The tag this store uses for a named property, or a failure that says which one is missing.
-fn tag_of(
+pub(super) fn tag_of(
     named: &mapi_client::NamedProperties,
     property: NamedProperty,
 ) -> Result<PropertyTag, Failure> {
@@ -315,7 +315,7 @@ fn tag_of(
     })
 }
 
-fn string(value: &str) -> PropertyValue {
+pub(super) fn string(value: &str) -> PropertyValue {
     PropertyValue::String(value.into())
 }
 

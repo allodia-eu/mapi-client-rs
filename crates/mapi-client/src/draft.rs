@@ -122,12 +122,20 @@ impl<'a> NewMessage<'a> {
         self
     }
 
-    /// Keeps a copy of the sent message in a folder — Sent Items, ordinarily.
+    /// Files the sent message in a folder — Sent Items, ordinarily.
     ///
     /// `PidTagSentMailSvrEID`, and a builder method rather than a property a caller remembers
-    /// because of what forgetting it does: [MS-OXOMSG] §2.2.3.10 makes the copy conditional on the
-    /// property being present, so a message sent without it is delivered and leaves no record of
-    /// having been sent. That is a surprise to a user and not to the protocol.
+    /// because of what forgetting it does: [MS-OXOMSG] §2.2.3.10 makes the filing conditional on
+    /// the property being present, and a send without it leaves the message wherever it was
+    /// created. See [`send`](Self::send) for the measured table.
+    ///
+    /// **The document says "copied" and the server moves.** §2.2.3.10 has "a copy of the message
+    /// is created in the specified folder after the message is sent", which reads as leaving the
+    /// original in place too. On Exchange Server SE `15.02.2562.045` the original does not stay: a
+    /// message drafted in Drafts and sent with this set is in Sent Items and nowhere else — **and
+    /// it is there under a different id** from the one [`SavedMessage::id`] reported, as a
+    /// [`Folder::move_messages`](crate::Folder::move_messages) also mints one. Nothing in the
+    /// response says what the new id is.
     ///
     /// The folder must not be a search folder, and the account needs write permission on it.
     ///
@@ -140,11 +148,15 @@ impl<'a> NewMessage<'a> {
         self
     }
 
-    /// Removes the original once the message has gone.
+    /// Removes the message once it has gone, keeping it nowhere.
     ///
-    /// `PidTagDeleteAfterSubmit`. The other half of what makes sending tidy: without it the
-    /// message stays in the folder it was created in as well as being sent, so a client that
-    /// drafts into Drafts and sends leaves the draft behind for good.
+    /// `PidTagDeleteAfterSubmit`. **This overrides
+    /// [`keep_copy_in`](Self::keep_copy_in)** — [MS-OXOMSG] §3.3.5.1.3 lists the two as separate
+    /// bullets with nothing saying one cancels the other, and on Exchange Server SE
+    /// `15.02.2562.045` the delete wins: a message sent with both is delivered and then exists in
+    /// no folder of the sender's mailbox at all. Setting both is therefore a way to lose the record
+    /// of a send while believing one was kept, which is why [`send`](Self::send) documents the
+    /// whole table rather than the two properties separately.
     ///
     /// Ignored by [`save`](Self::save), which submits nothing — and the property is written all
     /// the same, because a draft saved now and sent later means the same thing by it.
@@ -166,10 +178,24 @@ impl<'a> NewMessage<'a> {
     /// address produces a non-delivery report in the sender's Inbox some time later, not an error
     /// here.
     ///
-    /// The message has to be complete before the server will take it, and what "complete" means is
-    /// [MS-OXOMSG] §3.2.4.1's — recipients, and the sender properties. This crate does not decide
-    /// which of those to write for a caller, for the same reason it does not decide what makes a
-    /// contact a contact.
+    /// **Where the message ends up afterwards is two properties, and they interact.** Measured on
+    /// Exchange Server SE `15.02.2562.045` across all four combinations:
+    ///
+    /// | [`keep_copy_in`](Self::keep_copy_in) | [`deleting_the_original`](Self::deleting_the_original) | where it ends up |
+    /// |---|---|---|
+    /// | set | unset | the folder named |
+    /// | set | set | nowhere |
+    /// | unset | unset | still where it was created |
+    /// | unset | set | nowhere |
+    ///
+    /// [MS-OXOMSG] §3.3.5.1.3 lists the two as independent, and they are not: the delete wins, and
+    /// the "copy" is a move. A caller that sets both to be safe keeps no record at all.
+    ///
+    /// The message also has to be complete before the server will take it, and what "complete"
+    /// means is [MS-OXOMSG] §3.2.4.1's — recipients, and the sender properties. This crate does not
+    /// decide which of those to write for a caller, for the same reason it does not decide what
+    /// makes a contact a contact. Exchange fills the sender properties in itself
+    /// (§3.3.5.1.3.2), so a submit with none of them set is accepted and delivered.
     ///
     /// # Errors
     ///
@@ -363,6 +389,11 @@ pub struct SavedMessage {
 
 impl SavedMessage {
     /// The id the item now has, which is what names it from here on.
+    ///
+    /// **Except after a send.** A submitted message is filed by the server, and filing it mints a
+    /// new id — so after [`NewMessage::send`] this names the message as it was at the moment of
+    /// submission and not as it is now. Measured on Exchange Server SE `15.02.2562.045`: a message
+    /// saved as `0x51422B1800000001` appeared in Sent Items as `0xF1512B1800000001`.
     #[must_use]
     pub const fn id(&self) -> MessageId {
         self.id

@@ -163,13 +163,42 @@ impl NamedProperties {
     ///
     /// What decides whether a round trip is needed at all, and what it should ask for.
     pub(crate) fn missing(&self, names: &[PropertyName]) -> Vec<PropertyName> {
+        self.wanted(names, |entry| entry.is_none())
+    }
+
+    /// The names this store has no id for, whether or not it has been asked about them.
+    ///
+    /// The difference from [`missing`](Self::missing) is the one that matters when a caller is
+    /// about to *write*: a name the store answered `0x0000` for is cached as an entry with no id,
+    /// so `missing` says there is nothing to ask about — correctly, for a read. Asking again with
+    /// `CreateIfMissing` is a different question, and this is the list it is asked of.
+    pub(crate) fn unregistered(&self, names: &[PropertyName]) -> Vec<PropertyName> {
+        self.wanted(names, |entry| {
+            !entry.is_some_and(NamedPropertyEntry::is_mapped)
+        })
+    }
+
+    /// The names whose cached entry `include` accepts, in the order given and without repeats.
+    fn wanted(
+        &self,
+        names: &[PropertyName],
+        include: impl Fn(Option<&NamedPropertyEntry>) -> bool,
+    ) -> Vec<PropertyName> {
         let mut wanted: Vec<PropertyName> = Vec::new();
         for name in names {
-            if self.entry(name).is_none() && !wanted.contains(name) {
+            if include(self.entry(name)) && !wanted.contains(name) {
                 wanted.push(name.clone());
             }
         }
         wanted
+    }
+
+    /// Forgets what the store said about these names, so a second question can be asked.
+    ///
+    /// Registering is that second question. A name cached as unmapped has an entry, and leaving it
+    /// there would make the newly allocated id invisible to every later lookup.
+    pub(crate) fn forget(&mut self, names: &[PropertyName]) {
+        self.entries.retain(|entry| !names.contains(entry.name()));
     }
 
     /// Records what the store answered, pairing each id with the name it was asked in place of.

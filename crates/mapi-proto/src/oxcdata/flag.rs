@@ -56,6 +56,14 @@ impl MessageFlags {
     /// [MS-OXCMSG] §2.2.1.6 says clients SHOULD ignore this, and names Exchange 2007 as a server
     /// that does not set it alongside `mfRead`. It is here to be named in a diagnostic, not acted
     /// on.
+    ///
+    /// **It is set and never cleared**, which the same sentence does not allow: "This flag is set
+    /// or cleared by the server whenever the mfRead flag is set or cleared." Measured on Exchange
+    /// Server SE `15.02.2562.045` — a seeded message at `0x0002` went to `0x0403` when marked read
+    /// and back to `0x0402`, not `0x0002`, when marked unread. The behaviour is what the flag's own
+    /// description says it should be ("read at least once"), so the document contradicts itself
+    /// rather than the server contradicting the document; the consequence for a client is that
+    /// marking a message unread does not restore the flags it had.
     pub const EVER_READ: u32 = 0x0000_0400;
 
     /// Wraps the value of `PidTagMessageFlags`.

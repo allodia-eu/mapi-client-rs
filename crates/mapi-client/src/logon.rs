@@ -1,11 +1,9 @@
 //! A mailbox that has been logged on to, and the folders in it.
 
-use core::borrow::Borrow;
-
 use mapi_proto::{
-    Connected, FolderEntryId, FolderId, LogonResponse, LongTermId, MessageId, NameRegistration,
-    ObjectHandle, PropertyIdsResponse, PropertyName, PropertySet, PropertyValue, RopBatch,
-    RopResponse, SPECIAL_FOLDER_PROPERTIES, ShortTermId, SpecialFolder, WellKnownFolder,
+    Connected, FolderEntryId, FolderId, LogonResponse, LongTermId, MessageId, ObjectHandle,
+    PropertySet, PropertyValue, RopBatch, RopResponse, SPECIAL_FOLDER_PROPERTIES, ShortTermId,
+    SpecialFolder, WellKnownFolder,
 };
 
 use crate::connection::Connection;
@@ -15,6 +13,9 @@ use crate::message::Message;
 use crate::named::NamedProperties;
 use crate::properties::Properties;
 use crate::special::{SpecialFolderEntry, SpecialFolderState, SpecialFolders};
+
+/// Resolving named properties against this store, and registering ones it does not yet have.
+mod names;
 
 /// A mailbox, logged on and ready to be read.
 ///
@@ -210,125 +211,6 @@ impl Logon {
                 state: resolved
                     .state(folder)
                     .map_or_else(|| "it was not asked for".to_owned(), ToString::to_string),
-            })
-    }
-
-    /// What this store calls each of these named properties, resolving whatever it has not
-    /// already.
-    ///
-    /// **One round trip for however many are new, and none at all when they are all known.** The
-    /// ids are cached against this logon, so the second call for the same properties is free — and
-    /// that is not an optimisation but the difference between one extra round trip per session and
-    /// one per calendar read.
-    ///
-    /// The returned map is bound to this mailbox. An id resolved here means nothing in another
-    /// mailbox: ids are allocated per store as each first needs a property, and using one against
-    /// the wrong store reads a *different* property and reports no error.
-    ///
-    /// Only already-registered names are resolved; nothing is created. A property this store has
-    /// never held comes back unmapped, which is an answer rather than a failure — see
-    /// [`NamedPropertyEntry::id`](crate::NamedPropertyEntry::id).
-    ///
-    /// ```no_run
-    /// # use mapi_client::{APPOINTMENT_PROPERTIES, Logon, NamedProperty};
-    /// # async fn example(logon: &mut Logon) -> Result<(), mapi_client::Error> {
-    /// let named = logon.resolve_names(APPOINTMENT_PROPERTIES).await?;
-    /// for entry in named {
-    ///     println!("{entry}");
-    /// }
-    ///
-    /// let start = logon.names().tag_of(NamedProperty::AppointmentStartWhole);
-    /// println!("{start:?}");
-    /// # Ok(())
-    /// # }
-    /// ```
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Rop`] if the server refused the lookup — `ecAccessDenied` for a user who may not
-    /// read the mapping table — plus whatever the round trip failed with.
-    ///
-    /// [MS-OXCROPS] §2.2.8.1 — `RopGetPropertyIdsFromNames`
-    /// [MS-OXCPRPT] §3.1.2 — an id may be cached for the session, and is a fact about one store
-    pub async fn resolve_names<I>(&mut self, names: I) -> Result<&NamedProperties>
-    where
-        I: IntoIterator,
-        I::Item: Into<PropertyName>,
-    {
-        let asked: Vec<PropertyName> = names.into_iter().map(Into::into).collect();
-        let wanted = self.named.missing(&asked);
-        if wanted.is_empty() {
-            return Ok(&self.named);
-        }
-
-        let mut batch = RopBatch::new();
-        let logon = batch.bind(self.handle);
-        batch.property_ids_from_names(logon, &wanted, NameRegistration::Existing);
-
-        let execution = self
-            .connection
-            .execute(batch, "resolving named properties")
-            .await?;
-        let ids = execution
-            .responses()
-            .iter()
-            .find_map(RopResponse::as_property_ids)
-            .ok_or(Error::Unexpected {
-                expected: "a RopGetPropertyIdsFromNames response",
-                found: "no property ids in the batch's responses",
-            })?;
-
-        self.named.absorb(wanted, PropertyIdsResponse::ids(ids));
-        Ok(&self.named)
-    }
-
-    /// The named properties resolved so far, without sending anything.
-    #[must_use]
-    pub const fn names(&self) -> &NamedProperties {
-        &self.named
-    }
-
-    /// What this store calls each of these property ids — the inverse question.
-    ///
-    /// The only way to say what a `0x8005` in a property dump actually *is*. One round trip, and
-    /// deliberately not cached: unlike a name, an id is what a caller already has in hand, and the
-    /// answer is a diagnostic rather than something a later request is built from.
-    ///
-    /// An id below `0x8000` is answered from the `PS_MAPI` set rather than refused, and one this
-    /// store has never registered comes back as `None` rather than being left out — so the answers
-    /// stay positional against the ids asked about.
-    ///
-    /// # Errors
-    ///
-    /// [`Error::Rop`] if the server refused the lookup, plus whatever the round trip failed with.
-    ///
-    /// [MS-OXCROPS] §2.2.8.2 — `RopGetNamesFromPropertyIds`
-    pub async fn names_of<I>(&mut self, ids: I) -> Result<Vec<Option<PropertyName>>>
-    where
-        I: IntoIterator,
-        I::Item: Borrow<u16>,
-    {
-        let ids: Vec<u16> = ids.into_iter().map(|id| *id.borrow()).collect();
-        if ids.is_empty() {
-            return Ok(Vec::new());
-        }
-
-        let mut batch = RopBatch::new();
-        let logon = batch.bind(self.handle);
-        batch.names_from_property_ids(logon, &ids);
-
-        let execution = self
-            .connection
-            .execute(batch, "asking what property ids are named")
-            .await?;
-        execution
-            .responses()
-            .iter()
-            .find_map(RopResponse::as_property_names)
-            .map(|response| response.names().to_vec())
-            .ok_or(Error::Unexpected {
-                expected: "a RopGetNamesFromPropertyIds response",
-                found: "no property names in the batch's responses",
             })
     }
 
