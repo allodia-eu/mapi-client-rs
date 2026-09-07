@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  What the *second* lookup answers, for the shared mailbox named by autodiscover-settings.xml's
+  AlternativeMailbox element. Same fictional example.test deployment, same credentials: the
+  authenticated account is still alice, and the server is describing a mailbox she has rights to
+  rather than one she owns.
+
+  The two things that make this file worth having, both measured against Exchange Server SE
+  15.02.2562.045 before being written down here:
+
+    * The MailboxId in the MailStore URL is the *shared* mailbox's, not alice's. The endpoint and
+      the LegacyDN are a matched pair, and pairing alice's endpoint with this LegacyDN is refused
+      by RopLogon with ecWrongServer - one request after the Connect that accepted it.
+
+    * The User element describes the shared mailbox, so its DisplayName is what the shared mailbox
+      is called rather than what alice's client should label it. MS-OXDSCLI 2.2.4.1.1.2.5.1 gives
+      the AlternativeMailbox's own DisplayName as the one that "overrides how a client will display
+      the user's name", which is why the two are deliberately different here.
+-->
+<Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006">
+  <Response xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a">
+    <User>
+      <DisplayName>Shared Mailbox, as the directory has it</DisplayName>
+      <LegacyDN>/o=Example/ou=Exchange Administrative Group (FYDIBOHF23SPDLT)/cn=Recipients/cn=shared</LegacyDN>
+      <AutoDiscoverSMTPAddress>shared@example.test</AutoDiscoverSMTPAddress>
+      <DeploymentId>00000000-0000-0000-0000-000000000000</DeploymentId>
+    </User>
+    <Account>
+      <AccountType>email</AccountType>
+      <Action>settings</Action>
+      <MicrosoftOnline>False</MicrosoftOnline>
+      <Protocol Type="mapiHttp" Version="1">
+        <MailStore>
+          <InternalUrl>https://mail.example.test/mapi/emsmdb/?MailboxId=11111111-1111-1111-1111-111111111111@example.test</InternalUrl>
+        </MailStore>
+        <AddressBook>
+          <InternalUrl>https://mail.example.test/mapi/nspi/?MailboxId=11111111-1111-1111-1111-111111111111@example.test</InternalUrl>
+        </AddressBook>
+      </Protocol>
+    </Account>
+  </Response>
+</Autodiscover>
