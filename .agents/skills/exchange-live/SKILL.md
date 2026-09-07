@@ -27,6 +27,32 @@ The lab's host name, mailbox GUIDs and password are deliberately **not in this r
 come from the Exchange snapin, which every script here calls for itself, plus a password you
 supply.
 
+## Ask the server one question
+
+Most time spent against a live server is neither verifying nor capturing. It is asking one question,
+reading the answer, and asking a better one — which is how every measurement in this repository's
+doc comments was made.
+
+```powershell
+powershell.exe -File scripts\Invoke-Cli.ps1 -Mailbox developer -Password '<password>' messages --folder inbox
+powershell.exe -File scripts\Invoke-Cli.ps1 -Mailbox developer2 -Password '<password>' state --folder drafts --id 0x...
+```
+
+Everything after `-Password` goes to `mapi-cli` unchanged, `--dump` included. The five
+`MAPI_LIVE_*` variables are set for that child process and removed afterwards, so nothing leaks into
+the shell and two mailboxes cannot be mixed up. A non-zero exit is reported and passed through
+rather than thrown: **a refusal from the server is usually the answer, not the problem.**
+
+**Read the item back.** The operations that change a mailbox report almost nothing —
+`RopSubmitMessage` answers with a bare `ReturnValue`, and a move and a read-flag change answer with
+one byte each — so there is nothing in a response to be wrong about. `mapi-cli state` exists because
+of that, and three of the four deviations recorded against Exchange in this repository were found by
+running it after an operation that had just reported success.
+
+**Do read-flag experiments on a message the run creates and deletes.** `mfEverRead` is read-only for
+clients and, measured here, is *not* cleared when a message is marked unread — so marking a seeded
+message read changes its `PidTagMessageFlags` permanently and moves the corpus's baseline with it.
+
 ## Verify the client against the server
 
 ```powershell
@@ -149,6 +175,12 @@ when they find nothing, rather than reporting an empty calendar as a passing rea
 * **`powershell.exe -File` flattens an array argument** into one comma-joined string, so
   `-Mailbox developer,developer2` arrives as a single element. Every script here splits on commas
   for that reason.
+* **Never type a `legacyExchangeDN` into Git Bash**, and never build the endpoint by hand. MSYS
+  rewrites the leading `/o=` into a Windows path, and an endpoint missing its
+  `?MailboxId=<guid>@<domain>` earns HTTP 400 with no `X-ResponseCode` header at all. Both read like
+  something else entirely — `ecUnknownUser` looks like a credential fault, and the 400 looks like a
+  wrong URL rather than an incomplete one. `Get-LabMailbox` in `scripts\_Boot.ps1` derives both from
+  Exchange, and `Invoke-Cli.ps1` and `Test-Live.ps1` use it rather than deriving them again.
 * **When a `Connect` fails, the server says why.** `V15\Logging\MapiHttp\Mailbox\*.LOG` on the
   Exchange server names the real cause, which the wire response usually does not.
 

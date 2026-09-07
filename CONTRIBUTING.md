@@ -20,6 +20,34 @@ powershell.exe -File scripts\Invoke-Gate.ps1 -SkipCoverage    # skip the slow on
 Scripts require **Windows PowerShell 5.1 (Desktop)**. Run `powershell.exe`, not `pwsh` —
 `scripts/_Boot.ps1` will stop you with an explanation if you forget.
 
+### Formatting is nightly
+
+`rustfmt.toml` uses nightly-only options, so the gate runs `cargo +nightly fmt`. Stable `cargo fmt`
+prints a warning per option and then formats *less* than the gate requires:
+
+```powershell
+cargo +nightly fmt --all
+```
+
+Two of those options change what you can write, and both fail in ways that do not look like a
+formatting problem:
+
+- **`error_on_unformatted`** makes a trailing comment inside a builder chain a hard error —
+  `.u8(0) // LogonId` in the middle of one — and rustfmt then formats nothing else in that file
+  either, so unrelated drift appears in a file you did not touch. Name a `const` instead.
+- **`error_on_line_overflow`** applies inside doc comments, so a wide Markdown table row in a `///`
+  block fails at 100 characters. Use short link labels with reference definitions underneath.
+
+`reorder_impl_items` also alphabetises associated items, so a new `pub const` in a catalogue such as
+`ErrorCode` or `PropertyTag` is moved. Insert it in alphabetical order and the diff stays one hunk.
+
+### The 500-line limit counts non-blank lines
+
+`Measure-Object -Line` does not count empty strings, so `wc -l` overstates a file's size against the
+gate by roughly a tenth. From Bash, `grep -cve '^[[:space:]]*$'` gives the number the gate uses.
+Splits are expected to follow a seam that is already there — an object against the object it hangs
+off, a catalogue against the type it describes — rather than to be line-count relief.
+
 ## Specification authority
 
 **The Microsoft Open Specification documents are the authoritative resource — always.** Not this

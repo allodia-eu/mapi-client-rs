@@ -52,6 +52,14 @@ reaches a shell history. Add `--dump` to any command to hex-dump every request a
 is the reason this binary exists: a wrong `RopBuffer` is not readable by inspection, and a decoded
 view of it is a view through the very code you are doubting.
 
+Against a lab this machine can ask Exchange about, `scripts/Invoke-Cli.ps1` sets those variables for
+one mailbox and runs a single command, which saves getting either of the two values wrong that are
+easy to get wrong by hand:
+
+```powershell
+powershell.exe -File scripts\Invoke-Cli.ps1 -Mailbox developer -Password '<password>' messages --folder inbox
+```
+
 **Status:** tracks the workspace, at `0.3.0`. Never published: `cargo build -p mapi-cli` from the
 repository.
 

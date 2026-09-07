@@ -114,13 +114,6 @@ if ($Mailbox.Count -gt 0) {
         throw 'Running by -Mailbox still needs -Password (or MAPI_LIVE_PASSWORD).'
     }
 
-    if (-not (Get-PSSnapin -Name 'Microsoft.Exchange.Management.PowerShell.SnapIn' -ErrorAction SilentlyContinue)) {
-        Add-PSSnapin Microsoft.Exchange.Management.PowerShell.SnapIn
-    }
-
-    $vdir = @(Get-MapiVirtualDirectory -Server $env:COMPUTERNAME)[0]
-    if (-not $vdir) { throw "No MAPI virtual directory on $env:COMPUTERNAME." }
-
     # The send test needs a second mailbox, because the evidence that a RopSubmitMessage did
     # anything is in the mailbox it was sent to and the sender cannot read it. Every run addresses
     # the *next* mailbox in the list, wrapping - so with two mailboxes each sends to the other, and
@@ -134,30 +127,13 @@ if ($Mailbox.Count -gt 0) {
     }
 
     foreach ($identity in $Mailbox) {
-        $box = Get-Mailbox -Identity $identity
-        $regional = Get-MailboxRegionalConfiguration -Identity $identity -ErrorAction SilentlyContinue
-        $language = if ($regional -and $regional.Language) { $regional.Language.Name } else { $null }
-        $domain = ([string]$box.PrimarySmtpAddress -split '@')[-1]
+        $box = Get-LabMailbox -Identity $identity
+        $language = $box.Language
 
-        $env:MAPI_LIVE_ENDPOINT = "$($vdir.InternalUrl)/emsmdb/?MailboxId=$($box.ExchangeGuid)@$domain"
-        $env:MAPI_LIVE_USER_DN  = [string]$box.LegacyExchangeDN
-        $env:MAPI_LIVE_USERNAME = [string]$box.PrimarySmtpAddress
-
-        # The session locale, matched to the mailbox so the run is coherent. It does not translate
-        # anything: folder names come back in whatever language the mailbox already holds them.
-        #
-        # Resolved defensively. A mailbox with no regional configuration reports no language at
-        # all, and casting a name that is not a culture throws - which would abort the whole run
-        # before a single test had made a request, over a setting that only picks an LCID.
-        $lcid = 0x0409
-        if ($language) {
-            try {
-                $lcid = ([System.Globalization.CultureInfo]$language).LCID
-            } catch {
-                Write-Warn "$identity reports language '$language', which is not a culture; using en-US."
-            }
-        }
-        $env:MAPI_LIVE_LOCALE = '0x{0:x4}' -f $lcid
+        $env:MAPI_LIVE_ENDPOINT = $box.Endpoint
+        $env:MAPI_LIVE_USER_DN  = $box.Dn
+        $env:MAPI_LIVE_USERNAME = $box.Smtp
+        $env:MAPI_LIVE_LOCALE   = '0x{0:x4}' -f $box.Lcid
 
         # Whom this run sends to. The same password: the lab's mailboxes share one, and a second
         # place to type a password is not an improvement.
@@ -165,11 +141,10 @@ if ($Mailbox.Count -gt 0) {
             Remove-Item "env:$name" -ErrorAction SilentlyContinue
         }
         if ($partners.ContainsKey($identity)) {
-            $other = Get-Mailbox -Identity $partners[$identity]
-            $otherDomain = ([string]$other.PrimarySmtpAddress -split '@')[-1]
-            $env:MAPI_LIVE_SECOND_ENDPOINT = "$($vdir.InternalUrl)/emsmdb/?MailboxId=$($other.ExchangeGuid)@$otherDomain"
-            $env:MAPI_LIVE_SECOND_USER_DN  = [string]$other.LegacyExchangeDN
-            $env:MAPI_LIVE_SECOND_USERNAME = [string]$other.PrimarySmtpAddress
+            $other = Get-LabMailbox -Identity $partners[$identity]
+            $env:MAPI_LIVE_SECOND_ENDPOINT = $other.Endpoint
+            $env:MAPI_LIVE_SECOND_USER_DN  = $other.Dn
+            $env:MAPI_LIVE_SECOND_USERNAME = $other.Smtp
         }
 
         Write-Host ''
