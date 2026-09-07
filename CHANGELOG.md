@@ -15,7 +15,142 @@ Two conventions specific to this project:
 
 ## [Unreleased]
 
-Nothing yet.
+Acting on items. `0.3.0` could create, read and delete a message; this adds *sending* one, *moving*
+one, and both of the things MAPI means by *flagging* one — the read bit of `PidTagMessageFlags`,
+which has its own ROP, and the follow-up flag of [MS-OXOFLAG], which is a set of ordinary
+properties.
+
+That takes the client to fourteen of the eighteen operations the plan was written against.
+Everything except listing more than one mailbox is now implemented, and the four remaining gaps
+below are one operation and three deliberate omissions.
+
+Verified against Exchange Server SE `15.02.2562.045` and both lab mailboxes, with mail actually sent
+between them in both directions. The corpus grows by two scenarios and the whole of it re-captures
+byte for byte — 537 files identical — with two write scenarios in it.
+
+**This is a breaking release**: `SESSION_EXCHANGES` aside, three public items changed shape and one
+behavioural change is not visible to `cargo-semver-checks` at all. Both are listed under *Changed*.
+
+### Added
+
+- **`RopSubmitMessage`**, with `NewMessage::send()` for a message being created and
+  `Message::send()` for a draft already in the store. Both put the submit in the same ROP buffer as
+  the save that precedes it, which is the only order that works: a submit acts on what is in the
+  store, so one sent before the save would send the message as it was before its properties,
+  recipients and attachments were written — successfully.
+- **`RopMoveCopyMessages`**, with `Folder::move_messages()` and `Folder::copy_messages()`. Both
+  folders are opened in the same buffer as the move, so *archive a message* is one round trip
+  however far apart they are in the hierarchy.
+- **`RopSetReadFlags`**, with `Folder::set_read()` and `ReadFlags`. Addressed at a folder and a list
+  of ids rather than at an open message, so marking a whole page of a contents table read is one
+  ROP.
+- **`RopRemoveAllRecipients`**, with `MessageUpdate::replacing_recipients()`. The gap `0.3.0` listed
+  by name: `RopModifyRecipients` addresses rows by position and can never shorten a list, so this is
+  the only way to clear one — and replacing a list is this ROP followed by that one, in one buffer.
+- **The follow-up flag properties.** `FlagStatus`, `FollowupIcon` and `MessageFlags` in
+  `mapi-proto`, eight new `PidLid`s in the named-property catalogue, and six new `PidTag`s. The
+  property *lists* live in `mapi-cli` rather than in the library, as the contact and appointment
+  lists do and for the same reason: [MS-OXOFLAG] leaves the choice of each to the client.
+- **`Logon::register_names()`**, which asks the store to allocate an id for a named property it does
+  not have. `0.3.0` listed the absence of this as a gap and understated it — see *Fixed*.
+- **`MessageUpdate::delete()`**, which removes properties in the same round trip and the same commit
+  as the ones being written. Needed because a property some protocols define by its *absence* has to
+  actually be absent: [MS-OXOFLAG] §2.2.1.1 has `PidTagFlagStatus` exist only on a flagged message.
+- **`PtypServerId`** and `ServerEntryId`, for `PidTagSentMailSvrEID` — the property that decides
+  where a sent message is filed. Its `Ours` byte is not a version: `0x00` means another client
+  defined the value, so both readings are variants rather than one being a parse error.
+- **`STATE_PROPERTIES`**, and `mapi-cli state`, which reads back the three things "flag a message"
+  can mean. Not planned: it was written to check the flag commands and immediately found a bug in
+  one of them.
+- **Four `mapi-cli` subcommands** — `send`, `submit`, `move`, `mark`, `flag` and `state` — and a
+  ninth pair of captured scenarios, `acts-en-us` and `acts-nl-nl`.
+- **Four error codes by name**: `InvalidRecipients`, `TooManyRecips`, `QuotaExceeded`,
+  `MaxSubmissionExceeded` and `NullDestinationObject`.
+
+### Fixed
+
+- **A named property that no mailbox had ever written could not be written at all.** Every named
+  property this workspace used before was one a provisioned or EWS-seeded mailbox already had an id
+  for, so `resolve_names`' "only what is already registered" had never been the wrong question. It
+  is the wrong question for a write, and the flag properties are the first that exposed it: both lab
+  mailboxes had ids for all sixteen appointment and contact properties and for none of the eight
+  flagging ones. `register_names` is the fix, and `mapi-cli`'s contact and appointment commands use
+  it too — they worked only because the lab had been seeded first.
+- **Clearing a follow-up flag left the flag's colour and completion time behind.** [MS-OXOFLAG]
+  §3.1.4.2.3 sets nine properties back to named values and *deletes* the rest; the first version did
+  only the first half, which `mapi-cli state` printed as "not flagged, red".
+
+### Measured, and worth knowing
+
+Each of these is recorded in the doc comment of whatever it bears on, and four are drafted as
+Open Specification feedback.
+
+- **`PidTagSentMailSvrEID` and `PidTagDeleteAfterSubmit` are not independent**, though
+  [MS-OXOMSG] §3.3.5.1.3 lists them as separate bullets. Measured across all four combinations: the
+  copy property *moves* the message rather than copying it, the delete property overrides it
+  entirely, and with neither set the message stays where it was created. A caller setting both to be
+  safe keeps no record of the send at all, which is why `NewMessage::send` documents the table and
+  `mapi-cli send` offers the three outcomes rather than the two properties.
+- **Filing a message mints a new id, and so does moving one.** A message saved as
+  `0x51422B1800000001` arrived in Sent Items as `0xF1512B1800000001`; a message moved from Drafts to
+  Deleted Items arrived under a different `PidTagMid` from the one the move named. Neither
+  [MS-OXCFOLD] §2.2.1.6 nor [MS-OXCROPS] §2.2.4.6.2 says whether the identifier survives, and no
+  response has room for a new one.
+- **`PidTagClientSubmitTime` is not evidence of a submit.** [MS-OXOMSG] §2.2.3.11 has the server set
+  it "when the e-mail message is submitted"; a draft created and saved with no `RopSubmitMessage`
+  anywhere near it already carries one. `mfUnsent` and `mfSubmitted` are what answer that question.
+- **`mfEverRead` is set and never cleared**, which [MS-OXCMSG] §2.2.1.6's own sentence forbids and
+  its own description requires. A message at `0x0002` went to `0x0403` when marked read and back to
+  `0x0402` — not `0x0002` — when marked unread. Marking a message unread does not restore the flags
+  it had, and nothing a client may write can.
+- **A submit with no recipients earns `ecInvalidRecips`**, `0x00000467` — a name that does not lead
+  a reader to expect it, and a refusal [MS-OXOMSG] §3.3.5.1.1 does not list. The message is left
+  untouched: still `mfUnsent`, still deletable. That is what makes it the one `RopSubmitMessage` the
+  fixture corpus can hold.
+- **Exchange filled in the sender properties itself.** [MS-OXOMSG] §3.2.4.1.2 has the client set
+  them and §3.3.5.1.3.2 has the server set them from the mailbox owner; both are `MUST`s about the
+  same five properties. A submit with none of them set was accepted and delivered.
+- **Both halves of a submit are asynchronous.** The delivery *and* the filing settle on the server's
+  own schedule, and nothing in the response says when either will happen. The live suite polls for
+  both; the fixture corpus captures neither.
+- **No `RopProgress` was ever seen.** Every ROP that could ask for one is sent with
+  `WantAsynchronous = 0`, and Exchange honoured it for a cross-folder move — which the plan flagged
+  as an assumption to measure. The response is modelled anyway, because one arriving unrecognised
+  would cost the rest of the buffer.
+
+### Changed
+
+- **`NamedProperty::ALL` grows from sixteen entries to twenty-four**, which changes its type. The
+  same is true of `PropertyType`, `PropertyValue` and `RopResponse`, which gain variants — all three
+  are `#[non_exhaustive]`, so that is not breaking, but a caller matching exhaustively on the raw
+  `PropertyType::Unsupported(0x00FB)` would silently stop matching.
+- **`ErrorCode` moved to its own module** within `mapi-proto`'s `error`, and `Attachment` and
+  `EmbeddedMessage` to their own module within `mapi-client`'s `message`. Both are re-exported from
+  where they were; nothing a caller writes changes.
+- **The `session` capture scenario now *registers* named properties rather than resolving them**, so
+  the capture is the same shape whatever the mailbox has been used for. Not a library change, but it
+  is why every session fixture after the sixth renumbered.
+
+### Known gaps
+
+- **Listing mailboxes is still not implemented.** It is not a MAPI operation: what Outlook shows in
+  its folder pane comes from Autodiscover's `AlternativeMailbox` elements plus one `Connect` per
+  mailbox. That is the last of the eighteen.
+- **A successful submit is not in the fixture corpus**, only a refused one. A captured send would
+  deliver real mail on every `Verify-Fixtures.ps1` run and settle on its own schedule, which no
+  byte-for-byte corpus can hold. `mapi-client`'s live suite sends between the two lab mailboxes
+  instead, and is the only place that claim is checked.
+- **`RopSetMessageReadFlag` is not implemented**, only `RopSetReadFlags`. The two do the same job at
+  different objects, and the message-level one's extra response fields exist only in public-folder
+  mode, which a private-mailbox logon cannot enter.
+- **A message cannot be marked read *and* the receipt sent in one call from `mapi-cli`.**
+  `rfGenerateReceiptOnly` is modelled and reachable from the library; the command line does not offer
+  it, because sending a receipt without changing the read state is a thing a mail client does on the
+  user's behalf rather than a thing a diagnostic tool should make easy.
+- **Everything `0.3.0` listed that this release does not name above is still a gap**: an
+  attachment's content is held in memory, an embedded message cannot be created, a recurrence is
+  read rather than expanded, a meeting is not a meeting, `Negotiate` and `NTLM` are still not
+  implemented, and there is still no notification or incremental sync.
 
 ## [0.3.0] - 2026-08-26
 

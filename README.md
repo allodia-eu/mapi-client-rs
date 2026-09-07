@@ -27,19 +27,22 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: `0.3.0` released.** What works is what the corpus proves: locate an endpoint by
-> Autodiscover, connect, log on, walk the folder hierarchy — the whole of it in one table, tagged
-> by container class — read or write the Store object's and any folder's own properties, find the
-> Calendar, Contacts, Drafts, Tasks, Notes and Journal folders that the logon does not name, resolve
-> the `PidLid` properties a calendar entry is made of to the ids one store uses for them, and page a
-> contents table with the columns you choose, ordered and filtered by the server. `0.3.0` adds the
-> item itself: open a message, read its properties, list its attachments, extract one's bytes, open
-> the message inside another, and read a body far larger than a response buffer — and then the
-> other direction, **create** a message with recipients and an attachment, a contact or a
-> single-instance appointment, change one, and delete it again. All verified against Exchange Server
-> SE `15.02.2562.045`, in two mailboxes, in two languages. What is missing is *acting* on a message
-> — sending it, moving it, flagging it — and `Negotiate`/`NTLM` authentication. The gaps are
-> stated below and in the changelog rather than left to be discovered.
+> **Status: `0.3.0` released; the tree is ahead of it.** What works is what the corpus proves:
+> locate an endpoint by Autodiscover, connect, log on, walk the folder hierarchy — the whole of it
+> in one table, tagged by container class — read or write the Store object's and any folder's own
+> properties, find the Calendar, Contacts, Drafts, Tasks, Notes and Journal folders that the logon
+> does not name, resolve the `PidLid` properties a calendar entry is made of to the ids one store
+> uses for them, and page a contents table with the columns you choose, ordered and filtered by the
+> server. Then the item itself: open a message, read its properties, list its attachments, extract
+> one's bytes, open the message inside another, and read a body far larger than a response buffer —
+> and the other direction, **create** a message with recipients and an attachment, a contact or a
+> single-instance appointment, change one, and delete it again. Unreleased on top of that:
+> **send** a message, **move** one between folders, and **flag** one — both of the things MAPI means
+> by that, the read bit and the follow-up flag, which it keeps apart and so does this. All verified
+> against Exchange Server SE `15.02.2562.045`, in two mailboxes, in two languages, with mail
+> actually sent between them. What is missing is listing more than one mailbox, and
+> `Negotiate`/`NTLM` authentication. The gaps are stated below and in the changelog rather than left
+> to be discovered.
 
 ## Install
 

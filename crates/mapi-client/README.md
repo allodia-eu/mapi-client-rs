@@ -178,14 +178,16 @@ Part of [`mapi-client-rs`](https://github.com/allodia-eu/mapi-client-rs). Every 
 cites its Microsoft Open Specification section; see `SPEC.md` in the repository root for the pinned
 document versions.
 
-**Status:** `0.3.0`. Connect, logon, hierarchy and contents reads with paging — the hierarchy
-recursively, tagged by container class, the contents sorted and filtered by the server — the
-folders a logon does not name, property reads and writes on Store and Folder objects,
-named-property resolution cached per session, messages with their properties, attachments, embedded
-messages and streamed bodies, disconnect, and Autodiscover lookup are implemented. `0.3.0` adds
-creating a message, a contact or a single-instance appointment, with recipients and attachments,
-changing one and deleting it. Nothing that **sends** an item, and nothing that moves or flags one;
-no notifications, no ICS, no address book.
+**Status:** `0.3.0` released, and the tree is ahead of it. Connect, logon, hierarchy and contents
+reads with paging — the hierarchy recursively, tagged by container class, the contents sorted and
+filtered by the server — the folders a logon does not name, property reads and writes on Store and
+Folder objects, named-property resolution cached per session, messages with their properties,
+attachments, embedded messages and streamed bodies, disconnect, and Autodiscover lookup are
+implemented. Then creating a message, a contact or a single-instance appointment, with recipients
+and attachments, changing one and deleting it. Unreleased on top of that: **sending** a message,
+moving one between folders, marking one read or unread, replacing a recipient list, and registering
+a named property a store has never held. No notifications, no ICS, no address book, and no way to
+enumerate more than the one mailbox a logon names.
 
 ## Licence
 
