@@ -101,6 +101,14 @@ pub(crate) enum Scenario {
     ///
     /// Needs `--user-dn-override` naming something the server has never heard of.
     ConnectRefused,
+    /// One mailbox's endpoint paired with another's distinguished name, which is the mistake
+    /// "open a second mailbox" invites.
+    ///
+    /// Needs `--user-dn-override` naming a **real** second mailbox, served by a different
+    /// `?MailboxId=` from the one in the endpoint. The refusal is a `RopLogon` redirect rather
+    /// than a `Connect` failure, which is the whole reason it is worth a capture of its own:
+    /// `Connect` succeeds first, and reports the second mailbox's owner as though it had worked.
+    WrongServer,
 }
 
 impl Scenario {
@@ -111,6 +119,7 @@ impl Scenario {
             Self::Writes => "writes",
             Self::Acts => "acts",
             Self::ConnectRefused => "connect-refused",
+            Self::WrongServer => "wrong-server",
         }
     }
 }
@@ -136,6 +145,7 @@ pub(crate) async fn capture(
         Scenario::Writes => writes(&client, &recorder).await?,
         Scenario::Acts => acts(&client, &recorder).await?,
         Scenario::ConnectRefused => connect_refused(&client, &recorder).await?,
+        Scenario::WrongServer => wrong_server(&client, &recorder).await?,
     }
 
     let exchanges = recorder.exchanges();
@@ -241,6 +251,48 @@ async fn connect_refused(client: &MapiClient, recorder: &Recorder) -> Result<(),
         }
         Err(error) => {
             println!("  refused, as intended: {error}");
+            Ok(())
+        }
+    }
+}
+
+/// One mailbox's endpoint with another mailbox's distinguished name — and the refusal arriving a
+/// request later than a reader would expect.
+///
+/// The `?MailboxId=` in the URL selects a mailbox just as surely as the name does, and the two have
+/// to agree. What makes this worth a capture rather than a doc comment is *where* the disagreement
+/// surfaces: `Connect` succeeds, and its response names the owner of the mailbox in the
+/// distinguished name, so everything looks right. The `RopLogon` in the next request is what
+/// refuses, with `ecWrongServer` and a redirect body naming
+/// `cn=Configuration/cn=Servers/cn=<the MailboxId that would have worked>`.
+///
+/// That redirect is the only response in the corpus with a `RopLogon` body that is not a logon, and
+/// a decoder that reads it as one runs off the end of the buffer.
+///
+/// [MS-OXCSTOR] §2.2.1.1.2 — `RopLogon` redirect response buffer
+async fn wrong_server(client: &MapiClient, recorder: &Recorder) -> Result<(), Failure> {
+    recorder.label("");
+    let session = client.connect().await?;
+
+    // Recorded before the logon, because it is the half that looks like success.
+    println!(
+        "  Connect succeeded, reporting the owner as {}",
+        session.server().display_name()
+    );
+
+    recorder.label("logon-redirect");
+    match session.logon().await {
+        Ok(logon) => {
+            logon.disconnect().await.ok();
+            Err(Failure::from(
+                "the server logged the distinguished name on at this endpoint. This scenario \
+                 needs --user-dn-override naming a real second mailbox, one served by a different \
+                 ?MailboxId= from the endpoint's."
+                    .to_owned(),
+            ))
+        }
+        Err(error) => {
+            println!("  the logon refused it, as intended: {error}");
             Ok(())
         }
     }

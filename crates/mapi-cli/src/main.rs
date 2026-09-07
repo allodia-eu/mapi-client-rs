@@ -138,6 +138,9 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         Command::State { folder, id } => command::state(&connection, &folder, &id).await,
         Command::Properties { tag } => command::properties(&connection, &tag).await,
         Command::Discover { address } => command::discover(&connection, &address).await,
+        Command::Mailboxes { address, open } => {
+            command::mailboxes(&connection, &address, open).await
+        }
         Command::Capture(arguments) => scenario::capture(&connection, &arguments).await,
         changing => run_changing(connection, changing).await,
     }
