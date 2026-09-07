@@ -223,7 +223,7 @@ steps:
    [`CHANGELOG.md`](CHANGELOG.md) under the new version, with a date and the two comparison links
    at the foot of the file.
 2. Merge that to `main` and let CI go green.
-3. Tag it: `git tag v0.3.0 && git push origin v0.3.0`.
+3. Tag it: `git tag v0.4.0 && git push origin v0.4.0`.
 
 The tag is what publishes. `.github/workflows/release.yml` refuses a tag that disagrees with the
 manifest version or has no changelog entry, runs the whole of `ci.yml` against the tagged commit,

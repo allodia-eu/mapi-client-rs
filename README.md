@@ -27,7 +27,7 @@ repository existed. Two findings make it tractable:
 
 [`outlook-mapi`]: https://crates.io/crates/outlook-mapi
 
-> **Status: `0.3.0` released; the tree is ahead of it.** What works is what the corpus proves:
+> **Status: `0.4.0` released.** What works is what the corpus proves:
 > locate an endpoint by Autodiscover, connect, log on, walk the folder hierarchy — the whole of it
 > in one table, tagged by container class — read or write the Store object's and any folder's own
 > properties, find the Calendar, Contacts, Drafts, Tasks, Notes and Journal folders that the logon
@@ -36,9 +36,9 @@ repository existed. Two findings make it tractable:
 > server. Then the item itself: open a message, read its properties, list its attachments, extract
 > one's bytes, open the message inside another, and read a body far larger than a response buffer —
 > and the other direction, **create** a message with recipients and an attachment, a contact or a
-> single-instance appointment, change one, and delete it again. Unreleased on top of that:
-> **send** a message, **move** one between folders, and **flag** one — both of the things MAPI means
-> by that, the read bit and the follow-up flag, which it keeps apart and so does this. And then
+> single-instance appointment, change one, and delete it again. Then **send** a message, **move** one
+> between folders, and **flag** one — both of the things MAPI means by that, the read bit and the
+> follow-up flag, which it keeps apart and so does this. And then
 > **more than one mailbox**: list the shared, delegated and archive mailboxes an account can open,
 > and open one on that account's own credentials. It authenticates with **`NTLM`** and
 > **`Negotiate`** as well as Basic, which is what a default-configured Exchange offers. All verified
@@ -51,7 +51,7 @@ repository existed. Two findings make it tractable:
 
 ```toml
 [dependencies]
-mapi-client = "0.3"
+mapi-client = "0.4"
 ```
 
 `mapi-proto`, `mapi-autodiscover` and `mapi-auth` are published separately and are useful on their

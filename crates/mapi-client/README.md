@@ -178,16 +178,22 @@ Part of [`mapi-client-rs`](https://github.com/allodia-eu/mapi-client-rs). Every 
 cites its Microsoft Open Specification section; see `SPEC.md` in the repository root for the pinned
 document versions.
 
-**Status:** `0.3.0` released, and the tree is ahead of it. Connect, logon, hierarchy and contents
+**Status:** `0.4.0` released. Connect, logon, hierarchy and contents
 reads with paging — the hierarchy recursively, tagged by container class, the contents sorted and
 filtered by the server — the folders a logon does not name, property reads and writes on Store and
 Folder objects, named-property resolution cached per session, messages with their properties,
 attachments, embedded messages and streamed bodies, disconnect, and Autodiscover lookup are
 implemented. Then creating a message, a contact or a single-instance appointment, with recipients
-and attachments, changing one and deleting it. Unreleased on top of that: **sending** a message,
-moving one between folders, marking one read or unread, replacing a recipient list, registering a
-named property a store has never held — and **listing the mailboxes an account can open** and
-opening one of them, which is `MapiClientBuilder::mailboxes` and `MapiClient::for_mailbox`.
+and attachments, changing one and deleting it. Then **sending** a message, moving one between
+folders, marking one read or unread, replacing a recipient list, registering a named property a
+store has never held — and **listing the mailboxes an account can open** and opening one of them,
+which is `MapiClientBuilder::mailboxes` and `MapiClient::for_mailbox`.
+
+Authentication is Basic, Bearer, **`NTLM`** or **`Negotiate`**, the last two being what a
+default-configured Exchange offers. They are handshakes rather than headers, so choosing one pins
+the connection pool and serialises requests through it — see
+[`mapi-auth`](https://crates.io/crates/mapi-auth), and `Credentials`' own documentation for what
+that costs. Kerberos is not implemented.
 
 Opening a second mailbox re-aims one client rather than building another, and the reason is
 [MS-OXCMAPIHTTP] §2.2.3.3.4: `X-ClientInfo` is a GUID per client *instance* with a counter per

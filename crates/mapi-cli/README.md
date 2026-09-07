@@ -15,7 +15,9 @@ Part of [`mapi-client-rs`](https://github.com/allodia-eu/mapi-client-rs).
 mapi-cli ping                          is the endpoint there, and do the credentials work?
 mapi-cli connect                       what the server says about the mailbox, and its folder ids
 mapi-cli discover alice@example.test   what Autodiscover says about this mailbox
+mapi-cli discover alice@... --at URL   start from an Autodiscover URL the candidates would not find
 mapi-cli mailboxes alice@... --open    every mailbox these credentials can open, and open each
+mapi-cli connect --auth ntlm           any subcommand: basic (default), ntlm or negotiate
 mapi-cli folders --recursive           the whole folder tree, tagged by container class
 mapi-cli folders --class IPF.Contact   only the contact folders, refinements included
 mapi-cli special --details             find Calendar, Contacts, Drafts and the rest, and open them
@@ -67,8 +69,8 @@ easy to get wrong by hand:
 powershell.exe -File scripts\Invoke-Cli.ps1 -Mailbox developer -Password '<password>' messages --folder inbox
 ```
 
-**Status:** tracks the workspace, at `0.3.0`, with `mailboxes` and a tenth captured scenario
-unreleased on top of it. Never published: `cargo build -p mapi-cli` from the repository.
+**Status:** tracks the workspace, at `0.4.0`. Never published: `cargo build -p mapi-cli` from the
+repository.
 
 ## Licence
 
