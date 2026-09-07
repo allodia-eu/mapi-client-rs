@@ -27,10 +27,21 @@ mapi-cli message --id 0x... --body     one message: properties, body, attachment
 mapi-cli draft --to ada@example.test   write into Drafts, with recipients and an attachment
 mapi-cli contact --name .. --email ..  create a contact, one-off entry id included
 mapi-cli event --subject .. --start .. create an appointment, both instants in UTC
+mapi-cli send --to ada@example.test    write one and hand it to the transport. This sends real mail
+mapi-cli submit --id 0x...             send a draft that is already there
+mapi-cli move --to deleted-items --id  archive one: a move between two folders, in one round trip
+mapi-cli mark --id 0x... --unread      the read bit of PidTagMessageFlags, receipt suppressed
+mapi-cli flag --id 0x... --colour red  the follow-up flag, which is a different thing entirely
+mapi-cli state --id 0x...              read all three back: read, sent, flagged
 mapi-cli delete --folder drafts --id . take one back out again: a soft delete, by id
 mapi-cli properties                    dump every property of the Store object
 mapi-cli capture session --scrub r.tsv record a conversation as fixtures
 ```
+
+**Six of those change a mailbox and one of them sends mail to a real address.** There is no dry-run
+mode: the subcommand is the consent. `send` reports what it did with the message afterwards, because
+where a sent message ends up is two properties that interact in a way [MS-OXOMSG] does not describe
+— see the changelog.
 
 `--folder` takes one of the thirteen folders a logon names, one of the eight it does not —
 `drafts` resolves through the entry-id chain — or a raw folder id as `0x...`.

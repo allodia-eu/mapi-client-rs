@@ -30,9 +30,9 @@ discovering it in Phase 6.
 | List folders in mailbox | `RopGetHierarchyTable` with the `Depth` flag + `PidTagContainerClass` | **Done in Phase 2** |
 | List messages in folder | `RopGetContentsTable` | **Done in v0.1.0**; sorting and filtering done in Phase 4 |
 | Draft a new message | `RopCreateMessage` → `RopSetProperties` → `RopModifyRecipients` → `RopSaveChangesMessage` | **Done in Phase 5** |
-| Send a message | `RopSubmitMessage` | Phase 6 |
-| Archive / delete a message | `RopMoveCopyMessages` / `RopDeleteMessages` | Delete done in Phase 5; the move is Phase 6 |
-| Flag a message | Two different things — read state is `RopSetReadFlags`, follow-up is `RopSetProperties` | Phase 6 |
+| Send a message | `RopSubmitMessage` | **Done in Phase 6** |
+| Archive / delete a message | `RopMoveCopyMessages` / `RopDeleteMessages` | Delete done in Phase 5; **the move done in Phase 6** |
+| Flag a message | Two different things — read state is `RopSetReadFlags`, follow-up is `RopSetProperties` | **Both done in Phase 6** |
 | List calendars | Folder hierarchy filtered on `PidTagContainerClass = "IPF.Appointment"` | **Done in Phase 2** |
 | Get calendar details | `RopGetPropertiesSpecific` on the folder | **Done in Phase 2** |
 | List calendar events | Contents table, but the useful columns are **named properties** | **Done in Phase 4** |
@@ -174,6 +174,15 @@ Two behaviours to design for rather than discover:
 - `RopSubmitMessage` requires a set of properties to be present before it will accept the message
   ([MS-OXOMSG] §3.2.4.x). Missing one yields an error at submit time, well away from the omission.
   These belong in a builder that cannot produce an incomplete message, not in a doc comment.
+
+**Both settled in Phase 6, and the second was wrong.** `WantAsynchronous = 0` is honoured — no
+`RopProgress` was ever seen — though the response is modelled anyway, because one arriving
+unrecognised costs the rest of the buffer. And the properties a submit "requires" are ones Exchange
+fills in itself: §3.2.4.1.2 has the client set the actual sender properties and §3.3.5.1.3.2 has the
+server set them from the mailbox owner, both as `MUST`s about the same five, and a submit with none
+of them set was accepted and delivered. What a builder does have to prevent is a different pair —
+the two properties deciding *where the sent message goes*, which the document presents as
+independent and which are not.
 
 ### F5 — One-off EntryIDs
 
@@ -405,13 +414,65 @@ turned up:
   calendar column set does: a crate that shipped `create_contact(name, email)` would be taking
   positions the document leaves open, invisibly.
 
-**Phase 6 — Acting on items.** `RopSubmitMessage`, `RopMoveCopyMessages`, `RopSetReadFlags`, and
-the follow-up flag properties — `RopDeleteMessages` having come forward into Phase 5. Ends with the
-remaining operations, and with mail actually sent between the two lab mailboxes.
+**Phase 6 — Acting on items. Done.** `RopSubmitMessage`, `RopMoveCopyMessages`, `RopSetReadFlags`,
+`RopRemoveAllRecipients` and the follow-up flag properties. `mapi-cli send`, `move`, `mark` and
+`flag` deliver the four remaining rows of the table, `mapi-cli state` reads back what they did, and
+the live suite sends mail between the two lab mailboxes in both directions — 27 tests against each,
+both mailboxes left exactly as they were found.
 
-Two things Phase 5 leaves it: `RopRemoveAllRecipients`, without which a recipient list can be added
-to and changed but not cleared; and the sender properties [MS-OXOMSG] §3.2.4.1.2 requires before a
-submit will be accepted.
+The two things Phase 5 left it came out unevenly. `RopRemoveAllRecipients` was as expected and is
+one ROP. **The sender properties were not needed at all**: [MS-OXOMSG] §3.2.4.1.2 has the client set
+them and §3.3.5.1.3.2 has the server set them from the mailbox owner, both as `MUST`s about the same
+five properties, and Exchange fills them in — a submit with none of them set was accepted and
+delivered. Nine things the phase turned up:
+
+- **The two properties that decide where a sent message goes are not independent**, though
+  [MS-OXOMSG] §3.3.5.1.3 lists them as separate bullets. Measured across all four combinations:
+  `PidTagSentMailSvrEID` *moves* the message rather than copying it, `PidTagDeleteAfterSubmit`
+  overrides it entirely, and with neither set the message stays in Drafts. So the combination a
+  caller would set to mean "file it in Sent Items and do not leave a draft" keeps no record of the
+  send at all. `mapi-cli send` offers the three reachable outcomes rather than the two properties,
+  and refuses to set one the server would disregard.
+- **A move mints a new message id and reports it nowhere.** Neither [MS-OXCFOLD] §2.2.1.6 nor
+  [MS-OXCROPS] §2.2.4.6.2 says whether the identifier survives, and the response has no room for a
+  new one — so the id a caller holds after a move names nothing, and finding the message again means
+  reading the destination's contents table. Filing a submitted message does the same. Both were
+  found by looking, not by reading: these ROPs answer with one byte and nothing else.
+- **Writing a named property needed a ROP flag nothing here had ever set.** Every named property
+  this workspace wrote before was one a provisioned or EWS-seeded mailbox already had an id for, so
+  `NameRegistration::Existing` had never been the wrong question. Both lab mailboxes had ids for all
+  sixteen appointment and contact properties and for none of the eight flagging ones. `Existing`
+  answers `0x0000`, there is no tag to write under, and the earlier answer to that was an error
+  message telling the operator to open the mailbox in Outlook once. `Logon::register_names` replaces
+  it, and the contact and appointment commands use it too — they worked only because the lab had
+  been seeded.
+- **`RopSubmitMessage` cannot be captured successfully, and the reason is not the mail.** A capture
+  scenario could deliver to a mailbox and clean up after itself. What it cannot do is settle
+  deterministically: both the delivery *and* the filing happen on the server's own schedule and
+  nothing reports when, so a capture would have to poll — and a poll makes the exchange count depend
+  on how busy the transport was, which is the one thing a byte-for-byte corpus cannot have. The
+  corpus carries a *refused* submit instead, and the live suite carries the send. Same division as
+  CI and `Test-Live.ps1`, arrived at from the other end.
+- **The refusal is `ecInvalidRecips`**, `0x00000467`, for a message with no recipients — a name that
+  does not lead a reader to expect it, and a refusal [MS-OXOMSG] §3.3.5.1.1 does not list. The
+  message is left untouched, still `mfUnsent` and still deletable, which is what makes it usable in
+  a capture at all.
+- **`PidTagClientSubmitTime` is set at save, not at submit.** [MS-OXOMSG] §2.2.3.11 says otherwise
+  in both places it mentions the property. A doc comment here claimed it was the cheapest evidence
+  that a submit had happened, which is exactly the wrong reading and is corrected rather than
+  softened.
+- **`mfEverRead` is set and never cleared**, which [MS-OXCMSG] §2.2.1.6's own sentence forbids and
+  its own description requires. Marking a message unread does not restore the flags it had, and
+  nothing a client may write can — which is a mailbox change this phase made to a seeded message and
+  cannot undo.
+- **`RopProgress` never arrived.** `WantAsynchronous = 0` was honoured for a cross-folder move,
+  which this plan flagged as an assumption to measure. It is modelled anyway: a response arriving
+  unrecognised costs the rest of the buffer, and nine bytes read is cheaper than that.
+- **Reading the item back is what found three of the four deviations**, and one bug. These ROPs
+  report a bare `ReturnValue`, one byte, or one byte — there is nothing in a response to be wrong
+  about. `mapi-cli state` was written to check the flag commands and immediately printed "not
+  flagged, red", which is a clear that had set nine properties and deleted none of the four
+  [MS-OXOFLAG] §3.1.4.2.3 asks for.
 
 **Phase 7 — More than one mailbox.** `AlternativeMailbox` parsing in `mapi-autodiscover`, and
 opening a second mailbox on one set of credentials. Ends with *"list mailboxes"* as far as the
@@ -441,6 +502,14 @@ And one that is not a fixture problem but belongs next to it: **`RopSubmitMessag
 mail.** A capture scenario for sending will deliver to `developer2` in the lab. That is contained,
 but it should be a deliberate decision rather than a surprise, and the scenario should clean up
 after itself on both sides.
+
+**The mail turned out not to be the obstacle.** A scenario can deliver and clean up on both sides —
+the live suite does exactly that. What it cannot do is settle *deterministically*: the delivery and
+the filing both happen on the server's own schedule, so a capture would have to poll, and a poll
+makes the exchange count depend on how busy the transport was. So the corpus carries a refused
+submit and the live suite carries the send. The refusal was worth having anyway: a message with no
+recipients earns `ecInvalidRecips`, is left untouched, and is exactly the kind of error path an
+offline corpus usually lacks.
 
 None of this is a reason not to do it. It is a reason to build the write-fixture harness in Phase 5
 as its own piece of work, rather than assuming the read harness stretches.
