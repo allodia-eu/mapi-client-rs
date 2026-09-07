@@ -188,17 +188,42 @@ async fn store_object(logon: &mut Logon, recorder: &Recorder) -> Result<(), Fail
 /// each mailbox, so there is no id to ask about that would be stable enough to commit. The encoder
 /// for that form is covered against [MS-OXCPRPT] §4.1.1's own bytes instead.
 async fn named_properties(logon: &mut Logon, recorder: &Recorder) -> Result<(), Failure> {
-    let unregistered = PropertyName::named(PropertySetId::PUBLIC_STRINGS, UNREGISTERED_NAME)?;
-    let mut wanted: Vec<PropertyName> = NamedProperty::ALL.iter().map(|p| p.name()).collect();
-    wanted.push(unregistered.clone());
-
+    // Registered rather than merely resolved, and in its own exchange because of it. A store
+    // allocates an id for a named property the first time something writes it, so a mailbox that
+    // has never held a flagged message has ids for the appointment and contact properties and none
+    // for the flagging ones — measured on both lab mailboxes. Asking with `CreateIfMissing` is what
+    // makes this capture the same shape whatever the mailbox has been used for, and it replaces the
+    // instruction the earlier version gave when a name came back unmapped, which was to open the
+    // mailbox in Outlook once.
+    //
+    // It writes to the store's mapping table. That is a deliberate act on a lab mailbox, it happens
+    // once, and the ids it allocates are then as stable as every other id in this corpus.
     recorder.label("named-properties");
-    let resolved = logon.resolve_names(wanted).await?;
+    let resolved = logon.register_names(NamedProperty::ALL).await?;
     println!(
-        "  {} of {} named propert(y/ies) mapped by this store",
+        "  {} of {} catalogued named propert(y/ies) mapped by this store",
         resolved.mapped(),
         resolved.len()
     );
+    let mut ids: Vec<u16> = resolved
+        .iter()
+        .filter_map(|entry| Some(entry.id()?.as_u16()))
+        .collect();
+    if ids.len() != NamedProperty::ALL.len() {
+        return Err(Failure::from(format!(
+            "this store mapped only {} of the {} catalogued named properties even when asked to \
+             register them, which means the account may not register new ones.",
+            ids.len(),
+            NamedProperty::ALL.len()
+        )));
+    }
+
+    // And one name nothing should ever have registered, asked about *without* CreateIfMissing —
+    // which is the whole point of the separate exchange. A store answers `0x0000` alongside a
+    // successful ROP for a name it will not map, and that shape has to be in the corpus.
+    let unregistered = PropertyName::named(PropertySetId::PUBLIC_STRINGS, UNREGISTERED_NAME)?;
+    recorder.label("named-property-unregistered");
+    let resolved = logon.resolve_names([unregistered.clone()]).await?;
     if resolved.get(&unregistered).is_some() {
         return Err(Failure::from(format!(
             "the server mapped `{UNREGISTERED_NAME}`, which no store should have registered. \
@@ -207,19 +232,6 @@ async fn named_properties(logon: &mut Logon, recorder: &Recorder) -> Result<(), 
         )));
     }
 
-    let mut ids: Vec<u16> = resolved
-        .iter()
-        .filter_map(|entry| Some(entry.id()?.as_u16()))
-        .collect();
-    if ids.len() != NamedProperty::ALL.len() {
-        return Err(Failure::from(format!(
-            "this store maps only {} of the {} catalogued named properties, so the capture would \
-             carry no evidence that the rest resolve. Open the mailbox in Outlook or OWA once and \
-             re-run.",
-            ids.len(),
-            NamedProperty::ALL.len()
-        )));
-    }
     ids.push(FIXED_ID);
     ids.push(UNREGISTERED_ID);
 
