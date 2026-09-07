@@ -51,7 +51,11 @@
 
     mapi-cli's own flags go through unchanged; --dump hex-dumps every request and response.
 #>
-[CmdletBinding()]
+# PositionalBinding is off deliberately. With it on, `Invoke-Cli.ps1 ping` binds `ping` to -Mailbox
+# and leaves nothing to run, which is a confusing way to fail: the error says there is no subcommand
+# while the subcommand is right there on the line. Off, every mapi-cli argument reaches $Arguments
+# and -Mailbox has to be named.
+[CmdletBinding(PositionalBinding = $false)]
 param(
     [string] $Mailbox,
     [string] $Password = $env:MAPI_LIVE_PASSWORD,
