@@ -17,6 +17,18 @@ fn known_codes_carry_the_specs_own_names() {
         (ErrorCode::NETWORK_ERROR, "NetworkError", 0x8004_0115),
         (ErrorCode::TOO_BIG, "TooBig", 0x8004_0305),
         (ErrorCode::ACCESS_DENIED, "AccessDenied", 0x8007_0005),
+        (ErrorCode::QUOTA_EXCEEDED, "QuotaExceeded", 0x0000_04D9),
+        (
+            ErrorCode::MAX_SUBMISSION_EXCEEDED,
+            "MaxSubmissionExceeded",
+            0x0000_04DA,
+        ),
+        (
+            ErrorCode::NULL_DESTINATION_OBJECT,
+            "NullDestinationObject",
+            0x0000_0503,
+        ),
+        (ErrorCode::TOO_MANY_RECIPIENTS, "TooManyRecips", 0x0000_0505),
     ] {
         assert_eq!(code.as_u32(), raw);
         assert_eq!(code.name(), Some(name));

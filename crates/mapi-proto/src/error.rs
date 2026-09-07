@@ -416,12 +416,36 @@ impl ErrorCode {
     pub const NOT_ENOUGH_MEMORY: Self = Self(0x8007_000E);
     /// The requested object could not be found. `0x8004010F`, also written `ecNotFound`.
     pub const NOT_FOUND: Self = Self(0x8004_010F);
+    /// A destination handle could not be resolved. `0x00000503`, also written `ecDstNullObject`.
+    ///
+    /// The one refusal in this crate whose response body does **not** stop after `ReturnValue`:
+    /// `RopMoveCopyMessages` answering it appends a `DestHandleIndex` and a `PartialCompletion`
+    /// ([MS-OXCROPS] §2.2.4.6.3). Not to be confused with `ecNullObject`, `0x000004B9`, which is
+    /// about a *source* handle and stops where every other failure does.
+    ///
+    /// [MS-OXCDATA] §2.4.2
+    pub const NULL_DESTINATION_OBJECT: Self = Self(0x0000_0503);
     /// The server does not support this call. `0x80040102`, also written `ecNotSupported`.
     pub const NOT_SUPPORTED: Self = Self(0x8004_0102);
+    /// A message was too large to submit. `0x000004DA`, also written `ecMaxSubmissionExceeded`.
+    ///
+    /// The limit is `PidTagMaximumSubmitMessageSize` on the Store object, which
+    /// [`MAILBOX_PROPERTIES`](crate::MAILBOX_PROPERTIES) already reads — so this is a refusal a
+    /// client can predict rather than only report. [MS-OXCDATA] §2.4.2
+    pub const MAX_SUBMISSION_EXCEEDED: Self = Self(0x0000_04DA);
+    /// The operation would have exceeded a quota. `0x000004D9`, also written `ecQuotaExceeded`.
+    ///
+    /// One of the refusals [MS-OXOMSG] §3.3.5.1.1 lists for `RopSubmitMessage`. [MS-OXCDATA] §2.4.2
+    pub const QUOTA_EXCEEDED: Self = Self(0x0000_04D9);
     /// A string exceeded the maximum permitted length. `0x80040105`, `ecStringTooLarge`.
     pub const STRING_TOO_LONG: Self = Self(0x8004_0105);
     /// The operation succeeded. `0x00000000`, also written `ecSuccess`.
     pub const SUCCESS: Self = Self(0x0000_0000);
+    /// More recipients than the server allows. `0x00000505`, also written `ecTooManyRecips`.
+    ///
+    /// **None of them receive the message.** [MS-OXOMSG] §3.3.5.1 says so explicitly, which makes
+    /// this a refusal rather than a partial send. [MS-OXCDATA] §2.4.2
+    pub const TOO_MANY_RECIPIENTS: Self = Self(0x0000_0505);
     /// The result set is too big to return. `0x80040305`, also written `ecTooBig`.
     ///
     /// Routine rather than exceptional in a table: it is how a column too large for a row comes
@@ -477,6 +501,10 @@ impl ErrorCode {
             Self::NETWORK_ERROR => "NetworkError",
             Self::TOO_BIG => "TooBig",
             Self::ACCESS_DENIED => "AccessDenied",
+            Self::QUOTA_EXCEEDED => "QuotaExceeded",
+            Self::MAX_SUBMISSION_EXCEEDED => "MaxSubmissionExceeded",
+            Self::NULL_DESTINATION_OBJECT => "NullDestinationObject",
+            Self::TOO_MANY_RECIPIENTS => "TooManyRecips",
             _ => return None,
         })
     }

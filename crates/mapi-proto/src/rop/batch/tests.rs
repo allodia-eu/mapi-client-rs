@@ -5,6 +5,7 @@ use crate::oxcdata::{
 };
 use crate::rop::message::MessageMode;
 use crate::rop::named::NameRegistration;
+use crate::rop::send::{ReadFlags, SubmitFlags};
 use crate::rop::stream::StreamMode;
 use crate::rop::table::FolderDepth;
 
@@ -303,6 +304,35 @@ fn a_message_attachment_and_stream_chain_through_one_buffer() {
     assert_eq!(rops.get(32..36), Some(&[0x2B, 0x00, 0x02, 0x03][..]));
 }
 
+/// A move is the one operation that needs *two* folder handles at once, and both of them can be
+/// opened in the same buffer as the move itself. That is what makes archiving a message a single
+/// round trip rather than three.
+///
+/// The `DestHandleIndex` is the byte this is really about: it is the fourth of the request and
+/// there is nothing in the protocol to say it addresses a folder rather than the source again, so
+/// getting it wrong moves a message into the folder it is already in and reports success.
+#[test]
+fn a_move_chains_both_folder_handles_through_one_buffer() {
+    let mut batch = RopBatch::new();
+    let logon = batch.bind(ObjectHandle::new(0x2A));
+    let source = batch.open_folder(logon, FolderId::new(0x0C01));
+    let destination = batch.open_folder(logon, FolderId::new(0x0D01));
+    batch.move_copy_messages(source, destination, &[MessageId::new(0x42)], false);
+
+    assert_eq!(source.index(), 1);
+    assert_eq!(destination.index(), 2);
+    assert_eq!(batch.len(), 3);
+
+    let built = batch.build().unwrap();
+    let rops = built.bytes.get(10..).unwrap();
+    // Two RopOpenFolder requests, each 13 bytes: RopId, LogonId, two indices, a FolderId and
+    // OpenModeFlags.
+    assert_eq!(rops.get(..4), Some(&[0x02, 0x00, 0x00, 0x01][..]));
+    assert_eq!(rops.get(13..17), Some(&[0x02, 0x00, 0x00, 0x02][..]));
+    // Then the move, reading slot 1 and writing into slot 2.
+    assert_eq!(rops.get(26..30), Some(&[0x33, 0x00, 0x01, 0x02][..]));
+}
+
 /// An attachment table hangs off a message, not off a folder — and a message that turns out to be
 /// an embedded one hangs off an attachment. Both are chains this layer has to allow.
 #[test]
@@ -418,7 +448,19 @@ fn a_write_refuses_a_slot_from_another_batch() {
     let mut other = RopBatch::new();
     let stranger = other.bind(ObjectHandle::new(7));
 
-    let attempts: [Attempt; 8] = [
+    let attempts: [Attempt; 12] = [
+        ("remove_all_recipients", |batch, slot| {
+            batch.remove_all_recipients(slot);
+        }),
+        ("submit_message", |batch, slot| {
+            batch.submit_message(slot, SubmitFlags::None);
+        }),
+        ("move_copy_messages", |batch, slot| {
+            batch.move_copy_messages(slot, slot, &[MessageId::new(0x0100)], false);
+        }),
+        ("set_read_flags", |batch, slot| {
+            batch.set_read_flags(slot, ReadFlags::Read, &[MessageId::new(0x0100)]);
+        }),
         ("create_message", |batch, slot| {
             batch.create_message(slot, FolderId::new(1));
         }),

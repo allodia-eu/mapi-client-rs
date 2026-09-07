@@ -17,6 +17,7 @@ mod message;
 mod named;
 mod property;
 mod response;
+mod send;
 mod stream;
 mod table;
 
@@ -34,6 +35,9 @@ pub use named::{NameRegistration, PropertyIdsResponse, PropertyNamesResponse};
 pub use property::{GetPropertiesResponse, PropertyProblemsResponse};
 pub use response::RopResponse;
 pub(crate) use response::{Decoding, decode_all};
+pub use send::{
+    MoveCopyMessagesResponse, ProgressResponse, ReadFlags, SetReadFlagsResponse, SubmitFlags,
+};
 pub use stream::{ReadStreamResponse, StreamMode, StreamSizeResponse, WriteStreamResponse};
 pub use table::{
     Bookmark, FolderDepth, GetTableResponse, QueryRowsResponse, SetColumnsResponse, TableStatus,
