@@ -8,7 +8,9 @@
 
 use crate::error::{Error, ErrorCode, Result};
 use crate::oxcdata::kind::{CountWidth, ValueContext};
-use crate::oxcdata::{FileTime, Floating64, Guid, PropertyType, PropertyValue, TableString};
+use crate::oxcdata::{
+    FileTime, Floating64, Guid, PropertyType, PropertyValue, ServerEntryId, TableString,
+};
 use crate::wire::{Reader, Writer};
 
 impl PropertyValue {
@@ -30,6 +32,12 @@ impl PropertyValue {
             PropertyType::Time => Self::Time(FileTime::new(r.u64()?)),
             PropertyType::Guid => Self::Guid(Guid::from_bytes(r.array::<16>()?)),
             PropertyType::Binary => Self::Binary(read_binary(r, context)?),
+            // Counted exactly as a PtypBinary is, and then interpreted. The COUNT is not part of
+            // [MS-OXCDATA] §2.11.1.4's diagram — §2.11.1's type table is where it comes from,
+            // "Variable size; a 16-bit COUNT field followed by a structure".
+            PropertyType::ServerId => {
+                Self::ServerId(ServerEntryId::from_bytes(&read_binary(r, context)?))
+            }
             PropertyType::MultipleInteger32 => {
                 Self::MultipleInteger32(read_each(r, context, Reader::u32)?)
             }
@@ -86,6 +94,7 @@ impl PropertyValue {
             }
             Self::String(text) => write_string(w, text)?,
             Self::Binary(bytes) => write_binary(w, bytes, context)?,
+            Self::ServerId(value) => write_binary(w, &value.to_bytes(), context)?,
             Self::MultipleInteger32(values) => {
                 write_count(w, values.len(), PropertyType::MultipleInteger32, context)?;
                 for value in values {

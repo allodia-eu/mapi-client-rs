@@ -119,6 +119,62 @@ const MASTER_LIST: [(NamedProperty, PropertySetId, u32, PropertyType, &str);
         PropertyType::String,
         "PidLidFileUnder",
     ),
+    (
+        NamedProperty::FlagRequest,
+        PropertySetId::COMMON,
+        0x0000_8530,
+        PropertyType::String,
+        "PidLidFlagRequest",
+    ),
+    (
+        NamedProperty::ToDoTitle,
+        PropertySetId::COMMON,
+        0x0000_85A4,
+        PropertyType::String,
+        "PidLidToDoTitle",
+    ),
+    (
+        NamedProperty::ToDoOrdinalDate,
+        PropertySetId::COMMON,
+        0x0000_85A0,
+        PropertyType::Time,
+        "PidLidToDoOrdinalDate",
+    ),
+    (
+        NamedProperty::ToDoSubOrdinal,
+        PropertySetId::COMMON,
+        0x0000_85A1,
+        PropertyType::String,
+        "PidLidToDoSubOrdinal",
+    ),
+    (
+        NamedProperty::TaskStatus,
+        PropertySetId::TASK,
+        0x0000_8101,
+        PropertyType::Integer32,
+        "PidLidTaskStatus",
+    ),
+    (
+        NamedProperty::TaskComplete,
+        PropertySetId::TASK,
+        0x0000_811C,
+        PropertyType::Boolean,
+        "PidLidTaskComplete",
+    ),
+    (
+        NamedProperty::PercentComplete,
+        PropertySetId::TASK,
+        0x0000_8102,
+        PropertyType::Floating64,
+        "PidLidPercentComplete",
+    ),
+    (
+        NamedProperty::TaskDateCompleted,
+        PropertySetId::TASK,
+        0x0000_810F,
+        PropertyType::Time,
+        "PidLidTaskDateCompleted",
+    ),
 ];
 
 #[test]
@@ -135,12 +191,13 @@ fn each_property_matches_the_master_list() {
     }
 }
 
-/// The two write sets partition the catalogue, and no property appears twice. A duplicate LID
+/// The three write sets partition the catalogue, and no property appears twice. A duplicate LID
 /// would resolve two entries to one id and quietly halve a fetch.
 #[test]
-fn the_two_write_sets_are_the_whole_catalogue_and_share_nothing() {
+fn the_write_sets_are_the_whole_catalogue_and_share_nothing() {
     let mut grouped: Vec<NamedProperty> = NEW_APPOINTMENT_PROPERTIES.to_vec();
     grouped.extend_from_slice(&NEW_CONTACT_PROPERTIES);
+    grouped.extend_from_slice(&COMPLETE_FLAG_PROPERTIES);
     grouped.sort_unstable();
 
     let mut all = NamedProperty::ALL.to_vec();
@@ -165,6 +222,10 @@ fn each_read_set_is_the_front_of_its_write_set() {
     assert_eq!(
         NEW_CONTACT_PROPERTIES.get(..CONTACT_PROPERTIES.len()),
         Some(&CONTACT_PROPERTIES[..])
+    );
+    assert_eq!(
+        COMPLETE_FLAG_PROPERTIES.get(..FOLLOW_UP_PROPERTIES.len()),
+        Some(&FOLLOW_UP_PROPERTIES[..])
     );
 }
 
@@ -191,5 +252,18 @@ fn each_group_stays_inside_its_own_set() {
             PropertySetId::APPOINTMENT
         };
         assert_eq!(property.set(), expected, "{property}");
+    }
+
+    // The flag set spans two on purpose: [MS-OXOFLAG] §2.2.1 is `PSETID_Common` and §2.2.2 is the
+    // four it shares with the task protocol, which are `PSETID_Task`. Resolving one of those four
+    // against `PSETID_Common` answers an id for a property nobody asked for.
+    for property in FOLLOW_UP_PROPERTIES {
+        assert_eq!(property.set(), PropertySetId::COMMON, "{property}");
+    }
+    for property in COMPLETE_FLAG_PROPERTIES
+        .iter()
+        .skip(FOLLOW_UP_PROPERTIES.len())
+    {
+        assert_eq!(property.set(), PropertySetId::TASK, "{property}");
     }
 }

@@ -1,23 +1,35 @@
 //! The named properties this crate knows by name.
 //!
 //! A catalogue rather than a mechanism: [`PropertyName`] can name anything, and this is the list of
-//! the ones the requested operations need — the seven that make a calendar entry mean something and
-//! the three that carry a contact's email address. Every one of them is a `PidLid` with a
-//! documented set, LID and data type, and none of them has a fixed property id.
+//! the ones the requested operations need — the seven that make a calendar entry mean something,
+//! the three that carry a contact's email address, and the eight a follow-up flag is written from.
+//! Every one of them is a `PidLid` with a documented set, LID and data type, and none of them has a
+//! fixed property id.
 //!
 //! The type matters as much as the id. A named property's id says nothing about how its value is
 //! encoded, so a caller that resolved an id and then guessed `PtypString` for
 //! `PidLidAppointmentStartWhole` would ask the server to read eight bytes of `PtypTime` as a
 //! null-terminated string. Pairing the two here is what stops that.
 //!
-//! Reading and writing want different lists, which is why there are four constants rather than
-//! two. [`APPOINTMENT_PROPERTIES`] and [`CONTACT_PROPERTIES`] are what a *listing* needs;
-//! [`NEW_APPOINTMENT_PROPERTIES`] and [`NEW_CONTACT_PROPERTIES`] add the ones an item has to carry
-//! to be a well-formed item of its kind, which a reader has no reason to fetch.
+//! Reading and writing want different lists, which is why there are six constants rather than
+//! three. [`APPOINTMENT_PROPERTIES`], [`CONTACT_PROPERTIES`] and [`FOLLOW_UP_PROPERTIES`] are what
+//! a *listing* needs; [`NEW_APPOINTMENT_PROPERTIES`], [`NEW_CONTACT_PROPERTIES`] and
+//! [`COMPLETE_FLAG_PROPERTIES`] add the ones an item has to carry to be a well-formed item of its
+//! kind, which a reader has no reason to fetch.
+//!
+//! **Two of the flag properties are deliberately not here.** [MS-OXOFLAG] §3.1.4.1.1 lists
+//! `PidLidFlagString` and `PidLidValidFlagStringProof` alongside the rest, and §2.2.1.10 makes the
+//! first an *index into the reading client's own table of predefined strings* — so writing one is
+//! this crate claiming a string table it does not have, and a reader that has a different table
+//! shows different words. The document's own fallback is the right answer for a client in this
+//! position: with the index absent or zero, §2.2.1.10 has the reader use `PidLidFlagRequest`, which
+//! is the text a caller actually supplied. Both are optional for the client and neither is read or
+//! set by the server, so omitting them costs nothing.
 //!
 //! [MS-OXPROPS] §2 — every `PidLid`, with its set, its LID and its type
 //! [MS-OXOCAL] §2.2.1 — the appointment properties
 //! [MS-OXOCNTC] §2.2.1.2 — the electronic address properties
+//! [MS-OXOFLAG] §2.2.1 — the flagging properties
 
 use crate::oxcdata::{PropertyName, PropertySetId, PropertyType};
 
@@ -32,6 +44,12 @@ const NEW_APPOINTMENT_COUNT: usize = 3;
 
 /// How many more a contact has to carry to be a well-formed one.
 const NEW_CONTACT_COUNT: usize = 3;
+
+/// How many named properties a follow-up flag is written from, and read back through.
+const FOLLOW_UP_COUNT: usize = 4;
+
+/// How many more marking that flag complete needs.
+const COMPLETE_FLAG_COUNT: usize = 4;
 
 /// A named property [MS-OXPROPS] gives a canonical name, a set, a LID and a type.
 ///
@@ -106,6 +124,54 @@ pub enum NamedProperty {
     ///
     /// [MS-OXOCNTC] §2.2.1.1.11
     FileUnder,
+    /// `PidLidFlagRequest`, `PSETID_Common/0x8530`, `PtypString` — the words that go with a
+    /// follow-up flag.
+    ///
+    /// `"Follow up"` is what [MS-OXOFLAG] §2.2.1.9 has a client write when the user supplied
+    /// nothing. The server always uses this property, whatever a reading client does.
+    ///
+    /// [MS-OXOFLAG] §2.2.1.9
+    FlagRequest,
+    /// `PidLidPercentComplete`, `PSETID_Task/0x8102`, `PtypFloating64` — `1.0` when the flag is
+    /// complete, `0.0` when it is cleared.
+    ///
+    /// [MS-OXOFLAG] §2.2.2.3
+    PercentComplete,
+    /// `PidLidTaskComplete`, `PSETID_Task/0x811C`, `PtypBoolean`.
+    ///
+    /// [MS-OXOFLAG] §2.2.2.2
+    TaskComplete,
+    /// `PidLidTaskDateCompleted`, `PSETID_Task/0x810F`, `PtypTime` — when it was completed.
+    ///
+    /// [MS-OXOTASK] §2.2.2.2.9
+    TaskDateCompleted,
+    /// `PidLidTaskStatus`, `PSETID_Task/0x8101`, `PtypInteger32` — `0x02` for complete, `0x00` for
+    /// not started.
+    ///
+    /// [MS-OXOFLAG] §2.2.2.1
+    TaskStatus,
+    /// `PidLidToDoOrdinalDate`, `PSETID_Common/0x85A0`, `PtypTime` — when the item was flagged,
+    /// which is what orders a consolidated to-do list.
+    ///
+    /// Set only if it is not already on the object: [MS-OXOFLAG] §3.1.4.1.4 says so for the
+    /// complete flag, and re-setting it would reorder a list the user has already seen.
+    ///
+    /// [MS-OXOFLAG] §2.2.1.13
+    ToDoOrdinalDate,
+    /// `PidLidToDoSubOrdinal`, `PSETID_Common/0x85A1`, `PtypString` — breaks a tie between two
+    /// items flagged in the same instant.
+    ///
+    /// [MS-OXOFLAG] §2.2.1.14
+    ToDoSubOrdinal,
+    /// `PidLidToDoTitle`, `PSETID_Common/0x85A4`, `PtypString` — what the item is called in a
+    /// consolidated to-do list.
+    ///
+    /// **Deleted rather than emptied.** [MS-OXOFLAG] §2.2.1.12 has a client that means "no title"
+    /// remove the property instead of writing a zero-length string, and a reader that finds it
+    /// absent fall back to `PidTagNormalizedSubject`.
+    ///
+    /// [MS-OXOFLAG] §2.2.1.12
+    ToDoTitle,
     /// `PidLidLocation`, `PSETID_Appointment/0x8208`, `PtypString`.
     ///
     /// [MS-OXOCAL] §2.2.1.4
@@ -137,7 +203,12 @@ pub enum NamedProperty {
 impl NamedProperty {
     /// Every one of them, appointment properties first.
     pub const ALL: [Self;
-        APPOINTMENT_COUNT + CONTACT_COUNT + NEW_APPOINTMENT_COUNT + NEW_CONTACT_COUNT] = [
+        APPOINTMENT_COUNT
+            + CONTACT_COUNT
+            + NEW_APPOINTMENT_COUNT
+            + NEW_CONTACT_COUNT
+            + FOLLOW_UP_COUNT
+            + COMPLETE_FLAG_COUNT] = [
         Self::AppointmentStartWhole,
         Self::AppointmentEndWhole,
         Self::Location,
@@ -154,6 +225,14 @@ impl NamedProperty {
         Self::Email1OriginalDisplayName,
         Self::Email1OriginalEntryId,
         Self::FileUnder,
+        Self::FlagRequest,
+        Self::ToDoTitle,
+        Self::ToDoOrdinalDate,
+        Self::ToDoSubOrdinal,
+        Self::TaskStatus,
+        Self::TaskComplete,
+        Self::PercentComplete,
+        Self::TaskDateCompleted,
     ];
 
     /// The set this property is named in.
@@ -175,7 +254,15 @@ impl NamedProperty {
             | Self::Email1OriginalDisplayName
             | Self::Email1OriginalEntryId
             | Self::FileUnder => PropertySetId::ADDRESS,
-            Self::SideEffects => PropertySetId::COMMON,
+            Self::FlagRequest
+            | Self::SideEffects
+            | Self::ToDoOrdinalDate
+            | Self::ToDoSubOrdinal
+            | Self::ToDoTitle => PropertySetId::COMMON,
+            Self::PercentComplete
+            | Self::TaskComplete
+            | Self::TaskDateCompleted
+            | Self::TaskStatus => PropertySetId::TASK,
         }
     }
 
@@ -199,6 +286,14 @@ impl NamedProperty {
             Self::Email1EmailAddress => 0x0000_8083,
             Self::Email1OriginalDisplayName => 0x0000_8084,
             Self::Email1OriginalEntryId => 0x0000_8085,
+            Self::TaskStatus => 0x0000_8101,
+            Self::PercentComplete => 0x0000_8102,
+            Self::TaskDateCompleted => 0x0000_810F,
+            Self::TaskComplete => 0x0000_811C,
+            Self::FlagRequest => 0x0000_8530,
+            Self::ToDoOrdinalDate => 0x0000_85A0,
+            Self::ToDoSubOrdinal => 0x0000_85A1,
+            Self::ToDoTitle => 0x0000_85A4,
         }
     }
 
@@ -209,19 +304,29 @@ impl NamedProperty {
     #[must_use]
     pub const fn property_type(self) -> PropertyType {
         match self {
-            Self::AppointmentEndWhole | Self::AppointmentStartWhole => PropertyType::Time,
+            Self::AppointmentEndWhole
+            | Self::AppointmentStartWhole
+            | Self::TaskDateCompleted
+            | Self::ToDoOrdinalDate => PropertyType::Time,
             Self::AppointmentRecur | Self::Email1OriginalEntryId => PropertyType::Binary,
-            Self::AppointmentSubType | Self::Recurring => PropertyType::Boolean,
+            Self::AppointmentSubType | Self::Recurring | Self::TaskComplete => {
+                PropertyType::Boolean
+            }
             Self::AppointmentStateFlags
             | Self::BusyStatus
             | Self::ResponseStatus
-            | Self::SideEffects => PropertyType::Integer32,
+            | Self::SideEffects
+            | Self::TaskStatus => PropertyType::Integer32,
+            Self::PercentComplete => PropertyType::Floating64,
             Self::Email1AddressType
             | Self::Email1DisplayName
             | Self::Email1EmailAddress
             | Self::Email1OriginalDisplayName
             | Self::FileUnder
-            | Self::Location => PropertyType::String,
+            | Self::FlagRequest
+            | Self::Location
+            | Self::ToDoSubOrdinal
+            | Self::ToDoTitle => PropertyType::String,
         }
     }
 
@@ -241,10 +346,18 @@ impl NamedProperty {
             Self::Email1OriginalDisplayName => "PidLidEmail1OriginalDisplayName",
             Self::Email1OriginalEntryId => "PidLidEmail1OriginalEntryId",
             Self::FileUnder => "PidLidFileUnder",
+            Self::FlagRequest => "PidLidFlagRequest",
             Self::Location => "PidLidLocation",
+            Self::PercentComplete => "PidLidPercentComplete",
             Self::Recurring => "PidLidRecurring",
             Self::ResponseStatus => "PidLidResponseStatus",
             Self::SideEffects => "PidLidSideEffects",
+            Self::TaskComplete => "PidLidTaskComplete",
+            Self::TaskDateCompleted => "PidLidTaskDateCompleted",
+            Self::TaskStatus => "PidLidTaskStatus",
+            Self::ToDoOrdinalDate => "PidLidToDoOrdinalDate",
+            Self::ToDoSubOrdinal => "PidLidToDoSubOrdinal",
+            Self::ToDoTitle => "PidLidToDoTitle",
         }
     }
 
@@ -322,6 +435,35 @@ pub const NEW_CONTACT_PROPERTIES: [NamedProperty; CONTACT_COUNT + NEW_CONTACT_CO
     NamedProperty::Email1OriginalDisplayName,
     NamedProperty::Email1OriginalEntryId,
     NamedProperty::FileUnder,
+];
+
+/// The named properties a follow-up flag is written from, and read back through.
+///
+/// Setting a flag also writes four `PidTag`s — `PidTagFlagStatus`, `PidTagFollowupIcon`,
+/// `PidTagReplyRequested` and `PidTagResponseRequested` — which have fixed ids and need no lookup.
+/// These four are the rest of [MS-OXOFLAG] §3.1.4.1.1 and §3.1.4.1.3 minus the two the module
+/// documentation explains are deliberately absent.
+pub const FOLLOW_UP_PROPERTIES: [NamedProperty; FOLLOW_UP_COUNT] = [
+    NamedProperty::FlagRequest,
+    NamedProperty::ToDoTitle,
+    NamedProperty::ToDoOrdinalDate,
+    NamedProperty::ToDoSubOrdinal,
+];
+
+/// The named properties **marking a flag complete** needs, which is the flag set plus four.
+///
+/// The four are [MS-OXOFLAG] §2.2.2's shared task properties. They are not decoration: a message
+/// whose `PidTagFlagStatus` says `followupComplete` while `PidLidTaskComplete` is still false is a
+/// message that reads as done in one pane of a client and as outstanding in another.
+pub const COMPLETE_FLAG_PROPERTIES: [NamedProperty; FOLLOW_UP_COUNT + COMPLETE_FLAG_COUNT] = [
+    NamedProperty::FlagRequest,
+    NamedProperty::ToDoTitle,
+    NamedProperty::ToDoOrdinalDate,
+    NamedProperty::ToDoSubOrdinal,
+    NamedProperty::TaskStatus,
+    NamedProperty::TaskComplete,
+    NamedProperty::PercentComplete,
+    NamedProperty::TaskDateCompleted,
 ];
 
 #[cfg(test)]

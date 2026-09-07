@@ -82,15 +82,17 @@ pub use crate::http::{
 };
 pub use crate::oxcdata::{
     APPOINTMENT_COLUMNS, APPOINTMENT_PROPERTIES, ATTACHMENT_COLUMNS, ATTACHMENT_PROPERTIES,
-    AttachMethod, AttachmentNumber, CONTACT_COLUMNS, CONTACT_PROPERTIES, CONTENTS_COLUMNS, Cell,
-    ContainerClass, FOLDER_PROPERTIES, FileTime, Floating64, FolderEntryId, FolderId, FuzzyLevel,
-    Guid, HIERARCHY_COLUMNS, LegacyDn, LongTermId, MAILBOX_PROPERTIES, MESSAGE_PROPERTIES,
-    MessageClass, MessageId, NEW_APPOINTMENT_PROPERTIES, NEW_CONTACT_PROPERTIES, NamedProperty,
+    AttachMethod, AttachmentNumber, COMPLETE_FLAG_PROPERTIES, CONTACT_COLUMNS, CONTACT_PROPERTIES,
+    CONTENTS_COLUMNS, Cell, ContainerClass, FOLDER_PROPERTIES, FOLLOW_UP_PROPERTIES, FileTime,
+    FlagStatus, Floating64, FolderEntryId, FolderId, FollowupIcon, FuzzyLevel, Guid,
+    HIERARCHY_COLUMNS, LegacyDn, LongTermId, MAILBOX_PROPERTIES, MESSAGE_PROPERTIES, MessageClass,
+    MessageFlags, MessageId, NEW_APPOINTMENT_PROPERTIES, NEW_CONTACT_PROPERTIES, NamedProperty,
     NamedPropertyId, OneOffEntryId, PropertyName, PropertyNameKind, PropertyProblem, PropertyRow,
     PropertySet, PropertySetId, PropertySetIter, PropertyTag, PropertyType, PropertyValue,
     Recipient, RecipientType, RelationalOperator, ReplicaId, Restriction, RowForm,
-    SMTP_ADDRESS_TYPE, SPECIAL_FOLDER_PROPERTIES, ShortTermId, SortDirection, SortOrder,
-    SortOrderSet, SpecialFolder, StoreObjectType, TableString, TaggedValue, one_off_provider,
+    SMTP_ADDRESS_TYPE, SPECIAL_FOLDER_PROPERTIES, STATE_PROPERTIES, ServerEntryId, ShortTermId,
+    SortDirection, SortOrder, SortOrderSet, SpecialFolder, StoreObjectType, TableString,
+    TaggedValue, one_off_provider,
 };
 pub use crate::rop::{
     Bookmark, CreateAttachmentResponse, CreateMessageResponse, DeleteMessagesResponse, FolderDepth,

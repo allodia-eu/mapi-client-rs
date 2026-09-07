@@ -155,6 +155,29 @@ pub const APPOINTMENT_COLUMNS: [PropertyTag; 3] = [
     PropertyTag::MESSAGE_CLASS,
 ];
 
+/// What a message says about its own state: read or not, sent or not, flagged or not.
+///
+/// The three questions "flag a message" can mean, together in one fetch because a client that asks
+/// only one of them gives a confidently wrong answer to the others.
+/// [`PidTagMessageFlags`](PropertyTag::MESSAGE_FLAGS) carries the read bit,
+/// [`PidTagFlagStatus`](PropertyTag::FLAG_STATUS) the follow-up flag, and
+/// [`PidTagClientSubmitTime`](PropertyTag::CLIENT_SUBMIT_TIME) says whether it was ever submitted.
+///
+/// **Expect most of these to come back absent.** [MS-OXOFLAG] §2.2.1.1 has the flag properties
+/// exist only on a flagged message, so a fetch of an ordinary one answers with nothing for four of
+/// the six — which is the answer, not a failure.
+///
+/// [MS-OXOFLAG] §2.2.1 — the flagging properties
+/// [MS-OXCMSG] §2.2.1.6 — `PidTagMessageFlags`
+pub const STATE_PROPERTIES: [PropertyTag; 6] = [
+    PropertyTag::MESSAGE_FLAGS,
+    PropertyTag::FLAG_STATUS,
+    PropertyTag::FOLLOWUP_ICON,
+    PropertyTag::FLAG_COMPLETE_TIME,
+    PropertyTag::TODO_ITEM_FLAGS,
+    PropertyTag::CLIENT_SUBMIT_TIME,
+];
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,7 +220,7 @@ mod tests {
     /// widen the answer for nothing.
     #[test]
     fn no_set_names_the_same_tag_twice() {
-        let sets: [&[PropertyTag]; 9] = [
+        let sets: [&[PropertyTag]; 10] = [
             &HIERARCHY_COLUMNS,
             &CONTENTS_COLUMNS,
             &ATTACHMENT_COLUMNS,
@@ -207,6 +230,7 @@ mod tests {
             &ATTACHMENT_PROPERTIES,
             &CONTACT_COLUMNS,
             &APPOINTMENT_COLUMNS,
+            &STATE_PROPERTIES,
         ];
         for set in sets {
             let mut unique = set.to_vec();

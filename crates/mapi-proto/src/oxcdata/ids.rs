@@ -177,6 +177,9 @@ const FILETIME_TO_UNIX_SECONDS: i64 = 11_644_473_600;
 /// 100-nanosecond intervals in one second.
 const FILETIME_TICKS_PER_SECOND: u64 = 10_000_000;
 
+/// 100-nanosecond intervals in one minute, which [MS-OXOFLAG] §2.2.1.3 writes out as 600,000,000.
+const FILETIME_TICKS_PER_MINUTE: u64 = 600_000_000;
+
 impl FileTime {
     /// Wraps a raw tick count.
     #[must_use]
@@ -217,6 +220,33 @@ impl FileTime {
         i64::try_from(self.0 / FILETIME_TICKS_PER_SECOND)
             .ok()?
             .checked_sub(FILETIME_TO_UNIX_SECONDS)
+    }
+
+    /// The same instant with its seconds discarded, rounded down to the minute.
+    ///
+    /// One property in this crate requires it. [MS-OXOFLAG] §2.2.1.3: `PidTagFlagCompleteTime`'s
+    /// "smallest resolution MUST be minutes, and the value MUST be a multiple of 600,000,000".
+    /// Offered rather than applied silently, because which properties carry that constraint is the
+    /// caller's question and truncating a time it did not ask to truncate would be worse.
+    ///
+    /// ```
+    /// use mapi_proto::FileTime;
+    ///
+    /// let at = FileTime::from_unix_seconds(1_789_030_845).expect("after 1601");
+    /// let minute = at.to_whole_minutes();
+    /// assert_eq!(minute.to_unix_seconds(), Some(1_789_030_800));
+    /// // Already a multiple of 600,000,000, so truncating again changes nothing.
+    /// assert_eq!(minute.to_whole_minutes(), minute);
+    /// ```
+    #[must_use]
+    pub const fn to_whole_minutes(self) -> Self {
+        // The divisor is a non-zero constant, so `checked_div` cannot answer `None`. Written this
+        // way because the workspace forbids the bare operators, and `match` because `unwrap_or` is
+        // not `const` on the pinned toolchain.
+        match self.0.checked_div(FILETIME_TICKS_PER_MINUTE) {
+            Some(minutes) => Self(minutes.saturating_mul(FILETIME_TICKS_PER_MINUTE)),
+            None => self,
+        }
     }
 }
 

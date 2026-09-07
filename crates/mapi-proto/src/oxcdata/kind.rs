@@ -135,6 +135,12 @@ pub enum PropertyType {
     Time,
     /// `PtypGuid`, `0x0048`: 16 bytes.
     Guid,
+    /// `PtypServerId`, `0x00FB`: a COUNT of bytes, then a folder id, a message id and an instance.
+    ///
+    /// Counted like a `PtypBinary` rather than fixed at its 21 bytes, because [MS-OXCDATA]
+    /// §2.11.1.4 lets a client define its own shape under the same type code — see
+    /// [`ServerEntryId`](crate::ServerEntryId).
+    ServerId,
     /// `PtypBinary`, `0x0102`: a COUNT of bytes, then that many bytes.
     Binary,
     /// `PtypMultipleInteger32`, `0x1003`: a COUNT of values, then that many `PtypInteger32`.
@@ -164,6 +170,7 @@ impl PropertyType {
             0x001F => Self::String,
             0x0040 => Self::Time,
             0x0048 => Self::Guid,
+            0x00FB => Self::ServerId,
             0x0102 => Self::Binary,
             0x1003 => Self::MultipleInteger32,
             0x101F => Self::MultipleString,
@@ -187,6 +194,7 @@ impl PropertyType {
             Self::String => 0x001F,
             Self::Time => 0x0040,
             Self::Guid => 0x0048,
+            Self::ServerId => 0x00FB,
             Self::Binary => 0x0102,
             Self::MultipleInteger32 => 0x1003,
             Self::MultipleString => 0x101F,
@@ -210,6 +218,7 @@ impl PropertyType {
             Self::String => "PtypString",
             Self::Time => "PtypTime",
             Self::Guid => "PtypGuid",
+            Self::ServerId => "PtypServerId",
             Self::Binary => "PtypBinary",
             Self::MultipleInteger32 => "PtypMultipleInteger32",
             Self::MultipleString => "PtypMultipleString",
@@ -246,7 +255,7 @@ mod tests {
     /// Every modelled type, with the code [MS-OXCDATA] §2.11.1 gives it. Transcribed from the
     /// table rather than from this crate's own `new`, so a typo in one is not confirmed by the
     /// other.
-    const MODELLED: [(u16, PropertyType, &str); 15] = [
+    const MODELLED: [(u16, PropertyType, &str); 16] = [
         (0x0002, PropertyType::Integer16, "PtypInteger16"),
         (0x0003, PropertyType::Integer32, "PtypInteger32"),
         (0x0005, PropertyType::Floating64, "PtypFloating64"),
@@ -258,6 +267,7 @@ mod tests {
         (0x001F, PropertyType::String, "PtypString"),
         (0x0040, PropertyType::Time, "PtypTime"),
         (0x0048, PropertyType::Guid, "PtypGuid"),
+        (0x00FB, PropertyType::ServerId, "PtypServerId"),
         (0x0102, PropertyType::Binary, "PtypBinary"),
         (
             0x1003,

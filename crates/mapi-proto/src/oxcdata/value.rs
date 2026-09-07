@@ -1,7 +1,7 @@
 //! Property values, and the truncation a table quietly applies to strings.
 
 use crate::error::ErrorCode;
-use crate::oxcdata::{FileTime, Guid, PropertyType};
+use crate::oxcdata::{FileTime, Guid, PropertyType, ServerEntryId};
 
 mod codec;
 
@@ -180,6 +180,13 @@ pub enum PropertyValue {
     Guid(Guid),
     /// A `PtypBinary` value.
     Binary(Vec<u8>),
+    /// A `PtypServerId` value — a folder and a message named by the ids this store holds them
+    /// under.
+    ///
+    /// Kept apart from [`Binary`](Self::Binary), which is what the bytes would otherwise decode as,
+    /// because the two ask different questions of a caller: binary content is opaque and this is
+    /// not. See [`ServerEntryId`].
+    ServerId(ServerEntryId),
     /// A `PtypMultipleInteger32` value.
     MultipleInteger32(Vec<u32>),
     /// A `PtypMultipleString` value.
@@ -213,6 +220,7 @@ impl PropertyValue {
             Self::Time(_) => PropertyType::Time,
             Self::Guid(_) => PropertyType::Guid,
             Self::Binary(_) => PropertyType::Binary,
+            Self::ServerId(_) => PropertyType::ServerId,
             Self::MultipleInteger32(_) => PropertyType::MultipleInteger32,
             Self::MultipleString(_) => PropertyType::MultipleString,
             Self::MultipleBinary(_) => PropertyType::MultipleBinary,
@@ -315,6 +323,15 @@ impl PropertyValue {
         }
     }
 
+    /// The value if it is a `PtypServerId`.
+    #[must_use]
+    pub const fn as_server_id(&self) -> Option<&ServerEntryId> {
+        match self {
+            Self::ServerId(value) => Some(value),
+            _ => None,
+        }
+    }
+
     /// The error code, if the server sent one in place of a value.
     #[must_use]
     pub const fn as_error(&self) -> Option<ErrorCode> {
@@ -337,6 +354,7 @@ impl core::fmt::Display for PropertyValue {
             Self::Time(value) => write!(f, "FILETIME({})", value.as_u64()),
             Self::Guid(value) => write!(f, "{value}"),
             Self::Binary(bytes) => write!(f, "{} byte(s)", bytes.len()),
+            Self::ServerId(value) => write!(f, "{value}"),
             Self::MultipleInteger32(values) => write!(f, "{values:?}"),
             Self::MultipleString(values) => {
                 f.write_str("[")?;
