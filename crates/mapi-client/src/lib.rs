@@ -61,8 +61,21 @@
 //! large for the response buffer comes back as an error instead of a value and any real body
 //! clears that bar.
 //!
+//! **Archiving, flagging and sending are one round trip each.** A move opens both folders in the
+//! same buffer as the move itself; marking a page of messages read is one ROP for the whole page,
+//! because `RopSetReadFlags` takes a list of ids rather than an open message; and
+//! [`NewMessage::send`] is [`NewMessage::save`] with a `RopSubmitMessage` in the same buffer as the
+//! final save.
+//!
 //! # What the types enforce
 //!
+//! * **Success is not the same question as "did it happen".** The move, the copy, the read-flag
+//!   change and the delete all return success while doing part of the job, and say so only in a
+//!   `PartialCompletion` byte — so every one of them hands back a `bool` for whether it was
+//!   complete rather than `()`. See [`Folder::move_messages`].
+//! * **Marking a message read cannot send a read receipt by accident.** It is the same ROP, so
+//!   [`ReadFlags`] makes the choice explicit — and it makes "mark unread" unwritable without the
+//!   suppress bit that [MS-OXCMSG] §2.2.3.10.1 requires alongside it.
 //! * **One request in flight.** MAPI/HTTP allows exactly one per Session Context, and a violation
 //!   comes back as `X-ResponseCode` 15 (Invalid Sequence), pointing nowhere near the cause. Every
 //!   method that sends anything takes `&mut self`, so the borrow checker refuses the second one.
@@ -137,16 +150,18 @@ pub use mapi_proto;
 /// so that the common path needs one dependency rather than two.
 pub use mapi_proto::{
     APPOINTMENT_COLUMNS, APPOINTMENT_PROPERTIES, ATTACHMENT_COLUMNS, ATTACHMENT_PROPERTIES,
-    AttachMethod, AttachmentNumber, Bookmark, CONTACT_COLUMNS, CONTACT_PROPERTIES,
-    CONTENTS_COLUMNS, Cell, Connected, ContainerClass, ErrorCode, FOLDER_PROPERTIES, FileTime,
-    Floating64, FolderDepth, FolderEntryId, FolderId, FuzzyLevel, Guid, HIERARCHY_COLUMNS, Headers,
-    Lcid, LegacyDn, LogonResponse, LongTermId, MAILBOX_PROPERTIES, MESSAGE_PROPERTIES,
-    MessageClass, MessageId, MessageMode, NEW_APPOINTMENT_PROPERTIES, NEW_CONTACT_PROPERTIES,
-    NamedProperty, NamedPropertyId, OneOffEntryId, OpenMessageResponse, OpenRecipient,
-    PropertyName, PropertyNameKind, PropertyProblem, PropertyRow, PropertySet, PropertySetId,
-    PropertySetIter, PropertyTag, PropertyType, PropertyValue, Recipient, RecipientType,
-    RelationalOperator, ReplicaId, RequestType, Restriction, RowForm, SMTP_ADDRESS_TYPE,
-    ShortTermId, SortDirection, SortOrder, SortOrderSet, SpecialFolder, StoreObjectType,
+    AttachMethod, AttachmentNumber, Bookmark, COMPLETE_FLAG_PROPERTIES, CONTACT_COLUMNS,
+    CONTACT_PROPERTIES, CONTENTS_COLUMNS, Cell, Connected, ContainerClass, ErrorCode,
+    FOLDER_PROPERTIES, FOLLOW_UP_PROPERTIES, FileTime, FlagStatus, Floating64, FolderDepth,
+    FolderEntryId, FolderId, FollowupIcon, FuzzyLevel, Guid, HIERARCHY_COLUMNS, Headers, Lcid,
+    LegacyDn, LogonResponse, LongTermId, MAILBOX_PROPERTIES, MESSAGE_PROPERTIES, MessageClass,
+    MessageFlags, MessageId, MessageMode, MoveCopyMessagesResponse, NEW_APPOINTMENT_PROPERTIES,
+    NEW_CONTACT_PROPERTIES, NamedProperty, NamedPropertyId, OneOffEntryId, OpenMessageResponse,
+    OpenRecipient, ProgressResponse, PropertyName, PropertyNameKind, PropertyProblem, PropertyRow,
+    PropertySet, PropertySetId, PropertySetIter, PropertyTag, PropertyType, PropertyValue,
+    ReadFlags, Recipient, RecipientType, RelationalOperator, ReplicaId, RequestType, Restriction,
+    RowForm, SMTP_ADDRESS_TYPE, STATE_PROPERTIES, ServerEntryId, SetReadFlagsResponse, ShortTermId,
+    SortDirection, SortOrder, SortOrderSet, SpecialFolder, StoreObjectType, SubmitFlags,
     TableStatus, TableString, TaggedValue, WellKnownFolder, one_off_provider,
 };
 
