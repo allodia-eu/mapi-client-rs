@@ -15,6 +15,10 @@ Two conventions specific to this project:
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.4.0] - 2026-09-07
+
 Acting on items, and then reaching mailboxes the account does not own. `0.3.0` could create, read
 and delete a message; this adds *sending* one, *moving* one, and both of the things MAPI means by
 *flagging* one — the read bit of `PidTagMessageFlags`, which has its own ROP, and the follow-up flag
@@ -35,8 +39,19 @@ between them in both directions and a shared mailbox opened on a delegate's own 
 corpus grows by three scenarios and the whole of it re-captures byte for byte — 546 files identical
 — with two write scenarios in it.
 
-**This is a breaking release**: `SESSION_EXCHANGES` aside, three public items changed shape and one
-behavioural change is not visible to `cargo-semver-checks` at all. Both are listed under *Changed*.
+**There is a new crate**: `mapi-auth`, published here for the first time. It is a dependency of
+`mapi-client` under the default `ntlm` feature, and is separately useful to anyone driving
+`mapi-proto` with an HTTP client of their own.
+
+**This is a breaking release**, and one item is the whole of it: `NamedProperty::ALL` grows from
+sixteen entries to twenty-four, which changes its type. `ErrorCode`, `Attachment` and
+`EmbeddedMessage` moved to modules of their own and are re-exported from where they were, so nothing
+breaks at the path a caller writes.
+
+**Two changes `cargo-semver-checks` cannot see**, and they matter more than the one it can:
+`Credentials::Ntlm` and `Credentials::Negotiate` reconfigure the HTTP client and serialise requests
+through it, so a *clone of such a client buys no concurrency*; and handshake legs are not reported
+to an `Observer`. Both are listed under *Changed*, and neither affects `Basic` or `Bearer`.
 
 ### Added
 
@@ -268,6 +283,11 @@ Open Specification feedback.
   `X-RequestType` and an empty body — so feeding one to the fixture recorder would write a file that
   is not a request/response pair. The exchange that carried the real request is observed as before,
   and the fixture corpus is captured with Basic.
+- **`chacha20` moved from `0.10.1` to `0.10.2` in the lockfile**, because `0.10.1` is yanked and
+  `cargo publish` says so. It is not a vulnerability and nothing was exposed: the entry is stale —
+  `cargo tree -i chacha20 --target all --all-features` finds no path to it from any crate here — so
+  it is reachable by nothing this workspace builds. What the bump is for is a clean `cargo publish`
+  and `mapi-cli` built `--locked` from this repository.
 
 - **`NamedProperty::ALL` grows from sixteen entries to twenty-four**, which changes its type. The
   same is true of `PropertyType`, `PropertyValue` and `RopResponse`, which gain variants — all three
@@ -774,7 +794,8 @@ to the repository.
   measured, so neither LZ77/DIRECT2 nor the `0xA5` XOR layer is implemented. A server that refuses
   those flags is not supported.
 
-[Unreleased]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/allodia-eu/mapi-client-rs/releases/tag/v0.1.0

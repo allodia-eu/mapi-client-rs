@@ -23,7 +23,7 @@ batch.set_columns(table, &HIERARCHY_COLUMNS).query_rows(table, 50);
 let request = session.execute(batch)?;   // one round trip for the whole chain
 ```
 
-**Status:** `0.3.0` released, and the tree is ahead of it. The transport envelope, the ROP layer,
+**Status:** `0.4.0` released. The transport envelope, the ROP layer,
 the OXCDATA structures and the session state machine are implemented. `Connect`, `Execute`,
 `Disconnect` and `PING` are the request types covered, with the logon, folder, table, property,
 long-term-id, named-property, message, attachment and stream ROPs on top — enough to walk a whole
@@ -32,9 +32,10 @@ not name, ask a store which id it has allocated for a `PidLid`, sort and filter 
 server, and read a message down to its body and its attachments. Then the other direction:
 `RopCreateMessage`, `RopModifyRecipients`, `RopCreateAttachment`, `RopWriteStream`,
 `RopSaveChangesMessage` and `RopDeleteMessages`, with the one-off entry ids that address a recipient
-without an address book. Unreleased on top of that: `RopSubmitMessage`, `RopMoveCopyMessages`,
-`RopSetReadFlags` and `RopRemoveAllRecipients`, and `RopProgress` modelled so that a server which
-answers one unasked does not desynchronise the rest of the buffer. Sixteen of the OXCDATA property
+without an address book. And then acting on what is there: `RopSubmitMessage`,
+`RopMoveCopyMessages`, `RopSetReadFlags` and `RopRemoveAllRecipients`, with `RopProgress` modelled
+so that a server which answers one unasked does not desynchronise the rest of the buffer. Sixteen
+of the OXCDATA property
 types are modelled, and six of the twelve restriction formats. No notifications, no ICS and no
 address book endpoint.
 
