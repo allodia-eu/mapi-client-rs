@@ -97,10 +97,11 @@ pub use crate::oxcdata::{
 pub use crate::rop::{
     Bookmark, CreateAttachmentResponse, CreateMessageResponse, DeleteMessagesResponse, FolderDepth,
     GetPropertiesResponse, HandleSlot, IdFromLongTermIdResponse, LogonResponse,
-    LongTermIdFromIdResponse, MessageMode, NameRegistration, ObjectHandle, OpenMessageResponse,
-    OpenRecipient, PropertyIdsResponse, PropertyNamesResponse, PropertyProblemsResponse,
-    QueryRowsResponse, ReadStreamResponse, RopBatch, RopId, RopResponse, SaveChangesResponse,
-    StreamMode, StreamSizeResponse, TableStatus, TableStatusResponse, WellKnownFolder,
+    LongTermIdFromIdResponse, MessageMode, MoveCopyMessagesResponse, NameRegistration,
+    ObjectHandle, OpenMessageResponse, OpenRecipient, ProgressResponse, PropertyIdsResponse,
+    PropertyNamesResponse, PropertyProblemsResponse, QueryRowsResponse, ReadFlags,
+    ReadStreamResponse, RopBatch, RopId, RopResponse, SaveChangesResponse, SetReadFlagsResponse,
+    StreamMode, StreamSizeResponse, SubmitFlags, TableStatus, TableStatusResponse, WellKnownFolder,
     WriteStreamResponse,
 };
 pub use crate::session::{Connected, Execution, Outcome, Session, SessionBuilder};

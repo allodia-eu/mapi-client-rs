@@ -16,6 +16,10 @@ use crate::rop::create::{
     encode_create_attachment, encode_create_message, encode_delete_messages,
     encode_modify_recipients, encode_save_changes_attachment, encode_save_changes_message,
 };
+use crate::rop::send::{
+    ReadFlags, SubmitFlags, encode_move_copy_messages, encode_remove_all_recipients,
+    encode_set_read_flags, encode_submit_message,
+};
 use crate::rop::stream::{encode_commit_stream, encode_write_stream};
 
 impl RopBatch {
@@ -77,6 +81,102 @@ impl RopBatch {
     ) -> &mut Self {
         if self.check(message) {
             self.try_push(|w| encode_modify_recipients(w, message.index(), recipients));
+        }
+        self
+    }
+
+    /// Takes every recipient off an open message.
+    ///
+    /// The only way to shorten a recipient list.
+    /// [`modify_recipients`](Self::modify_recipients) addresses each row by a `RowId` that is its
+    /// position in the list it was given, so it can rewrite and it can extend and it can never
+    /// remove — which means "replace the recipients" is this ROP followed by that one, and
+    /// forgetting the first leaves the old addresses on a message about to be submitted.
+    ///
+    /// [MS-OXCROPS] §2.2.6.4 — `RopRemoveAllRecipients`
+    pub fn remove_all_recipients(&mut self, message: HandleSlot) -> &mut Self {
+        if self.check(message) {
+            self.push(|w| encode_remove_all_recipients(w, message.index()));
+        }
+        self
+    }
+
+    /// Hands an open message to the transport.
+    ///
+    /// **This sends real mail**, and the response says only that the server accepted it — there is
+    /// no dry run and no delivery report. The message has to be saved first: `RopSubmitMessage`
+    /// acts on what is in the store, not on uncommitted changes to the handle.
+    ///
+    /// The properties a message needs before a server will accept it are [MS-OXOMSG] §3.2.4.1's
+    /// and not this layer's, and the refusals are worth recognising by name:
+    /// [`ecTooManyRecips`](crate::ErrorCode::TOO_MANY_RECIPIENTS) means **none** of the recipients
+    /// got it ([MS-OXOMSG] §3.3.5.1), and
+    /// [`ecAccessDenied`](crate::ErrorCode::ACCESS_DENIED) is what an FAI message is refused with,
+    /// which reads like a permission problem and is not.
+    ///
+    /// [MS-OXCROPS] §2.2.7.1 — `RopSubmitMessage`
+    pub fn submit_message(&mut self, message: HandleSlot, flags: SubmitFlags) -> &mut Self {
+        if self.check(message) {
+            self.push(|w| encode_submit_message(w, message.index(), flags));
+        }
+        self
+    }
+
+    /// Moves or copies messages from one open folder to another.
+    ///
+    /// Both folders are handles rather than ids, and they are the reason this cannot be done in
+    /// fewer round trips than it takes to open them — which is none, because the opens chain in
+    /// the same buffer.
+    ///
+    /// Sent synchronously, as [`delete_messages`](Self::delete_messages) is. **Whether Exchange
+    /// honours that for a cross-folder move is a measurement rather than an assumption**, so a
+    /// [`RopProgress`](crate::RopResponse::Progress) arriving here is reported rather than
+    /// treated as impossible.
+    ///
+    /// **The response says whether it moved everything it was given**, and the ROP succeeds either
+    /// way — see [`MoveCopyMessagesResponse`](crate::MoveCopyMessagesResponse). There is also a
+    /// third response shape when the destination handle resolves to nothing, which is decoded
+    /// rather than skipped.
+    ///
+    /// [MS-OXCROPS] §2.2.4.6 — `RopMoveCopyMessages`
+    /// [MS-OXCFOLD] §2.2.1.6 — semantics
+    pub fn move_copy_messages(
+        &mut self,
+        source: HandleSlot,
+        destination: HandleSlot,
+        messages: &[MessageId],
+        copy: bool,
+    ) -> &mut Self {
+        if self.check(source) && self.check(destination) {
+            self.try_push(|w| {
+                encode_move_copy_messages(w, source.index(), destination.index(), messages, copy)
+            });
+        }
+        self
+    }
+
+    /// Changes the read state of messages in an open folder.
+    ///
+    /// Addressed at the folder and a list of ids rather than at an open message, which is what
+    /// makes marking a page of a contents table read one ROP instead of one per message.
+    ///
+    /// **It is not only a property write.** [MS-OXCMSG] §2.2.3.10 has the server send the read
+    /// receipt the sender asked for as part of this, so a client marking messages read on a user's
+    /// behalf wants [`ReadFlags::ReadQuietly`](crate::ReadFlags::ReadQuietly) rather than the
+    /// default — see [`ReadFlags`](crate::ReadFlags).
+    ///
+    /// **The response says whether it changed everything it was given**, and the ROP succeeds
+    /// either way.
+    ///
+    /// [MS-OXCROPS] §2.2.6.10 — `RopSetReadFlags`
+    pub fn set_read_flags(
+        &mut self,
+        folder: HandleSlot,
+        flags: ReadFlags,
+        messages: &[MessageId],
+    ) -> &mut Self {
+        if self.check(folder) {
+            self.try_push(|w| encode_set_read_flags(w, folder.index(), flags, messages));
         }
         self
     }

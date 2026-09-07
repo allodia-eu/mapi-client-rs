@@ -92,6 +92,14 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.6.5
     pub const MODIFY_RECIPIENTS: Self = Self(0x0E);
+    /// `RopMoveCopyMessages`, `0x33` — moves or copies messages between two folders.
+    ///
+    /// **Three response shapes, not two.** Besides success and an ordinary refusal there is the
+    /// null-destination failure of [MS-OXCROPS] §2.2.4.6.3, whose body continues past
+    /// `ReturnValue`.
+    ///
+    /// [MS-OXCROPS] §2.2.4.6
+    pub const MOVE_COPY_MESSAGES: Self = Self(0x33);
     /// `RopOpenAttachment`, `0x22` — opens one attachment by its `PidTagAttachNumber`.
     ///
     /// [MS-OXCROPS] §2.2.6.12
@@ -115,6 +123,14 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.9.1
     pub const OPEN_STREAM: Self = Self(0x2B);
+    /// `RopProgress`, `0x50` — how far an asynchronous operation has got.
+    ///
+    /// Nothing in this crate asks for one; every ROP that could is sent with
+    /// `WantAsynchronous = 0`. Recognised so that a server which answers one anyway is reported
+    /// rather than left to desynchronise the rest of the buffer.
+    ///
+    /// [MS-OXCROPS] §2.2.8.13
+    pub const PROGRESS: Self = Self(0x50);
     /// `RopQueryRows`, `0x15`.
     ///
     /// [MS-OXCROPS] §2.2.5.4
@@ -127,6 +143,13 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.15.3
     pub const RELEASE: Self = Self(0x01);
+    /// `RopRemoveAllRecipients`, `0x0D` — takes every recipient off a message.
+    ///
+    /// The counterpart `RopModifyRecipients` does not have: that ROP adds and modifies rows by
+    /// `RowId` and can never shorten a list, so this is the only way to clear one.
+    ///
+    /// [MS-OXCROPS] §2.2.6.4
+    pub const REMOVE_ALL_RECIPIENTS: Self = Self(0x0D);
     /// `RopRestrict`, `0x14` — establishes a filter for a table.
     ///
     /// [MS-OXCROPS] §2.2.5.3
@@ -150,10 +173,25 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.8.6
     pub const SET_PROPERTIES: Self = Self(0x0A);
+    /// `RopSetReadFlags`, `0x66` — changes the read state of messages in a folder.
+    ///
+    /// Addressed at a Folder object and a list of ids, not at an open message. It also sends the
+    /// read receipt the sender asked for, which is why the request carries flags rather than a
+    /// boolean.
+    ///
+    /// [MS-OXCROPS] §2.2.6.10
+    pub const SET_READ_FLAGS: Self = Self(0x66);
     /// `RopSortTable`, `0x13` — orders a table's rows by a sort key.
     ///
     /// [MS-OXCROPS] §2.2.5.2
     pub const SORT_TABLE: Self = Self(0x13);
+    /// `RopSubmitMessage`, `0x32` — hands a message to the transport.
+    ///
+    /// **It sends real mail.** There is no dry run, and [MS-OXOMSG] §2.2.4.2's `RopAbortSubmit`
+    /// only helps while the message is still queued.
+    ///
+    /// [MS-OXCROPS] §2.2.7.1
+    pub const SUBMIT_MESSAGE: Self = Self(0x32);
     /// `RopWriteStream`, `0x2D` — writes bytes at the stream's cursor.
     ///
     /// [MS-OXCROPS] §2.2.9.3
@@ -181,6 +219,11 @@ impl RopId {
             Self::CREATE_MESSAGE => "RopCreateMessage",
             Self::SAVE_CHANGES_MESSAGE => "RopSaveChangesMessage",
             Self::MODIFY_RECIPIENTS => "RopModifyRecipients",
+            Self::REMOVE_ALL_RECIPIENTS => "RopRemoveAllRecipients",
+            Self::SUBMIT_MESSAGE => "RopSubmitMessage",
+            Self::MOVE_COPY_MESSAGES => "RopMoveCopyMessages",
+            Self::SET_READ_FLAGS => "RopSetReadFlags",
+            Self::PROGRESS => "RopProgress",
             Self::CREATE_ATTACHMENT => "RopCreateAttachment",
             Self::SAVE_CHANGES_ATTACHMENT => "RopSaveChangesAttachment",
             Self::DELETE_MESSAGES => "RopDeleteMessages",
@@ -236,6 +279,11 @@ mod tests {
             (RopId::CREATE_MESSAGE, 0x06, "RopCreateMessage"),
             (RopId::SAVE_CHANGES_MESSAGE, 0x0C, "RopSaveChangesMessage"),
             (RopId::MODIFY_RECIPIENTS, 0x0E, "RopModifyRecipients"),
+            (RopId::REMOVE_ALL_RECIPIENTS, 0x0D, "RopRemoveAllRecipients"),
+            (RopId::SUBMIT_MESSAGE, 0x32, "RopSubmitMessage"),
+            (RopId::MOVE_COPY_MESSAGES, 0x33, "RopMoveCopyMessages"),
+            (RopId::SET_READ_FLAGS, 0x66, "RopSetReadFlags"),
+            (RopId::PROGRESS, 0x50, "RopProgress"),
             (RopId::DELETE_MESSAGES, 0x1E, "RopDeleteMessages"),
             (RopId::CREATE_ATTACHMENT, 0x23, "RopCreateAttachment"),
             (

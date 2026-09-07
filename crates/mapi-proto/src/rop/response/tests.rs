@@ -1,4 +1,8 @@
+mod exceptions;
+
+use super::decode::{Decoding, decode_all};
 use super::*;
+use crate::error::Error;
 use crate::oxcdata::{HIERARCHY_COLUMNS, PropertyName, PropertyTag, PropertyValue, TableString};
 use crate::testing::{logon_response, query_rows_response};
 use crate::wire::Writer;
@@ -77,112 +81,6 @@ fn decodes_the_whole_folder_chain_in_order() {
             .unwrap()
             .as_str(),
         "Inbox"
-    );
-}
-
-/// The failure shape that breaks naive decoders: everything the success layout promises is simply
-/// absent, and the next ROP's response starts immediately after `ReturnValue`.
-#[test]
-fn a_failed_rop_stops_after_its_return_value() {
-    let mut w = Writer::new();
-    w.u8(RopId::LOGON.as_u8())
-        .u8(0)
-        .u32(ErrorCode::UNKNOWN_USER.as_u32());
-    w.u8(RopId::SET_COLUMNS.as_u8()).u8(2).u32(0).u8(0);
-
-    let responses = decode_all(&w.finish(), against(&no_columns())).unwrap();
-    assert_eq!(
-        responses.first(),
-        Some(&RopResponse::Failed {
-            rop: RopId::LOGON,
-            code: ErrorCode::UNKNOWN_USER
-        })
-    );
-    assert_eq!(
-        responses.first().and_then(RopResponse::failure),
-        Some(ErrorCode::UNKNOWN_USER)
-    );
-    assert!(matches!(responses.get(1), Some(RopResponse::SetColumns(_))));
-}
-
-/// The one failure that does *not* stop after `ReturnValue`. Treating it as a bare failure leaves
-/// `LogonFlags`, `ServerNameSize` and `ServerName` in the stream, and the next `RopId` is then read
-/// out of the middle of a server name.
-///
-/// [MS-OXCSTOR] §2.2.1.1.2
-#[test]
-fn a_logon_redirect_is_read_past_its_server_name() {
-    // LogonFlags, then a ServerNameSize that counts the terminating NUL.
-    const LOGON_FLAGS: u8 = 0x01;
-    const SERVER_NAME_SIZE: u8 = 11;
-
-    let mut w = Writer::new();
-    w.u8(RopId::LOGON.as_u8())
-        .u8(0)
-        .u32(ErrorCode::WRONG_SERVER.as_u32())
-        .u8(LOGON_FLAGS)
-        .u8(SERVER_NAME_SIZE)
-        .ascii_z("EXCHANGE-B");
-    w.u8(RopId::SET_COLUMNS.as_u8()).u8(2).u32(0).u8(0);
-
-    let responses = decode_all(&w.finish(), against(&no_columns())).unwrap();
-    assert_eq!(
-        responses.first(),
-        Some(&RopResponse::LogonRedirect {
-            server_name: "EXCHANGE-B".to_owned()
-        })
-    );
-    assert_eq!(
-        responses.first().and_then(RopResponse::redirect_server),
-        Some("EXCHANGE-B")
-    );
-    assert_eq!(
-        responses.first().and_then(RopResponse::failure),
-        Some(ErrorCode::WRONG_SERVER),
-        "a redirect is still a refusal"
-    );
-    assert!(
-        matches!(responses.get(1), Some(RopResponse::SetColumns(_))),
-        "the ROP after a redirect must still decode"
-    );
-    assert_eq!(
-        responses.get(1).and_then(RopResponse::redirect_server),
-        None,
-        "only a redirect names a server"
-    );
-}
-
-#[test]
-fn buffer_too_small_carries_the_size_needed_and_ends_the_stream() {
-    let mut w = Writer::new();
-    w.u8(RopId::BUFFER_TOO_SMALL.as_u8()).u16(4096);
-    w.bytes(&[0xDE, 0xAD, 0xBE, 0xEF]); // the request buffers that were not executed
-
-    let responses = decode_all(&w.finish(), against(&no_columns())).unwrap();
-    assert_eq!(
-        responses,
-        vec![RopResponse::BufferTooSmall { size_needed: 4096 }]
-    );
-}
-
-#[test]
-fn a_backoff_is_decoded_past_its_variable_length_tail() {
-    let mut w = Writer::new();
-    w.u8(RopId::BACKOFF.as_u8()).u8(0).u32(30_000).u8(1);
-    w.u8(RopId::QUERY_ROWS.as_u8()).u32(5_000); // one BackoffRop
-    w.u16(2).bytes(&[0xAA, 0xBB]); // AdditionalData
-    w.u8(RopId::SET_COLUMNS.as_u8()).u8(2).u32(0).u8(0);
-
-    let responses = decode_all(&w.finish(), against(&no_columns())).unwrap();
-    assert_eq!(
-        responses.first(),
-        Some(&RopResponse::Backoff {
-            duration_ms: 30_000
-        })
-    );
-    assert!(
-        matches!(responses.get(1), Some(RopResponse::SetColumns(_))),
-        "the ROP after a backoff must still decode"
     );
 }
 
