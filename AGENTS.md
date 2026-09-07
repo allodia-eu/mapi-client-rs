@@ -159,6 +159,15 @@ caller, the script then runs with no helpers defined and exits 0. `Invoke-Gate.p
    provisioned with, so a client subtly wrong about names passes against an English mailbox and
    fails against a Dutch one — the most misleading way for a test to be wrong. Folders are addressed
    by the id a logon reports, never by name.
+5. **A mailbox is named by an endpoint URL *and* a distinguished name, and they are a matched pair.**
+   The `?MailboxId=` selects a mailbox as surely as the `UserDn` does. Pairing the wrong two is
+   accepted by `Connect`, which reports the other mailbox's owner as though it had worked, and
+   refused by the `RopLogon` in the next request with `ecWrongServer` — so the mistake surfaces a
+   request later than it is made, in an error about servers. Never change one without the other.
+6. **Granting mailbox access is not the same as making it discoverable.** `FullAccess` without
+   `-AutoMapping $true` works and is never advertised, and Autodiscover's `AlternativeMailbox`
+   element is the only place MAPI/HTTP names a mailbox the caller does not own. A permission a
+   client can use and cannot find.
 
 ## Working conventions
 

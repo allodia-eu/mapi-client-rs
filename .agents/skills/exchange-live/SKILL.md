@@ -36,6 +36,7 @@ doc comments was made.
 ```powershell
 powershell.exe -File scripts\Invoke-Cli.ps1 -Mailbox developer -Password '<password>' messages --folder inbox
 powershell.exe -File scripts\Invoke-Cli.ps1 -Mailbox developer2 -Password '<password>' state --folder drafts --id 0x...
+powershell.exe -File scripts\Invoke-Cli.ps1 -Mailbox developer -Password '<password>' mailboxes developer@dev.local --open
 ```
 
 Everything after `-Password` goes to `mapi-cli` unchanged, `--dump` included. The five
@@ -56,7 +57,8 @@ message read changes its `PidTagMessageFlags` permanently and moves the corpus's
 ## Verify the client against the server
 
 ```powershell
-powershell.exe -File scripts\Test-Live.ps1 -Mailbox developer,developer2 -Password '<password>'
+powershell.exe -File scripts\Test-Live.ps1 -Mailbox developer,developer2 -Password '<password>' `
+    -SharedMailbox shared
 ```
 
 Everything else is derived from Exchange. This runs the `#[ignore]`d tests in
@@ -76,7 +78,8 @@ comment-based help at the top of the script.
 ## Refresh the fixture corpus
 
 ```powershell
-powershell.exe -File scripts\Capture-Fixtures.ps1 -Mailbox developer,developer2 -Password '<password>'
+powershell.exe -File scripts\Capture-Fixtures.ps1 -Mailbox developer,developer2 -Password '<password>' `
+    -SharedMailbox shared
 ```
 
 That single command asks Exchange for the deployment's details, derives the redaction rules from
@@ -108,8 +111,14 @@ to any encoding shows up there.
 ## Has the server changed?
 
 ```powershell
-powershell.exe -File scripts\Verify-Fixtures.ps1 -Mailbox developer,developer2 -Password '<password>'
+powershell.exe -File scripts\Verify-Fixtures.ps1 -Mailbox developer,developer2 -Password '<password>' `
+    -SharedMailbox shared
 ```
+
+**Pass `-SharedMailbox` to all three, and the same one every time.** `Test-Live.ps1` needs it for
+the shared-mailbox suite; the other two need it for the `wrong-server` capture, and a verify run
+without it re-captures nine scenarios out of ten and reports the tenth as missing — which is a
+difference about the arguments rather than about the server.
 
 Re-captures into a scratch directory and demands byte-for-byte equality with what is committed.
 Any difference is a finding. That rule is only usable because capture already removes the few
@@ -127,7 +136,13 @@ out, and a change in it would be a real finding.
 
 When it reports a difference, in rough order of likelihood:
 
-1. **The mailbox changed.** A message arrived, a folder was created. Re-capture.
+1. **The mailbox changed.** A message arrived, a folder was created. Re-capture. One cause of this
+   is a capture run itself, and it is not obvious: capturing `acts` puts its recipient into
+   Exchange's own `RecipientCache` folder, which moves that folder's row and the Store's
+   `PidTagContentCount`. Nothing in the scenario wrote there and nothing can undo it — but a cache
+   keyed by address does not grow when the same address recurs, so it settles after one run rather
+   than drifting. Two changed bytes in `session-en-us` after a first capture on a fresh lab are
+   expected; the same two changing *again* would not be.
 2. **The server was updated.** Re-measure the version-tied claims in the source — *re-measure them,
    do not renumber them* — and commit the new corpus with the new version in `MANIFEST.toml`.
 3. **This workspace changed what it sends.** The interesting one, and why request bodies are
@@ -137,13 +152,24 @@ When it reports a difference, in rough order of likelihood:
 
 ```powershell
 powershell.exe -File scripts\Initialize-ExchangeLab.ps1 `
-    -Mailbox developer:en-US,developer2:nl-NL -Password '<password>' -EnableBasic -Seed
+    -Mailbox developer:en-US,developer2:nl-NL -Password '<password>' -EnableBasic -Seed `
+    -SharedMailbox shared
 
 powershell.exe -File scripts\Add-LabItems.ps1 -Mailbox developer,developer2 -Password '<password>'
 ```
 
-Two things a lab needs that are not the default: **Basic** on the MAPI virtual directory, because
-that is the only scheme `mapi-client` implements, and **two mailboxes in different languages**.
+Three things a lab needs that are not the default: **Basic** on the MAPI virtual directory, because
+that is the only scheme `mapi-client` implements, **two mailboxes in different languages**, and a
+**shared mailbox** both of them have `FullAccess` over.
+
+**The shared mailbox has to be granted with automapping, and that is the part that is easy to get
+wrong.** `Add-MailboxPermission -AutoMapping $true` is what puts the mailbox into each grantee's
+Autodiscover response as an `AlternativeMailbox` element, and that element is the *only* place in
+MAPI/HTTP a mailbox you do not own is ever named — there is no ROP that enumerates them. Granted
+without automapping, the access works perfectly and no client can discover it, so
+`mapi-cli mailboxes` reports nothing and the shared-mailbox suite fails looking for a mailbox it can
+already open. Automapping also takes a few minutes to reach Autodiscover; `mapi-cli mailboxes` is
+how to tell when it has.
 
 The second command is what an *item* read needs, and the first cannot do it: `-Seed` sends mail,
 which is all a folder-and-table client ever needed. `Add-LabItems.ps1` adds four appointments, three
@@ -154,6 +180,28 @@ client.
 **Seeding adds; it does not reset.** Both the live suite and the `items` capture assert exact
 counts, so run it against a mailbox that does not already hold them. Both say which script to run
 when they find nothing, rather than reporting an empty calendar as a passing read.
+
+## Opening a mailbox somebody else owns
+
+Two facts, both measured, and both about *where* a mistake surfaces rather than what it is.
+
+**The endpoint URL and the distinguished name are a matched pair.** The `?MailboxId=` selects a
+mailbox as surely as the `UserDn` does, and the two must name the same one. Pairing the wrong two is
+**accepted by `Connect`**, whose response even reports the other mailbox's owner — the `RopLogon` in
+the next request is what refuses, with `ecWrongServer`. So there is no reusing one mailbox's endpoint
+for another: `MapiClient::at` takes both or neither, and `mapi-cli mailboxes` prints the pair for
+each mailbox so a hand-built command can be checked against it.
+
+**The access check and the pairing check are in different requests, and the first hides the second.**
+A mailbox this account has no rights to is refused at `Connect` with `ecLoginPerm`, before the
+endpoint mismatch can matter. That is why the `wrong-server` capture needs the *shared* mailbox and
+not simply the second lab mailbox — one lab mailbox has no rights over the other, so that pairing
+never gets far enough to be told it is on the wrong server. Discovering this cost a capture run.
+
+The redirect is worth reading when you see it. Its `ServerName` looks like a server's distinguished
+name and ends `cn=Servers/cn=<mailbox GUID>@<domain>` — and that GUID is exactly the `?MailboxId=`
+the URL was missing, which is more useful than [MS-OXCSTOR] §2.2.1.1.2's description of the field
+suggests.
 
 ## Things that have already cost time here
 

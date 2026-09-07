@@ -15,6 +15,7 @@ Part of [`mapi-client-rs`](https://github.com/allodia-eu/mapi-client-rs).
 mapi-cli ping                          is the endpoint there, and do the credentials work?
 mapi-cli connect                       what the server says about the mailbox, and its folder ids
 mapi-cli discover alice@example.test   what Autodiscover says about this mailbox
+mapi-cli mailboxes alice@... --open    every mailbox these credentials can open, and open each
 mapi-cli folders --recursive           the whole folder tree, tagged by container class
 mapi-cli folders --class IPF.Contact   only the contact folders, refinements included
 mapi-cli special --details             find Calendar, Contacts, Drafts and the rest, and open them
@@ -38,6 +39,12 @@ mapi-cli properties                    dump every property of the Store object
 mapi-cli capture session --scrub r.tsv record a conversation as fixtures
 ```
 
+`mailboxes` is the odd one out: it is the only subcommand whose answer comes from Autodiscover
+rather than from a ROP, because MAPI/HTTP has no verb that asks a server what else you may open. It
+therefore needs no `--endpoint` and no `--user-dn` — finding those for a mailbox you do not own is
+the work. It costs one Autodiscover round trip per mailbox plus one, because Exchange names each
+alternative mailbox by address rather than by distinguished name.
+
 **Six of those change a mailbox and one of them sends mail to a real address.** There is no dry-run
 mode: the subcommand is the consent. `send` reports what it did with the message afterwards, because
 where a sent message ends up is two properties that interact in a way [MS-OXOMSG] does not describe
@@ -60,8 +67,8 @@ easy to get wrong by hand:
 powershell.exe -File scripts\Invoke-Cli.ps1 -Mailbox developer -Password '<password>' messages --folder inbox
 ```
 
-**Status:** tracks the workspace, at `0.3.0`. Never published: `cargo build -p mapi-cli` from the
-repository.
+**Status:** tracks the workspace, at `0.3.0`, with `mailboxes` and a tenth captured scenario
+unreleased on top of it. Never published: `cargo build -p mapi-cli` from the repository.
 
 ## Licence
 
