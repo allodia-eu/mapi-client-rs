@@ -1,5 +1,7 @@
 //! What a server says about a mailbox.
 
+use crate::mailbox::AlternativeMailbox;
+
 /// The two URLs a protocol can be reachable at.
 ///
 /// At least one is always present; which one to use depends on where the client is, which this
@@ -245,6 +247,7 @@ impl MapiHttpEndpoint {
 pub struct Settings {
     pub(crate) user: User,
     pub(crate) protocols: Vec<Protocol>,
+    pub(crate) alternative_mailboxes: Vec<AlternativeMailbox>,
 }
 
 impl Settings {
@@ -258,6 +261,19 @@ impl Settings {
     #[must_use]
     pub fn protocols(&self) -> &[Protocol] {
         &self.protocols
+    }
+
+    /// The other mailboxes this account may open: archives, shared mailboxes and delegated ones.
+    ///
+    /// **This is the whole of "list mailboxes".** MAPI/HTTP has no enumeration verb, so what
+    /// Outlook shows below a user's own mailbox comes from here and nowhere else. An empty slice
+    /// means the server named none, which [MS-OXDSCLI] §2.2.4.1.1.2.5 makes the ordinary case:
+    /// the element is returned only when an alternative mailbox is associated with the user.
+    ///
+    /// [MS-OXDSCLI] §2.2.4.1.1.2.5 — `AlternativeMailbox`
+    #[must_use]
+    pub fn alternative_mailboxes(&self) -> &[AlternativeMailbox] {
+        &self.alternative_mailboxes
     }
 
     /// The `mapiHttp` protocol, paired with the distinguished name from the `User` element.

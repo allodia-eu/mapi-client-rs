@@ -71,6 +71,12 @@ const ITEM_EXCHANGES: usize = 27;
 const WRITE_EXCHANGES: usize = 18;
 const ACT_EXCHANGES: usize = 21;
 
+/// The two refusals, which are one exchange and three: a `Connect` the server will not accept
+/// stops there, while a mismatched endpoint and name costs a `Connect`, the `RopLogon` that
+/// refuses, and the `Disconnect` the client sends on its way out.
+const REFUSED_EXCHANGES: usize = 1;
+const WRONG_SERVER_EXCHANGES: usize = 3;
+
 /// The comment `mapi-cli capture` tried to set on the Store object, and which Exchange refused.
 /// Same reason as the page sizes: the request bodies only match if the replay sends the same
 /// value.
@@ -362,6 +368,55 @@ async fn a_refused_connect_replays_as_a_refusal() {
     assert_requests_match(&server, &exchanges).await;
 }
 
+/// The other refusal, and the one that opening a second mailbox invites: a real endpoint paired
+/// with a real distinguished name that another endpoint serves.
+///
+/// Everything about the first request says it worked. `Connect` succeeds, and its response names
+/// the owner of the mailbox in the distinguished name — so a client that stopped there would report
+/// having opened a mailbox it has not. The `RopLogon` in the *next* request is what refuses, with
+/// `ecWrongServer` and a redirect body that is not a logon response at all.
+///
+/// [MS-OXCSTOR] §2.2.1.1.2 — `RopLogon` redirect response buffer
+#[tokio::test]
+async fn a_mismatched_endpoint_and_name_replay_as_a_logon_redirect() {
+    let exchanges = scenario("wrong-server");
+    assert_eq!(exchanges.len(), WRONG_SERVER_EXCHANGES);
+    assert_eq!(
+        exchanges[0].status, 200,
+        "the Connect that works arrives as a success"
+    );
+
+    let server = server(&exchanges).await;
+    let client = MapiClient::builder()
+        .endpoint(format!("{}/mapi/emsmdb/", server.uri()))
+        .user_dn(user_dn(&exchanges))
+        .credentials(Credentials::basic("replay@example.test", "hunter2"))
+        .danger_allow_plaintext_http()
+        .build()
+        .expect("a client");
+
+    // The half that looks like success, and the reason this is a scenario rather than a comment.
+    let session = client
+        .connect()
+        .await
+        .expect("Connect accepts a name this endpoint does not serve");
+
+    let error = session
+        .logon()
+        .await
+        .expect_err("the logon is where the mismatch is caught");
+    let message = error.to_string();
+    assert!(message.contains("not on this server"), "{message}");
+    // The redirect names where to go instead, which is the only place the right `?MailboxId=`
+    // appears — and it is a server DN rather than a URL, so it still has to be looked up.
+    assert!(
+        message.contains("cn=Configuration/cn=Servers/"),
+        "{message}"
+    );
+
+    assert_requests_match(&server, &exchanges).await;
+}
+
 /// The corpus is only worth anything if it is the one the manifest describes.
 #[test]
 fn every_committed_fixture_is_in_the_manifest() {
@@ -384,6 +439,7 @@ fn every_committed_fixture_is_in_the_manifest() {
         "acts-en-us",
         "acts-nl-nl",
         "connect-refused",
+        "wrong-server",
     ] {
         let directory = fixtures().join("exchange-se").join(scenario);
         assert!(manifest.contains(&format!("[scenarios.\"exchange-se/{scenario}\"]")));
@@ -406,7 +462,12 @@ fn every_committed_fixture_is_in_the_manifest() {
     // chose.
     assert_eq!(
         counted,
-        (SESSION_EXCHANGES * 2 + ITEM_EXCHANGES * 2 + WRITE_EXCHANGES * 2 + ACT_EXCHANGES * 2 + 1)
+        (SESSION_EXCHANGES * 2
+            + ITEM_EXCHANGES * 2
+            + WRITE_EXCHANGES * 2
+            + ACT_EXCHANGES * 2
+            + REFUSED_EXCHANGES
+            + WRONG_SERVER_EXCHANGES)
             * 3
     );
 }

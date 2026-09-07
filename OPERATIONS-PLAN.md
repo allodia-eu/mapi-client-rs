@@ -25,7 +25,7 @@ discovering it in Phase 6.
 
 | Requested | Mechanism | Verdict |
 |---|---|---|
-| List mailboxes the user can access | **No such operation.** Autodiscover's `AlternativeMailbox` elements, plus a second `Connect` per mailbox | Not MAPI — see Phase 7 |
+| List mailboxes the user can access | **No such operation.** Autodiscover's `AlternativeMailbox` elements, plus a second *lookup* and a second `Connect` per mailbox | **Done in Phase 7** |
 | Get mailbox metadata | `RopLogon` response (have it) + `RopGetPropertiesSpecific` on the Store object | Phase 1 |
 | List folders in mailbox | `RopGetHierarchyTable` with the `Depth` flag + `PidTagContainerClass` | **Done in Phase 2** |
 | List messages in folder | `RopGetContentsTable` | **Done in v0.1.0**; sorting and filtering done in Phase 4 |
@@ -48,6 +48,12 @@ The three that are not MAPI operations:
    delegate mailbox. Opening one is an ordinary `Connect` with *that* mailbox's `UserDn`, still
    authenticating as the original user; the server does the access check. So the answer is a
    `mapi-autodiscover` change plus a `mapi-client` convenience, not a new ROP.
+
+   **Measured in Phase 7, and the `UserDn` is the part this got wrong.** Exchange names the mailbox
+   by SMTP address, so the `UserDn` takes a second Autodiscover lookup — which also answers with a
+   different `?MailboxId=` endpoint, and the endpoint and the name have to move together. The
+   access check is indeed the server's, and it happens at `Connect`; the pairing check happens one
+   request later at `RopLogon`.
 2. **"Calendars" and "address books" as first-class objects.** They do not exist. A calendar *is* a
    folder whose `PidTagContainerClass` is `IPF.Appointment`, and a contacts folder one whose class
    is `IPF.Contact`. Everything JMAP calls a calendar collection is a folder query here.
@@ -474,9 +480,54 @@ delivered. Nine things the phase turned up:
   flagged, red", which is a clear that had set nine properties and deleted none of the four
   [MS-OXOFLAG] §3.1.4.2.3 asks for.
 
-**Phase 7 — More than one mailbox.** `AlternativeMailbox` parsing in `mapi-autodiscover`, and
-opening a second mailbox on one set of credentials. Ends with *"list mailboxes"* as far as the
-protocol family allows.
+**Phase 7 — More than one mailbox. Done.** `AlternativeMailbox` parsing in `mapi-autodiscover`,
+`Mailbox` and `MapiClientBuilder::mailboxes` in `mapi-client`, and `mapi-cli mailboxes --open`,
+which lists every mailbox a set of credentials can open and logs on to each. *"List mailboxes"* is
+delivered as far as the protocol family allows, which is the last of the eighteen.
+
+**The plan's one assertion about how this works was half wrong**, and it is the half that costs a
+round trip. "Opening one is an ordinary `Connect` with *that* mailbox's `UserDn`" is right about the
+`Connect` and wrong about where the `UserDn` comes from. Seven things the phase turned up:
+
+- **Exchange names an alternative mailbox by SMTP address and never by distinguished name.**
+  [MS-OXDSCLI] §2.2.4.1.1.2.5.2 offers a `LegacyDN` child — everything a `Connect` needs, with no
+  further lookup — and §2.2.4.1.1.2.5.4 offers an `SmtpAddress` instead, the two being mutually
+  exclusive in four `MUST`s. The lab sends the second. So listing *n* mailboxes costs *n + 1*
+  Autodiscover round trips and there is no way to make it fewer, and `MailboxAddress` is an enum so
+  that a caller cannot ignore the form that arrives.
+- **The endpoint URL and the distinguished name are a matched pair, and the plan did not know it.**
+  The `?MailboxId=` selects a mailbox as surely as the name does. This is why the second lookup is
+  not merely a convenience: it is the only way to learn the *other* endpoint, and a phase that had
+  reused the first would have been wrong in a way the plan predicted no part of.
+- **The refusal arrives one request after the mistake.** Pairing one mailbox's URL with another's
+  name is *accepted* by `Connect`, which answers successfully and reports the other mailbox's
+  owner — so a client that stopped there would report having opened a mailbox it has not. The
+  `RopLogon` in the next request refuses with `ecWrongServer`. That exchange is the `wrong-server`
+  scenario, and it is the only response in the corpus whose `RopLogon` body is not a logon.
+- **The access check and the pairing check are in different requests, and the first hides the
+  second.** A mailbox the account has no rights to is refused at `Connect` with `ecLoginPerm`,
+  before the endpoint mismatch can matter — so only a mailbox the account may genuinely open ever
+  reports being on the wrong server. Found by a capture run failing: the scenario was written
+  against the second lab mailbox, which the first has no rights over, and it needs the shared
+  mailbox instead.
+- **The redirect names a mailbox in a field documented to name a server**, and its documented remedy
+  has no MAPI/HTTP form. [MS-OXCSTOR] §2.2.1.1.2 calls `ServerName` an ESSDN "of server for the
+  client to connect to" and §3.1.5.1 says to connect to it; what arrives ends
+  `cn=Servers/cn=<mailbox GUID>@<domain>`, and that GUID is exactly the `?MailboxId=` that was
+  missing. There is nothing to POST to an ESSDN. Useful in practice, and drafted as feedback because
+  the field's own definition does not lead a reader there.
+- **Automapping is what makes a shared mailbox discoverable, not the permission.** `FullAccess`
+  granted without it works and is never advertised: no `AlternativeMailbox` element, and therefore
+  nothing in MAPI/HTTP that could name the mailbox. A permission a client can use and cannot find.
+- **Everything above the session was already right.** Folders, special folders, named properties,
+  items, writes and acts all worked against the shared mailbox with no change at all, because the
+  only thing that differs is which endpoint and which name the pair carries. The phase added no ROP.
+
+One thing it did *not* need: the plan's "plus a `mapi-client` convenience" turned out to be the
+smaller half. `MapiClient::at` re-aims an existing client rather than building a second, which
+matters for a reason the plan did not mention — [MS-OXCMAPIHTTP] §2.2.3.3.4 makes `X-ClientInfo` a
+GUID per client *instance* with a counter per Session Context, so two mailboxes opened by one
+program are one instance with two contexts, and a second builder would claim to be a second Outlook.
 
 ## The fixture problem
 

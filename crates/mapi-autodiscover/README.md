@@ -41,12 +41,18 @@ Part of [`mapi-client-rs`](https://github.com/allodia-eu/mapi-client-rs). Every 
 cites its Microsoft Open Specification section; see `SPEC.md` in the repository root for the pinned
 document versions.
 
-**Status:** `0.3.0`, and still not a line of it different from `0.1.0` — the four crates share one
-version number, so this one is republished when any of them changes. Request building, the
-candidate-URL sequence, response parsing, redirects and server errors are implemented. SRV lookup
-and HTTP redirect probing need DNS and HTTP, so this crate names them and the caller performs them.
-`AlternativeMailbox` elements — the only way MAPI/HTTP has of saying which other mailboxes a user
-can open — are not parsed yet.
+**Status:** `0.3.0`, with the first change to this crate since `0.1.0` unreleased on top of it.
+Request building, the candidate-URL sequence, response parsing, redirects and server errors are
+implemented. SRV lookup and HTTP redirect probing need DNS and HTTP, so this crate names them and
+the caller performs them.
+
+`AlternativeMailbox` elements are now parsed, which is the whole of *list mailboxes*: MAPI/HTTP has
+no enumeration verb, so this is the only place in the protocol family a shared, delegated or archive
+mailbox is ever named. Measured against Exchange Server SE `15.02.2562.045`, and the measurement
+shapes the API: Exchange names such a mailbox by **SMTP address** and never by the distinguished
+name [MS-OXDSCLI] §2.2.4.1.1.2.5.2 offers, so opening one costs a second lookup. `MailboxAddress`
+is an enum rather than a struct of options because the two forms are mutually exclusive in four
+`MUST`s, and a caller has to handle whichever arrives.
 
 ## Licence
 

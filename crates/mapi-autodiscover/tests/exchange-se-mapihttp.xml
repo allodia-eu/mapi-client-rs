@@ -1,15 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Captured from Exchange Server SE (X-ServerApplication: 15.02.2562.000) on 2026-08-01, in answer
-  to an Autodiscover POST carrying X-MapiHttpCapability: 1.
+  Captured from Exchange Server SE (X-ServerApplication: 15.02.2562.000) on 2026-08-01, and
+  re-captured on 2026-09-07 once the lab had a shared mailbox to report, in answer to an
+  Autodiscover POST carrying X-MapiHttpCapability: 1.
 
   Scrubbed: the lab hostname, the mailbox GUID, the deployment id, the recipient GUID inside the
   distinguished name, and the display name. The domain dev.local and the mailbox name are
   synthetic and left readable, because being readable is what makes the capture useful.
 
-  Two things here are exactly why this file is a capture rather than a hand-written example:
+  Three things here are exactly why this file is a capture rather than a hand-written example:
   the Protocol element for mapiHttp names itself with a Type *attribute* while the WEB one uses a
-  Type *child element*, and the WEB protocol nests further Protocol elements inside <Internal>.
+  Type *child element*; the WEB protocol nests further Protocol elements inside <Internal>; and
+  the AlternativeMailbox for the shared mailbox carries a SmtpAddress and *no* LegacyDN, which is
+  the form [MS-OXDSCLI] §2.2.4.1.1.2.5.4 says costs a second lookup. A reader of §2.2.4.1.1.2.5.2
+  alone would expect a distinguished name here and find none.
+
+  OwnerSmtpAddress is present on a Delegate and repeats the SmtpAddress. §2.2.4.1.1.2.5.6
+  introduces the element for telling one Archive from another, so on this element it is not the
+  discriminator the document describes — it carries nothing SmtpAddress does not.
 -->
 <Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006">
   <Response xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a">
@@ -41,6 +49,12 @@
           </Protocol>
         </Internal>
       </Protocol>
+      <AlternativeMailbox>
+        <Type>Delegate</Type>
+        <DisplayName>Shared Mailbox</DisplayName>
+        <SmtpAddress>shared@dev.local</SmtpAddress>
+        <OwnerSmtpAddress>shared@dev.local</OwnerSmtpAddress>
+      </AlternativeMailbox>
     </Account>
   </Response>
 </Autodiscover>

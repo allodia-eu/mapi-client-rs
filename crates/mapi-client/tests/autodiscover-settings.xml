@@ -6,9 +6,12 @@
   so what this file is for is driving the *client* — the candidate sequence, the redirects and the
   handover of a URL and a distinguished name into a session.
 
-  Two shapes here are the ones that defeat a first attempt at reading a real response, and they are
-  reproduced deliberately: mapiHttp names itself with a Type *attribute* while WEB uses a Type
-  *child element*, and WEB nests further Protocol elements inside <Internal>.
+  Three shapes here are the ones that defeat a first attempt at reading a real response, and they
+  are reproduced deliberately: mapiHttp names itself with a Type *attribute* while WEB uses a Type
+  *child element*; WEB nests further Protocol elements inside <Internal>; and the
+  AlternativeMailbox names its mailbox by SmtpAddress with no LegacyDN, which is the form Exchange
+  Server SE was measured sending and the reason opening one costs a second lookup.
+  See autodiscover-shared.xml for what that second lookup answers.
 -->
 <Autodiscover xmlns="http://schemas.microsoft.com/exchange/autodiscover/responseschema/2006">
   <Response xmlns="http://schemas.microsoft.com/exchange/autodiscover/outlook/responseschema/2006a">
@@ -40,6 +43,12 @@
           </Protocol>
         </Internal>
       </Protocol>
+      <AlternativeMailbox>
+        <Type>Delegate</Type>
+        <DisplayName>Shared Mailbox</DisplayName>
+        <SmtpAddress>shared@example.test</SmtpAddress>
+        <OwnerSmtpAddress>shared@example.test</OwnerSmtpAddress>
+      </AlternativeMailbox>
     </Account>
   </Response>
 </Autodiscover>

@@ -15,18 +15,19 @@ Two conventions specific to this project:
 
 ## [Unreleased]
 
-Acting on items. `0.3.0` could create, read and delete a message; this adds *sending* one, *moving*
-one, and both of the things MAPI means by *flagging* one — the read bit of `PidTagMessageFlags`,
-which has its own ROP, and the follow-up flag of [MS-OXOFLAG], which is a set of ordinary
-properties.
+Acting on items, and then reaching mailboxes the account does not own. `0.3.0` could create, read
+and delete a message; this adds *sending* one, *moving* one, and both of the things MAPI means by
+*flagging* one — the read bit of `PidTagMessageFlags`, which has its own ROP, and the follow-up flag
+of [MS-OXOFLAG], which is a set of ordinary properties. Then it adds **shared, delegated and archive
+mailboxes**, which is the one operation on the list that is not a ROP at all.
 
-That takes the client to fourteen of the eighteen operations the plan was written against.
-Everything except listing more than one mailbox is now implemented, and the four remaining gaps
-below are one operation and three deliberate omissions.
+That completes all eighteen operations the plan was written against. Every gap listed below is now a
+deliberate omission rather than an operation still to come.
 
 Verified against Exchange Server SE `15.02.2562.045` and both lab mailboxes, with mail actually sent
-between them in both directions. The corpus grows by two scenarios and the whole of it re-captures
-byte for byte — 537 files identical — with two write scenarios in it.
+between them in both directions and a shared mailbox opened on a delegate's own credentials. The
+corpus grows by three scenarios and the whole of it re-captures byte for byte — 546 files identical
+— with two write scenarios in it.
 
 **This is a breaking release**: `SESSION_EXCHANGES` aside, three public items changed shape and one
 behavioural change is not visible to `cargo-semver-checks` at all. Both are listed under *Changed*.
@@ -66,6 +67,33 @@ behavioural change is not visible to `cargo-semver-checks` at all. Both are list
   ninth pair of captured scenarios, `acts-en-us` and `acts-nl-nl`.
 - **Four error codes by name**: `InvalidRecipients`, `TooManyRecips`, `QuotaExceeded`,
   `MaxSubmissionExceeded` and `NullDestinationObject`.
+- **`AlternativeMailbox` in `mapi-autodiscover`**, with `MailboxKind`, `MailboxAddress` and
+  `Settings::alternative_mailboxes()`. This is the whole of *list mailboxes*: MAPI/HTTP has no
+  enumeration verb, so these elements are the only place in the protocol family a mailbox the
+  caller does not own is ever named.
+
+  `MailboxAddress` is an enum rather than a struct of options because [MS-OXDSCLI]
+  §2.2.4.1.1.2.5.2 and §2.2.4.1.1.2.5.4 make the two forms mutually exclusive in four `MUST`s — a
+  distinguished name with a server, or an SMTP address to look up. A caller has to handle both and
+  cannot construct the combination the document forbids.
+- **`MapiClientBuilder::mailboxes()`** and `mailboxes_at()`, which list every mailbox a set of
+  credentials can open, the account's own first. Plus `lookup_settings()`, for a caller that wants
+  the whole Autodiscover answer rather than only the `mapiHttp` block.
+- **`Mailbox`**, an alternative mailbox *resolved* to the endpoint-and-name pair a session needs —
+  which on Exchange takes a second Autodiscover lookup, because it names the mailbox by address.
+  `Mailbox::is_openable()` reports the one documented shape that cannot be resolved.
+- **`MapiClient::for_mailbox()`** and `at()`, which re-aim an existing client at another mailbox on
+  the same deployment. Sharing the client is not only an economy: `X-ClientInfo` is a GUID per
+  client *instance* with a counter per Session Context ([MS-OXCMAPIHTTP] §2.2.3.3.4), so two
+  mailboxes opened by one program are one instance with two contexts. A second `MapiClient::builder`
+  would mint a second GUID and claim to be a second Outlook.
+- **`mapi-cli mailboxes`**, with `--open` to log on to each and report the owner and Inbox count.
+  Needs no `--endpoint` and no `--user-dn`, because finding those for a mailbox you do not own is
+  what it does.
+- **A `wrong-server` capture scenario**, and `-SharedMailbox` on `Initialize-ExchangeLab.ps1`,
+  `Capture-Fixtures.ps1`, `Verify-Fixtures.ps1` and `Test-Live.ps1`. The first creates a shared
+  mailbox and grants it, the middle two need one for that scenario, and the last passes only its
+  *address* — resolving it is what the tests are testing.
 
 ### Fixed
 
@@ -117,6 +145,52 @@ Open Specification feedback.
   `WantAsynchronous = 0`, and Exchange honoured it for a cross-folder move — which the plan flagged
   as an assumption to measure. The response is modelled anyway, because one arriving unrecognised
   would cost the rest of the buffer.
+- **Exchange names an alternative mailbox by SMTP address, never by distinguished name.**
+  [MS-OXDSCLI] §2.2.4.1.1.2.5.2 offers a `LegacyDN` child, which would be everything a `Connect`
+  needs; the lab sends `SmtpAddress` and no `LegacyDN` at all. So listing *n* mailboxes costs
+  *n + 1* Autodiscover round trips and there is no way to make it cost fewer. The plan had this as
+  "an ordinary `Connect` with that mailbox's `UserDn`", which is half right — the `Connect` is
+  ordinary, and getting the `UserDn` is a second lookup.
+- **The endpoint URL and the distinguished name are a matched pair, and the two halves are checked
+  at different moments.** The `?MailboxId=` selects a mailbox just as the name does. Pairing one
+  mailbox's URL with another's name is *accepted* by `Connect`, which answers successfully and
+  reports the other mailbox's owner; the `RopLogon` in the next request is what refuses, with
+  `ecWrongServer` and a redirect naming `cn=Configuration/cn=Servers/cn=<the MailboxId that would
+  have worked>`. So a client that reused the first endpoint fails one request later than it looks,
+  in an error about servers rather than about mailboxes. `MapiClient::at` takes both or neither for
+  that reason, and the corpus carries the exchange.
+- **The logon redirect's `ServerName` does not name a server, and its documented remedy is not
+  actionable over MAPI/HTTP.** [MS-OXCSTOR] §2.2.1.1.2 defines the field as "the
+  enterprise/site/server distinguished name (ESSDN) of server for the client to connect to", and
+  §3.1.5.1 says to "create a new Session Context with the server that is specified by the
+  `ServerName` field". What arrives is
+  `/o=…/cn=Configuration/cn=Servers/cn=<mailbox GUID>@<domain>` — the leaf under `cn=Servers/` is
+  the *mailbox's* identifier, not a server's, and it is exactly the `?MailboxId=` the URL was
+  missing. Nothing says how to get from an ESSDN to an endpoint URL, and there is nothing to POST
+  to an ESSDN. Useful in practice, since the GUID is the answer; drafted as Open Specification
+  feedback because the field's own definition does not lead a reader there.
+- **The access check is `Connect`'s, and it hides the pairing check.** A mailbox the account has no
+  rights to is refused at `Connect` with `ecLoginPerm` — before the endpoint mismatch can matter.
+  Only a mailbox the account may genuinely open gets as far as being told it is on the wrong server,
+  which is why the `wrong-server` scenario needs a shared mailbox rather than simply a second one.
+  That cost a capture run to discover.
+- **Automapping is what makes a shared mailbox discoverable, not the permission.** `FullAccess`
+  granted with `-AutoMapping $false` works perfectly and is never advertised: no
+  `AlternativeMailbox` element, and therefore nothing in MAPI/HTTP that could name it. A permission
+  a client can use and cannot discover.
+- **`OwnerSmtpAddress` arrives on a `Delegate` and repeats the `SmtpAddress`.** [MS-OXDSCLI]
+  §2.2.4.1.1.2.5.6 introduces the element for telling a user's own `Archive` from a delegated
+  mailbox's `Archive`; on a shared mailbox it carries nothing `SmtpAddress` does not.
+- **[MS-OXDSCLI] §6.2's XSD permits at most one `AlternativeMailbox`.** The element is declared
+  `minOccurs="0"` with no `maxOccurs`, which defaults to one, while §2.2.4.1.1.2.5's prose describes
+  a per-mailbox element and any user with both an archive and a shared mailbox has two. A reader who
+  believed the schema would drop mailboxes silently; the parser reads them all.
+- **A write scenario has a side effect it does not clean up, and it settles rather than drifting.**
+  Capturing `acts` puts its recipient into Exchange's own `RecipientCache` folder, which moved that
+  folder's row from 0 items to 1 and the Store's `PidTagContentCount` from 280 to 282. Nothing in
+  the scenario wrote there and nothing can undo it — but a cache keyed by address does not grow when
+  the same address recurs, so the corpus re-captures byte for byte afterwards. Worth knowing before
+  reading it as drift.
 
 ### Changed
 
@@ -133,9 +207,20 @@ Open Specification feedback.
 
 ### Known gaps
 
-- **Listing mailboxes is still not implemented.** It is not a MAPI operation: what Outlook shows in
-  its folder pane comes from Autodiscover's `AlternativeMailbox` elements plus one `Connect` per
-  mailbox. That is the last of the eighteen.
+- **An alternative mailbox given as a `LegacyDN` and a `Server` cannot be opened.** A MAPI/HTTP
+  endpoint needs a `?MailboxId=<guid>@<domain>` and a server's fully qualified name is not one;
+  there is no arithmetic from the first to the second, and the account's own endpoint is refused at
+  logon. Such a mailbox is *listed*, and `Mailbox::is_openable()` reports it as unreachable rather
+  than handing back a client that fails a round trip later. Documented rather than observed: it is
+  the shape [MS-OXDSCLI]'s notes 8 and 10 describe for Exchange 2007 and 2010, neither of which
+  speaks MAPI/HTTP at all.
+- **A shared mailbox is opened as a second Session Context, not as a second logon.** This client
+  keeps one logon per connection — the two have the same lifetime, and separating them would only
+  make it possible to outlive the session a handle belongs to — so *n* mailboxes cost *n*
+  `Connect`s. They share one HTTP connection pool and one client identity, so the cost is a round
+  trip each rather than a client each. Whether a Session Context could carry several private-mailbox
+  logons at once is not measured here; [MS-OXCSTOR] §3.1.5.1 describes reusing one for a *public
+  folder* logon, which is a different question.
 - **A successful submit is not in the fixture corpus**, only a refused one. A captured send would
   deliver real mail on every `Verify-Fixtures.ps1` run and settle on its own schedule, which no
   byte-for-byte corpus can hold. `mapi-client`'s live suite sends between the two lab mailboxes

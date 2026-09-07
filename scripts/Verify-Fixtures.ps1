@@ -26,6 +26,12 @@
 .PARAMETER Mailbox
     The same mailbox identities Capture-Fixtures.ps1 was given.
 
+.PARAMETER SharedMailbox
+    The same shared mailbox Capture-Fixtures.ps1 was given, if it was given one. Without it the
+    wrong-server capture is skipped, and its committed fixtures are then reported as missing from
+    the re-capture - which is a difference about this script's arguments rather than about the
+    server.
+
 .PARAMETER Password
     The password for those mailboxes. Defaults to MAPI_LIVE_PASSWORD.
 
@@ -41,6 +47,7 @@
 [CmdletBinding()]
 param(
     [Parameter(Mandatory)][string[]] $Mailbox,
+    [string] $SharedMailbox,
     [string] $Password = $env:MAPI_LIVE_PASSWORD,
     [string] $Root,
     [switch] $Keep
@@ -64,7 +71,9 @@ New-Item -ItemType Directory -Path $scratch -Force | Out-Null
 Write-Step "Re-capturing into $scratch"
 
 try {
-    & "$PSScriptRoot\Capture-Fixtures.ps1" -Mailbox $Mailbox -Password $Password -Root $scratch
+    $capture = @{ Mailbox = $Mailbox; Password = $Password; Root = $scratch }
+    if ($SharedMailbox) { $capture['SharedMailbox'] = $SharedMailbox }
+    & "$PSScriptRoot\Capture-Fixtures.ps1" @capture
     if ($LASTEXITCODE -ne 0) { throw 'The re-capture failed; there is nothing to compare.' }
 
     # ---------------------------------------------------------------------

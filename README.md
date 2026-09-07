@@ -38,11 +38,12 @@ repository existed. Two findings make it tractable:
 > and the other direction, **create** a message with recipients and an attachment, a contact or a
 > single-instance appointment, change one, and delete it again. Unreleased on top of that:
 > **send** a message, **move** one between folders, and **flag** one — both of the things MAPI means
-> by that, the read bit and the follow-up flag, which it keeps apart and so does this. All verified
-> against Exchange Server SE `15.02.2562.045`, in two mailboxes, in two languages, with mail
-> actually sent between them. What is missing is listing more than one mailbox, and
-> `Negotiate`/`NTLM` authentication. The gaps are stated below and in the changelog rather than left
-> to be discovered.
+> by that, the read bit and the follow-up flag, which it keeps apart and so does this. And then
+> **more than one mailbox**: list the shared, delegated and archive mailboxes an account can open,
+> and open one on that account's own credentials. All verified against Exchange Server SE
+> `15.02.2562.045`, in two mailboxes, in two languages, with mail actually sent between them and a
+> shared mailbox read by a delegate. What is missing is `Negotiate`/`NTLM` authentication. The gaps
+> are stated below and in the changelog rather than left to be discovered.
 
 ## Install
 

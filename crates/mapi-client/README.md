@@ -185,9 +185,17 @@ Folder objects, named-property resolution cached per session, messages with thei
 attachments, embedded messages and streamed bodies, disconnect, and Autodiscover lookup are
 implemented. Then creating a message, a contact or a single-instance appointment, with recipients
 and attachments, changing one and deleting it. Unreleased on top of that: **sending** a message,
-moving one between folders, marking one read or unread, replacing a recipient list, and registering
-a named property a store has never held. No notifications, no ICS, no address book, and no way to
-enumerate more than the one mailbox a logon names.
+moving one between folders, marking one read or unread, replacing a recipient list, registering a
+named property a store has never held — and **listing the mailboxes an account can open** and
+opening one of them, which is `MapiClientBuilder::mailboxes` and `MapiClient::for_mailbox`.
+
+Opening a second mailbox re-aims one client rather than building another, and the reason is
+[MS-OXCMAPIHTTP] §2.2.3.3.4: `X-ClientInfo` is a GUID per client *instance* with a counter per
+Session Context, so two mailboxes opened by one program are one instance with two contexts. It also
+takes the endpoint and the distinguished name together, because they are a matched pair — changing
+only the name is accepted by `Connect` and refused by the `RopLogon` after it.
+
+No notifications, no ICS, and no address book.
 
 ## Licence
 

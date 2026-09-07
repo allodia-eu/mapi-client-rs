@@ -135,6 +135,8 @@ mod transport;
 
 #[cfg(feature = "autodiscover")]
 mod discovery;
+#[cfg(feature = "autodiscover")]
+mod mailbox;
 
 pub mod error;
 
@@ -142,7 +144,9 @@ pub mod error;
 /// The Autodiscover client this crate drives, for the types it does not re-export.
 pub use mapi_autodiscover;
 #[cfg(feature = "autodiscover")]
-pub use mapi_autodiscover::{EmailAddress, MapiHttpEndpoint};
+pub use mapi_autodiscover::{
+    AlternativeMailbox, EmailAddress, MailboxAddress, MailboxKind, MapiHttpEndpoint, Settings,
+};
 /// The sans-io codec every byte on the wire comes from, for the types this crate does not
 /// re-export.
 pub use mapi_proto;
@@ -173,6 +177,8 @@ pub use crate::draft::{NewAttachment, NewMessage, SavedMessage};
 pub use crate::error::{Error, Result};
 pub use crate::folder::Folder;
 pub use crate::logon::Logon;
+#[cfg(feature = "autodiscover")]
+pub use crate::mailbox::Mailbox;
 pub use crate::message::{Attachment, EmbeddedMessage, Message, MessageUpdate};
 pub use crate::named::{NamedProperties, NamedPropertiesIter, NamedPropertyEntry};
 pub use crate::observer::{Exchange, Observer};
@@ -232,6 +238,8 @@ mod tests {
         assert::<NamedProperties>();
         assert::<NamedPropertyEntry>();
         assert::<NamedPropertiesIter<'_>>();
+        #[cfg(feature = "autodiscover")]
+        assert::<Mailbox>();
     }
 
     #[test]

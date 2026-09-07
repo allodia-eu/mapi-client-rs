@@ -22,8 +22,8 @@
 use std::collections::VecDeque;
 
 use mapi_autodiscover::{
-    AutodiscoverRequest, AutodiscoverResponse, EmailAddress, MapiHttpEndpoint, candidate_urls,
-    redirect_probe_url,
+    AutodiscoverRequest, AutodiscoverResponse, EmailAddress, MapiHttpEndpoint, Settings,
+    candidate_urls, redirect_probe_url,
 };
 use mapi_proto::LegacyDn;
 use reqwest::{Client, StatusCode};
@@ -99,7 +99,29 @@ impl MapiClientBuilder {
     /// As [`discover`](MapiClientBuilder::discover), minus the ones that come from building.
     pub async fn lookup(&self, address: &EmailAddress) -> Result<MapiHttpEndpoint> {
         let queue = candidate_urls(address).collect();
-        self.search(address, queue, true).await
+        self.search(address, queue, true).await?.endpoint(address)
+    }
+
+    /// Everything the server said about the mailbox, rather than only the endpoint.
+    ///
+    /// [`lookup`](MapiClientBuilder::lookup) narrows the answer to the `mapiHttp` block, which
+    /// throws away the one thing that names *other* mailboxes: MAPI/HTTP has no enumeration verb,
+    /// so the `AlternativeMailbox` elements are the only description of a shared, delegated or
+    /// archive mailbox anywhere in the protocol family.
+    ///
+    /// [`mailboxes`](MapiClientBuilder::mailboxes) is the answer for most callers; this is for one
+    /// that wants the response itself.
+    ///
+    /// # Errors
+    ///
+    /// As [`lookup`](MapiClientBuilder::lookup), minus [`Error::NoEndpoint`] for a deployment that
+    /// answered without a `mapiHttp` block — which is a settings response like any other and is
+    /// handed back rather than refused.
+    ///
+    /// [MS-OXDSCLI] §2.2.4.1.1 — `Response`
+    pub async fn lookup_settings(&self, address: &EmailAddress) -> Result<Settings> {
+        let queue = candidate_urls(address).collect();
+        Ok(self.search(address, queue, true).await?.settings)
     }
 
     /// Locates the mailbox starting from an Autodiscover URL you already have.
@@ -120,16 +142,16 @@ impl MapiClientBuilder {
         address: &EmailAddress,
     ) -> Result<MapiHttpEndpoint> {
         let queue = VecDeque::from([url.into()]);
-        self.search(address, queue, false).await
+        self.search(address, queue, false).await?.endpoint(address)
     }
 
     /// Works through the queue, following redirects, until something answers with settings.
-    async fn search(
+    pub(crate) async fn search(
         &self,
         address: &EmailAddress,
         mut queue: VecDeque<String>,
         probe: bool,
-    ) -> Result<MapiHttpEndpoint> {
+    ) -> Result<Found> {
         let search = Search {
             http: self.http()?,
             credentials: &self.credentials,
@@ -167,10 +189,7 @@ impl MapiClientBuilder {
                     // wanted: the server has described the mailbox, and asking a different URL
                     // about the same mailbox will not change what it supports.
                     // [MS-OXDSCLI] §3.1.5.4
-                    return settings.mapi_http().ok_or(Error::NoEndpoint {
-                        address: address.to_string(),
-                        tried,
-                    });
+                    return Ok(Found { settings, tried });
                 }
                 AutodiscoverResponse::RedirectUrl(target) => {
                     redirects = bump(redirects)?;
@@ -193,6 +212,29 @@ impl MapiClientBuilder {
         Err(Error::NoEndpoint {
             address: address.to_string(),
             tried,
+        })
+    }
+}
+
+/// What a completed search found, and the URLs it asked on the way.
+///
+/// The two travel together because [`Error::NoEndpoint`] reports the list of candidates tried, and
+/// that list only exists inside the search — so narrowing the settings to an endpoint has to happen
+/// where the trail is still in hand.
+#[derive(Debug)]
+pub(crate) struct Found {
+    /// What the server said about the mailbox.
+    pub(crate) settings: Settings,
+    /// Every URL asked, in order, for a diagnostic that has to say where it looked.
+    tried: Vec<String>,
+}
+
+impl Found {
+    /// The `mapiHttp` block, or a refusal naming everywhere that was asked.
+    fn endpoint(self, address: &EmailAddress) -> Result<MapiHttpEndpoint> {
+        self.settings.mapi_http().ok_or(Error::NoEndpoint {
+            address: address.to_string(),
+            tried: self.tried,
         })
     }
 }

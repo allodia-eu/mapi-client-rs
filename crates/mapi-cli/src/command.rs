@@ -5,12 +5,14 @@
 
 mod acts;
 mod items;
+mod mailboxes;
 mod writes;
 
 use std::collections::HashMap;
 
 pub(crate) use acts::{flag, mark, move_messages, send, state, submit};
 pub(crate) use items::{contacts, events, message, messages};
+pub(crate) use mailboxes::mailboxes;
 use mapi_client::{
     ContainerClass, EmailAddress, FOLDER_PROPERTIES, FolderId, Logon, NamedProperty,
     NamedPropertyEntry, NamedPropertyId, PropertyName, PropertyRow, PropertyTag, PropertyValue,

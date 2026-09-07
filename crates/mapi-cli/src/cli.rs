@@ -427,6 +427,25 @@ pub(crate) enum Command {
         address: String,
     },
 
+    /// List every mailbox these credentials can open: shared, delegated and archive.
+    ///
+    /// **The one operation here with no ROP behind it.** MAPI/HTTP has no verb that asks a server
+    /// what else you may open, so the answer comes from Autodiscover's `AlternativeMailbox`
+    /// elements and nowhere else. Needs no endpoint and no distinguished name.
+    /// [MS-OXDSCLI] §2.2.4.1.1.2.5
+    Mailboxes {
+        /// The email address to look up.
+        address: String,
+
+        /// Also log on to each one and report the owner and the Inbox count.
+        ///
+        /// Costs a Session Context per mailbox. Worth it: a listing says the deployment names
+        /// them, and only a logon says this account may open one — the access check is the
+        /// server's, and it happens at `Connect` rather than at `RopLogon`.
+        #[arg(long)]
+        open: bool,
+    },
+
     /// Drive a scenario against the live server and write it out as fixtures.
     Capture(scenario::CaptureArguments),
 }
