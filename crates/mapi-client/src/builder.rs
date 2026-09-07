@@ -122,6 +122,25 @@ impl MapiClientBuilder {
     }
 
     /// How to authenticate. Defaults to [`Credentials::None`].
+    ///
+    /// # A connection-oriented scheme changes the transport underneath
+    ///
+    /// [`Credentials::Ntlm`] and [`Credentials::Negotiate`] authenticate a TCP connection rather
+    /// than a request, so choosing one reconfigures the HTTP client this builder produces:
+    ///
+    /// * **HTTP/1.1 only.** The lab's Exchange negotiates HTTP/2 by ALPN for an anonymous request,
+    ///   and a multiplexed connection is not one a Windows-authentication handshake can be bound
+    ///   to.
+    /// * **One connection per host, and one request at a time.** A handshake whose three legs land
+    ///   on different connections cannot complete, and nothing in `reqwest` pins a request to a
+    ///   connection — so the pool is pinned and the requests are serialised instead. Cloning the
+    ///   client does not get the concurrency back, and could not: two concurrent requests would
+    ///   need two authenticated connections.
+    /// * **The server certificate is retained**, because the channel binding that satisfies
+    ///   Extended Protection is computed over it.
+    ///
+    /// None of that applies to [`Credentials::Basic`] or [`Credentials::Bearer`], which are a
+    /// header and leave the transport alone.
     #[must_use]
     pub fn credentials(mut self, credentials: Credentials) -> Self {
         self.credentials = credentials;
@@ -256,6 +275,7 @@ impl MapiClientBuilder {
             self.connect_timeout,
             &self.root_certificates,
             self.accept_invalid_certificates,
+            self.credentials.is_connection_oriented(),
         )
     }
 
@@ -290,6 +310,7 @@ impl MapiClientBuilder {
             self.connect_timeout,
             &self.root_certificates,
             self.accept_invalid_certificates,
+            self.credentials.is_connection_oriented(),
         )?;
 
         Ok(MapiClient {
@@ -299,6 +320,8 @@ impl MapiClientBuilder {
                 credentials: self.credentials,
                 timeout: self.timeout,
                 observer: self.observer,
+                #[cfg(feature = "ntlm")]
+                connection: Arc::default(),
             },
             identity: Identity::new(),
             user_dn,
@@ -313,11 +336,16 @@ impl MapiClientBuilder {
 /// Redirects are **not** followed. A MAPI endpoint has no reason to redirect, and following one
 /// would mean deciding whether to carry the `Authorization` header to wherever it points. A 3xx is
 /// reported as [`Error::Http`] instead, which says where the server tried to send us.
+///
+/// `connection_oriented` says whether the credentials authenticate a connection rather than a
+/// request, which changes three settings. See
+/// [`MapiClientBuilder::credentials`](MapiClientBuilder::credentials) for what and why.
 pub(crate) fn http_client(
     timeout: Duration,
     connect_timeout: Duration,
     root_certificates: &[Vec<u8>],
     accept_invalid_certificates: bool,
+    connection_oriented: bool,
 ) -> Result<reqwest::Client> {
     let mut builder = reqwest::Client::builder()
         .user_agent(concat!(
@@ -329,6 +357,13 @@ pub(crate) fn http_client(
         .timeout(timeout)
         .connect_timeout(connect_timeout)
         .danger_accept_invalid_certs(accept_invalid_certificates);
+
+    if connection_oriented {
+        builder = builder
+            .http1_only()
+            .pool_max_idle_per_host(1)
+            .tls_info(true);
+    }
 
     for certificate in root_certificates {
         let certificate = reqwest::Certificate::from_pem(certificate)

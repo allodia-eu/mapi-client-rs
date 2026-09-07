@@ -60,7 +60,7 @@ Get the documents (never committed, gitignored under `spec/`):
 powershell.exe -File scripts\Get-Specs.ps1
 ```
 
-Then grep the text extracts rather than the PDFs — 1,969 pages across seventeen documents:
+Then grep the text extracts rather than the PDFs — 2,101 pages across nineteen documents:
 
 ```powershell
 Select-String -Path spec\MS-OXCROPS.txt -Pattern 'RopQueryRows' -Context 2
@@ -216,7 +216,7 @@ length-preserving, every byte offset after it. Widen the rules and capture again
 
 ## Releasing
 
-All four crates share one version number, in `[workspace.package]`. Cutting a release is three
+All five crates share one version number, in `[workspace.package]`. Cutting a release is three
 steps:
 
 1. Bump `version` in the root `Cargo.toml` and move the `[Unreleased]` entries in

@@ -90,6 +90,29 @@ async fn a_settings_response_ends_the_search() {
     assert!(requests[0].headers.get("Authorization").is_some());
 }
 
+/// A candidate that never challenges has already answered, and that is not a refusal.
+///
+/// Under a connection-oriented scheme the opening leg carries the whole Autodiscover request, so a
+/// service that wants no authentication replies to it directly. Reading that reply as "the
+/// handshake did not complete" would end the search with `Unauthorized` at the first candidate that
+/// actually worked.
+#[cfg(feature = "ntlm")]
+#[tokio::test]
+async fn a_candidate_that_never_challenges_is_still_an_answer() {
+    let server = service(SETTINGS).await;
+    let url = format!("{}/Autodiscover/Autodiscover.xml", server.uri());
+
+    let endpoint = builder()
+        .credentials(Credentials::ntlm("DEV\\alice", "hunter2"))
+        .lookup_at(&url, &address())
+        .await
+        .unwrap();
+
+    assert_eq!(endpoint.mail_store_url(), Some(MAIL_STORE_URL));
+    // One request, not two: there was no challenge, so there was no second leg.
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
 /// `redirectUrl` means "ask over there instead", and the answer over there is the one that counts.
 #[tokio::test]
 async fn a_redirect_is_followed_to_the_url_it_names() {
@@ -197,6 +220,80 @@ async fn refused_credentials_stop_the_search_and_say_so() {
     };
     assert_eq!(offered, &["Basic"]);
     assert_eq!(*sent, "Basic credentials");
+}
+
+/// Autodiscover has to answer a handshake too, and it is the *first* thing a caller does.
+///
+/// NTLM that worked only on the MAPI endpoint would fail at the step before it, so the challenge
+/// path is here as well as in the transport. Unlike the transport's, this one re-sends the whole
+/// Autodiscover request on the last leg: it is a few hundred bytes of XML, and the alternative is
+/// an extra round trip.
+///
+/// [MS-NLMP] §4.2.4.3's own `CHALLENGE_MESSAGE`, which is the only one that can be written down
+/// here without a server to get it from.
+#[cfg(feature = "ntlm")]
+#[tokio::test]
+async fn a_connection_oriented_scheme_completes_its_handshake_during_discovery() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use wiremock::{Request, Respond};
+
+    const CHALLENGE: &str = concat!(
+        "NTLM TlRMTVNTUAACAAAADAAMADgAAAAzgoriASNFZ4mrze8AAAAAAAAAACQAJABE",
+        "AAAABgBwFwAAAA9TAGUAcgB2AGUAcgACAAwARABvAG0AYQBpAG4AAQAMAFMAZQBy",
+        "AHYAZQByAAAAAAA="
+    );
+
+    /// Challenges the first request and answers the second, which is what IIS does.
+    struct Challenging(Arc<AtomicUsize>);
+    impl Respond for Challenging {
+        fn respond(&self, _: &Request) -> ResponseTemplate {
+            if self.0.fetch_add(1, Ordering::SeqCst) == 0 {
+                return ResponseTemplate::new(401)
+                    .append_header("WWW-Authenticate", CHALLENGE)
+                    .append_header("WWW-Authenticate", "Basic realm=\"x\"");
+            }
+            ResponseTemplate::new(200)
+                .set_body_string(SETTINGS)
+                .append_header("Content-Type", "text/xml; charset=utf-8")
+        }
+    }
+
+    let seen = Arc::new(AtomicUsize::new(0));
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .respond_with(Challenging(Arc::clone(&seen)))
+        .mount(&server)
+        .await;
+
+    let endpoint = MapiClient::builder()
+        .credentials(Credentials::ntlm("DEV\\alice", "hunter2"))
+        .timeout(Duration::from_secs(5))
+        .danger_allow_plaintext_http()
+        .lookup_at(
+            format!("{}/Autodiscover/Autodiscover.xml", server.uri()),
+            &address(),
+        )
+        .await
+        .expect("the handshake completes and the settings arrive");
+
+    assert_eq!(endpoint.mail_store_url(), Some(MAIL_STORE_URL));
+    assert_eq!(seen.load(Ordering::SeqCst), 2, "two legs, one candidate");
+
+    // Both legs carry an Authorization header, and both carry the request body — which is what
+    // makes the second leg a request rather than a third round trip.
+    let requests = server.received_requests().await.unwrap();
+    for request in &requests {
+        let scheme = request
+            .headers
+            .get("authorization")
+            .unwrap()
+            .to_str()
+            .unwrap();
+        assert!(scheme.starts_with("NTLM "), "{scheme}");
+        assert!(!request.body.is_empty());
+    }
 }
 
 /// The same rule the endpoint itself is held to: credentials do not go out in the clear unless

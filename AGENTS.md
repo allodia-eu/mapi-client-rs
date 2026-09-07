@@ -1,8 +1,9 @@
 # Working in `mapi-client-rs`
 
-A pure-Rust client for **MAPI over HTTP**, the protocol Outlook speaks to Exchange. Four crates:
-`mapi-proto` (sans-io codec), `mapi-autodiscover` (finding the endpoint), `mapi-client` (the async
-client that does the I/O) and `mapi-cli` (diagnostics, and the fixture capture tool).
+A pure-Rust client for **MAPI over HTTP**, the protocol Outlook speaks to Exchange. Five crates:
+`mapi-proto` (sans-io codec), `mapi-autodiscover` (finding the endpoint), `mapi-auth` (sans-io NTLM
+and SPNEGO handshakes), `mapi-client` (the async client that does the I/O) and `mapi-cli`
+(diagnostics, and the fixture capture tool).
 
 This file is the standing brief. `CLAUDE.md` is a symlink to it, so there is one copy rather than
 two that drift. What follows is not style preference — every rule here is either mechanically
@@ -12,10 +13,10 @@ enforced or was paid for in debugging time, and the note attached to each says w
 
 **The Microsoft Open Specification documents are the authoritative resource — always.** Not this
 repository's documentation, not a blog post, not another implementation, and not an inference from
-an observed transcript. Seventeen documents, pinned by version in [`SPEC.md`](SPEC.md), fetched with
+an observed transcript. Nineteen documents, pinned by version in [`SPEC.md`](SPEC.md), fetched with
 `scripts\Get-Specs.ps1` into a gitignored `spec/` and never committed.
 
-Read the `spec/*.txt` extracts, not the PDFs — 1,969 pages are painful to page through and instant
+Read the `spec/*.txt` extracts, not the PDFs — 2,101 pages are painful to page through and instant
 to `Select-String`. Start a property lookup in [MS-OXPROPS], which is an index rather than a
 narrative: it maps every `PidTag` and `PidLid` to its id, its type and the document that defines it,
 which is usually the question being asked.
@@ -168,6 +169,19 @@ caller, the script then runs with no helpers defined and exits 0. `Invoke-Gate.p
    `-AutoMapping $true` works and is never advertised, and Autodiscover's `AlternativeMailbox`
    element is the only place MAPI/HTTP names a mailbox the caller does not own. A permission a
    client can use and cannot find.
+7. **A 401 from IIS says nothing about *why*.** Exchange ships with
+   `ExtendedProtectionTokenChecking: Require`, so an NTLM `AUTHENTICATE_MESSAGE` without a channel
+   binding is refused — with the same bare `WWW-Authenticate: NTLM` that a wrong password earns, and
+   the same one the handshake opened with. Three different faults, one response. Check
+   `Get-MapiVirtualDirectory | fl ExtendedProtection*` before suspecting the credential.
+8. **`reqwest` sends no `Content-Length` for an empty body, and `http.sys` answers 411.** Before
+   authenticating anything — so a bodyless handshake leg never reaches the challenge it was sent
+   for, and the 411 carries no `WWW-Authenticate` to hint at why. Any request this crate sends with
+   no body sets the header itself.
+9. **An unread response body costs the connection.** `reqwest` returns a connection to the pool only
+   once the body is consumed, so a handshake leg whose body is dropped hands the next leg a *fresh*
+   connection — one the server never challenged. It authenticates a connection, not a request, so
+   the answer arrives with nothing to answer. Read the body even when it is empty and uninteresting.
 
 ## Working conventions
 

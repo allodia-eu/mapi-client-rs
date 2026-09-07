@@ -35,11 +35,20 @@
     -Mailbox developer,developer2 sets them for each run in turn, so each mailbox sends to the
     other. The password is the one already given.
 
+    One more selects the authentication scheme, and defaults to Basic:
+
+        MAPI_LIVE_AUTH       basic, ntlm or negotiate. Setting it runs the *whole* suite over that
+                             scheme rather than proving it with one test, which is the point: a
+                             handshake that gets as far as a logon has not been shown to survive a
+                             streamed attachment or a paged table.
+
     Two traps worth not rediscovering:
 
-      * Basic authentication must be enabled on the MAPI virtual directory, because that is the
-        only scheme this crate implements. Check with
-        `Get-MapiVirtualDirectory -Server $env:COMPUTERNAME | Select IISAuthenticationMethods`.
+      * A 401 says nothing about why. Exchange ships with ExtendedProtectionTokenChecking set to
+        Require, so a channel-binding fault, a wrong password and a scheme the server does not
+        accept are all the same response. Check what the virtual directory actually offers with
+        `Get-MapiVirtualDirectory -Server $env:COMPUTERNAME |
+             Select IISAuthenticationMethods, ExtendedProtectionTokenChecking`.
       * Never pass the distinguished name through Git Bash. MSYS rewrites a leading /o= into a
         Windows path, and Exchange reports the result as ecUnknownUser — which reads like a
         credential fault and is not one. This script exists partly so that nobody has to.
@@ -69,11 +78,22 @@
 .PARAMETER Password
     Overrides MAPI_LIVE_PASSWORD.
 
+.PARAMETER Auth
+    Overrides MAPI_LIVE_AUTH: basic (the default), ntlm or negotiate.
+
+    The whole suite runs over whichever is named, which is the only way to know a scheme works. A
+    handshake authenticates a connection, not a request, so what matters is what that connection
+    survives afterwards - a streamed attachment, a paged table, a write - and none of that is shown
+    by one logon.
+
 .EXAMPLE
     powershell.exe -File scripts\Test-Live.ps1
 
 .EXAMPLE
     powershell.exe -File scripts\Test-Live.ps1 -Mailbox developer,developer2 -Password '<password>'
+
+.EXAMPLE
+    powershell.exe -File scripts\Test-Live.ps1 -Mailbox developer,developer2 -Password '<password>' -Auth ntlm
 
 .EXAMPLE
     powershell.exe -File scripts\Test-Live.ps1 -Endpoint 'https://mail.example.test/mapi/emsmdb/?MailboxId=...@example.test'
@@ -85,7 +105,9 @@ param(
     [string]   $Endpoint,
     [string]   $UserDn,
     [string]   $Username,
-    [string]   $Password
+    [string]   $Password,
+    [ValidateSet('basic', 'ntlm', 'negotiate')]
+    [string]   $Auth
 )
 
 $ErrorActionPreference = 'Stop'
@@ -106,6 +128,7 @@ if ($Endpoint) { $env:MAPI_LIVE_ENDPOINT = $Endpoint }
 if ($UserDn)   { $env:MAPI_LIVE_USER_DN  = $UserDn }
 if ($Username) { $env:MAPI_LIVE_USERNAME = $Username }
 if ($Password) { $env:MAPI_LIVE_PASSWORD = $Password }
+if ($Auth)     { $env:MAPI_LIVE_AUTH     = $Auth }
 
 $cargo = Get-CargoPath
 

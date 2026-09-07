@@ -425,6 +425,14 @@ pub(crate) enum Command {
     Discover {
         /// The email address to look up.
         address: String,
+
+        /// Start from this Autodiscover URL instead of the candidate sequence.
+        ///
+        /// For a deployment whose Autodiscover service is somewhere the candidates would never
+        /// look — which includes a lab where `autodiscover.<domain>` does not resolve. Redirects
+        /// are still followed from here.
+        #[arg(long, value_name = "URL")]
+        at: Option<String>,
     },
 
     /// List every mailbox these credentials can open: shared, delegated and archive.
