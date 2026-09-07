@@ -257,7 +257,7 @@ jobs:
             echo
           } >> "$GITHUB_STEP_SUMMARY"
 
-          for pkg in mapi-proto mapi-autodiscover mapi-client; do
+          for pkg in mapi-proto mapi-auth mapi-autodiscover mapi-client; do
             echo "### \`$pkg\`" >> "$GITHUB_STEP_SUMMARY"
             echo '```diff' >> "$GITHUB_STEP_SUMMARY"
             # Two things that both fail quietly if you get them wrong:

@@ -13,16 +13,27 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-default = ["autodiscover"]
+default = ["autodiscover", "ntlm"]
 # Locating an endpoint from an email address. Additive: it adds `MapiClientBuilder::discover`
 # and nothing anywhere else changes. Turn it off if you already know the endpoint URL and the
 # distinguished name, and would rather not compile an XML parser.
 autodiscover = ["dep:mapi-autodiscover"]
+# NTLM and Negotiate authentication, which is what a default-configured Exchange offers. Additive:
+# it adds two `Credentials` variants and nothing anywhere else changes. Turning it off drops four
+# hash crates and a mutex from the tree, and leaves a client that needs Basic or OAuth on the MAPI
+# virtual directory.
+ntlm = ["dep:mapi-auth", "dep:tokio", "dep:getrandom"]
 
 [dependencies]
 mapi-proto.workspace = true
+mapi-auth = { workspace = true, optional = true }
 mapi-autodiscover = { workspace = true, optional = true }
 thiserror.workspace = true
+
+# `sync` only, for the mutex that serialises requests while a connection-oriented handshake is in
+# flight. It is not a new runtime in the tree: reqwest already brings tokio, and this asks for one
+# more feature of it rather than one more dependency.
+tokio = { version = "1", features = ["sync"], optional = true }
 
 # TLS is rustls with the *platform* verifier rather than a bundled root list, which is the whole
 # reason this default is worth stating: an on-premises Exchange is routinely fronted by a
@@ -47,6 +58,12 @@ reqwest = { version = "0.13", default-features = false, features = [
 # `X-RequestId` and `X-ClientInfo` carry a GUID that [MS-OXCMAPIHTTP] §2.2.3.3.2 requires to be
 # unique per client instance. A sans-io crate cannot obtain randomness; this one can.
 uuid = { version = "1", features = ["v4"] }
+
+# The eight-byte client challenge an NTLM handshake needs. Taken from the operating system rather
+# than from a `Uuid`, whose version and variant nibbles are fixed and would therefore hand four
+# known bits to anybody watching. `mapi-auth` cannot do this for itself and says so: a sans-io
+# crate has no source of randomness.
+getrandom = { version = "0.4", optional = true }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }

@@ -15,6 +15,24 @@ use mapi_client::{Credentials, Lcid, LegacyDn, MapiClient, MapiClientBuilder};
 use crate::Failure;
 use crate::report::Dump;
 
+/// Which authentication scheme `--auth` selects.
+///
+/// The two connection-oriented schemes are behind the same feature as the client's, so a
+/// `--no-default-features` build offers `basic` and says so rather than accepting a value it cannot
+/// act on.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
+pub(crate) enum Auth {
+    /// HTTP Basic, sent preemptively. Needs Basic enabled on the MAPI virtual directory.
+    #[default]
+    Basic,
+    /// NTLM v2, over a three-message handshake.
+    #[cfg(feature = "ntlm")]
+    Ntlm,
+    /// SPNEGO carrying NTLM.
+    #[cfg(feature = "ntlm")]
+    Negotiate,
+}
+
 /// How to reach one mailbox.
 #[derive(Clone, Debug, Args)]
 pub(crate) struct Connection {
@@ -44,6 +62,19 @@ pub(crate) struct Connection {
         hide_env_values = true
     )]
     password: Option<String>,
+
+    /// Which authentication scheme to use: `basic`, `ntlm` or `negotiate`.
+    ///
+    /// A default-configured Exchange offers only the last two. `basic` is the default here because
+    /// it is what the committed fixture corpus was captured with, and changing the scheme changes
+    /// how many HTTP exchanges a capture contains.
+    #[arg(
+        long,
+        env = "MAPI_LIVE_AUTH",
+        value_name = "SCHEME",
+        default_value = "basic"
+    )]
+    auth: Auth,
 
     /// The Session Context's locale, as an [MS-LCID] identifier: `0x0409` is en-US, `0x0413`
     /// nl-NL.
@@ -116,10 +147,14 @@ impl Connection {
             .danger_accept_invalid_certificates(self.insecure);
 
         if let Some(username) = self.username.as_deref() {
-            builder = builder.credentials(Credentials::basic(
-                username,
-                self.password.clone().unwrap_or_default(),
-            ));
+            let password = self.password.clone().unwrap_or_default();
+            builder = builder.credentials(match self.auth {
+                Auth::Basic => Credentials::basic(username, password),
+                #[cfg(feature = "ntlm")]
+                Auth::Ntlm => Credentials::ntlm(username, password),
+                #[cfg(feature = "ntlm")]
+                Auth::Negotiate => Credentials::negotiate(username, password),
+            });
         }
 
         // A plaintext endpoint is refused unless it was asked for, and here asking for it is the

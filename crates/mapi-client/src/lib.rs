@@ -122,6 +122,8 @@ mod connection;
 mod credentials;
 mod draft;
 mod folder;
+#[cfg(feature = "ntlm")]
+mod handshake;
 mod logon;
 mod message;
 mod named;
@@ -140,6 +142,11 @@ mod mailbox;
 
 pub mod error;
 
+/// The sans-io NTLM and SPNEGO handshakes this crate drives, for
+/// [`Identity`](mapi_auth::Identity) and for anyone wiring one up to an HTTP client of their
+/// own.
+#[cfg(feature = "ntlm")]
+pub use mapi_auth;
 #[cfg(feature = "autodiscover")]
 /// The Autodiscover client this crate drives, for the types it does not re-export.
 pub use mapi_autodiscover;

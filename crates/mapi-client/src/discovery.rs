@@ -26,7 +26,7 @@ use mapi_autodiscover::{
     candidate_urls, redirect_probe_url,
 };
 use mapi_proto::LegacyDn;
-use reqwest::{Client, StatusCode};
+use reqwest::{Client, Response, StatusCode, Url};
 
 use crate::builder::{MapiClientBuilder, parse_endpoint};
 use crate::client::MapiClient;
@@ -239,6 +239,20 @@ impl Found {
     }
 }
 
+/// The `WWW-Authenticate` values a response carried, whole.
+///
+/// Whole rather than reduced to scheme names, because a handshake's next message is in the value:
+/// what a 401 offers and what it challenges with are the same header.
+fn challenges(response: &Response) -> Vec<String> {
+    response
+        .headers()
+        .get_all("WWW-Authenticate")
+        .iter()
+        .filter_map(|value| value.to_str().ok())
+        .map(str::to_owned)
+        .collect()
+}
+
 /// Counts a redirect, refusing to follow a chain that is really a loop.
 fn bump(redirects: usize) -> Result<usize> {
     let next = redirects.saturating_add(1);
@@ -269,31 +283,23 @@ impl Search<'_> {
             return Ok(None);
         };
 
-        let request = AutodiscoverRequest::new(address);
-        let mut builder = self.http.post(url.clone());
-        for (name, value) in request.headers() {
-            builder = builder.header(name, value);
-        }
-        builder = match self.credentials {
-            Credentials::None => builder,
-            Credentials::Basic { username, password } => {
-                builder.basic_auth(username, Some(password))
-            }
-            Credentials::Bearer { token } => builder.bearer_auth(token),
+        // A connection-oriented scheme has to run its handshake here too. Autodiscover is the
+        // *first* thing a caller does, so NTLM that worked only on the MAPI endpoint would fail at
+        // the step before it.
+        #[cfg(feature = "ntlm")]
+        let Some(response) = self.authenticate(&url, address).await? else {
+            return Ok(None);
         };
-
-        let Ok(response) = builder.body(request.into_body()).send().await else {
+        #[cfg(not(feature = "ntlm"))]
+        let Some(response) = self.post(&url, address, None).await else {
             return Ok(None);
         };
 
         if response.status() == StatusCode::UNAUTHORIZED {
             return Err(Error::Unauthorized {
                 url: url.to_string(),
-                offered: response
-                    .headers()
-                    .get_all("WWW-Authenticate")
+                offered: challenges(&response)
                     .iter()
-                    .filter_map(|value| value.to_str().ok())
                     .filter_map(|value| value.split_whitespace().next())
                     .map(str::to_owned)
                     .collect(),
@@ -313,6 +319,88 @@ impl Search<'_> {
         // often just the organisation's website — so a body that will not parse is one more
         // candidate that did not answer.
         Ok(AutodiscoverResponse::parse(&body).ok())
+    }
+
+    /// POSTs one Autodiscover request, with an optional `Authorization` value of our own.
+    ///
+    /// `None` means the candidate did not answer at all, which is a reason to try the next one
+    /// rather than to stop.
+    async fn post(
+        &self,
+        url: &Url,
+        address: &EmailAddress,
+        authorization: Option<&str>,
+    ) -> Option<Response> {
+        let request = AutodiscoverRequest::new(address);
+        let mut builder = self.http.post(url.clone());
+        for (name, value) in request.headers() {
+            builder = builder.header(name, value);
+        }
+        builder = if let Some(value) = authorization {
+            builder.header(reqwest::header::AUTHORIZATION, value)
+        } else {
+            match self.credentials {
+                Credentials::Basic { username, password } => {
+                    builder.basic_auth(username, Some(password))
+                }
+                Credentials::Bearer { token } => builder.bearer_auth(token),
+                // `None`, and the handshake schemes, which supply their own header above.
+                _ => builder,
+            }
+        };
+
+        builder.body(request.into_body()).send().await.ok()
+    }
+
+    /// Sends the request, running a handshake first when the credentials need one.
+    ///
+    /// The opening leg carries the whole Autodiscover request rather than an empty body, which is
+    /// the opposite of what the MAPI transport does and for the opposite reason: an Autodiscover
+    /// request is a few hundred bytes of XML rather than a ROP buffer, so re-sending it costs less
+    /// than the round trip an empty leg would add.
+    ///
+    /// `None` means the candidate did not answer, which is a reason to try the next one.
+    #[cfg(feature = "ntlm")]
+    async fn authenticate(&self, url: &Url, address: &EmailAddress) -> Result<Option<Response>> {
+        let Some((scheme, identity)) = self.credentials.handshake() else {
+            return Ok(self.post(url, address, None).await);
+        };
+
+        let url_text = url.to_string();
+        let context = crate::handshake::Context {
+            url: &url_text,
+            credentials: self.credentials,
+        };
+
+        let (negotiation, opening) =
+            crate::handshake::Negotiation::start(scheme, identity, url.host_str())?;
+        let Some(challenged) = self.post(url, address, Some(&opening)).await else {
+            return Ok(None);
+        };
+
+        // A candidate that did not challenge has already answered the request the opening leg
+        // carried — it wants no authentication, or none this client would have to prove. There is
+        // no handshake to finish, so the reply is the reply; treating it as a refusal would turn a
+        // candidate that answered into an error that ends the whole search.
+        if challenged.status() != StatusCode::UNAUTHORIZED {
+            return Ok(Some(challenged));
+        }
+
+        let certificate = challenged
+            .extensions()
+            .get::<reqwest::tls::TlsInfo>()
+            .and_then(|info| info.peer_certificate().map(<[u8]>::to_vec));
+        let offered = challenges(&challenged);
+
+        // Reading the body is what returns the connection to the pool, and a handshake depends on
+        // it: NTLM authenticates a connection, so the answer has to travel on the one that was
+        // challenged. Leaving the body unread hands the last leg a fresh connection, on which the
+        // server has no challenge outstanding — the same trap the MAPI transport documents.
+        let _ = challenged.bytes().await;
+
+        let answer = negotiation.answer(&offered, certificate.as_deref(), context)?;
+
+        Ok(self.post(url, address, Some(&answer)).await)
     }
 
     /// The plain-HTTP redirect probe: a `GET` whose `Location` header names the real service.
