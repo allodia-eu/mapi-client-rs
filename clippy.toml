@@ -14,3 +14,9 @@ msrv = "1.97.0"
 
 # Protocol constants are written the way the spec writes them.
 literal-representation-threshold = 16
+
+# Proper nouns the specifications spell this way, which `doc_markdown` would
+# otherwise want in backticks — and backticks would say "this is code", which
+# these are not. The trailing `..` keeps clippy's own default list rather than
+# replacing it.
+doc-valid-idents = ["NetBIOS", ".."]

@@ -599,10 +599,11 @@ Per the changelog's convention that gaps are listed as plainly as features:
   analogues of JMAP's push and `/changes`. Almost certainly wanted eventually — a client that has to
   re-list a folder to notice a new message is not one you would build a product on — but nothing
   here depends on them.
-- **`Negotiate`/`NTLM`.** Unchanged from v0.1.0 and unchanged by this plan, but worth repeating in
-  a conversation containing the words "production-ready": a default-configured Exchange offers only
-  those two schemes, and this client speaks neither. Basic on the MAPI virtual directory or OAuth is
-  still the requirement.
+- **`Negotiate`/`NTLM`.** Deferred by this plan and then done anyway, because it was the last thing
+  standing between the workspace and an unmodified deployment: a default-configured Exchange offers
+  only those two schemes, so "production-ready" was not sayable while Basic had to be switched on
+  first. `mapi-auth` implements both. **Kerberos** is what remains — `Negotiate` here is SPNEGO
+  offering NTLM as its only mechanism, which is what every non-Windows client does.
 
 ## Effect on the gates
 

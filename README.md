@@ -40,10 +40,12 @@ repository existed. Two findings make it tractable:
 > **send** a message, **move** one between folders, and **flag** one — both of the things MAPI means
 > by that, the read bit and the follow-up flag, which it keeps apart and so does this. And then
 > **more than one mailbox**: list the shared, delegated and archive mailboxes an account can open,
-> and open one on that account's own credentials. All verified against Exchange Server SE
-> `15.02.2562.045`, in two mailboxes, in two languages, with mail actually sent between them and a
-> shared mailbox read by a delegate. What is missing is `Negotiate`/`NTLM` authentication. The gaps
-> are stated below and in the changelog rather than left to be discovered.
+> and open one on that account's own credentials. It authenticates with **`NTLM`** and
+> **`Negotiate`** as well as Basic, which is what a default-configured Exchange offers. All verified
+> against Exchange Server SE `15.02.2562.045`, in two mailboxes, in two languages, with mail
+> actually sent between them, a shared mailbox read by a delegate, and the whole suite run over each
+> authentication scheme. What is missing is Kerberos. The gaps are stated below and in the changelog
+> rather than left to be discovered.
 
 ## Install
 
@@ -52,9 +54,10 @@ repository existed. Two findings make it tractable:
 mapi-client = "0.3"
 ```
 
-`mapi-proto` and `mapi-autodiscover` are published separately and are useful on their own — the
-first if you want the codec with your own transport, the second if you only need to find an
-endpoint. `mapi-cli` is not published; build it from this repository with `cargo build -p mapi-cli`.
+`mapi-proto`, `mapi-autodiscover` and `mapi-auth` are published separately and are useful on their
+own — the first if you want the codec with your own transport, the second if you only need to find
+an endpoint, the third if you need NTLM or Negotiate with an HTTP client of your own. `mapi-cli` is
+not published; build it from this repository with `cargo build -p mapi-cli`.
 
 ## What CI does and does not prove
 
@@ -91,6 +94,7 @@ folders are addressed by the id a logon reports and the corpus proves it in both
 |---|---|---|
 | [`mapi-proto`](crates/mapi-proto) | The sans-io core: wire envelope, ROPs, OXCDATA structures. No network, no async, no I/O at all. | [docs](https://docs.rs/mapi-proto) |
 | [`mapi-autodiscover`](crates/mapi-autodiscover) | Autodiscover — a genuinely different protocol (XML over HTTPS), separately useful for locating an endpoint. | [docs](https://docs.rs/mapi-autodiscover) |
+| [`mapi-auth`](crates/mapi-auth) | NTLM and SPNEGO handshakes, sans-io: what to put in `Authorization`, with no network, clock or entropy of its own. | [docs](https://docs.rs/mapi-auth) |
 | [`mapi-client`](crates/mapi-client) | The async client: HTTP, TLS, auth, retry. Depends on `mapi-proto`; nothing depends on it. | [docs](https://docs.rs/mapi-client) |
 | [`mapi-cli`](crates/mapi-cli) | Diagnostic binary, and the fixture capture tool. Not published. | |
 
@@ -159,10 +163,25 @@ let saved = logon.folder(drafts)
     .await?;                                     // -> SavedMessage, with the id the server minted
 ```
 
-Authentication is Basic or Bearer. **`Negotiate` and `NTLM` are not implemented** — a genuine gap,
-because a default-configured Exchange offers only those two. Both are multi-leg challenge/response
-handshakes bound to the connection, which a "compute one header" credential cannot express; see
-`mapi-client`'s documentation for the ways round it.
+**Authentication is Basic, Bearer, `NTLM` or `Negotiate`** — the last two being what a
+default-configured Exchange offers, and what this client needed a lab modification to work without
+until now.
+
+```rust
+let client = MapiClient::builder()
+    .credentials(Credentials::ntlm(r"DEV\developer", "…"))   // or ::negotiate
+    .discover(&EmailAddress::new("developer@dev.local")?)
+    .await?;
+```
+
+Both are multi-leg handshakes that authenticate a **TCP connection** rather than a request, so
+choosing one pins the connection pool and serialises requests — a clone of such a client does not
+add concurrency, and could not. The handshakes themselves live in [`mapi-auth`](crates/mapi-auth),
+which is sans-io for the same reason `mapi-proto` is: [MS-NLMP]'s published test vectors are only
+reproducible when the client challenge and the timestamp are inputs rather than ambient.
+
+**Kerberos is not implemented.** `Negotiate` here is SPNEGO offering NTLM as its only mechanism,
+which is what every non-Windows client does; a server that insists on Kerberos is reported by name.
 
 **Three correctness traps encoded in the types, not the docs.**
 
@@ -200,8 +219,9 @@ The Microsoft Open Specification documents are authoritative — over this repos
 any blog post, over any other implementation, and over any inference from an observed transcript.
 Every protocol item cites its section: `[MS-OXCROPS] §2.2.4.1.1`, never just "the spec".
 
-Seventeen documents — fifteen pinned at `v20250520`, `[MS-OXDSCLI]` and `[MS-OXOCAL]` at
-`v20250819`. They are **never committed**; [`SPEC.md`](SPEC.md) carries the URLs and one command
+Nineteen documents — fifteen pinned at `v20250520`, `[MS-OXDSCLI]` and `[MS-OXOCAL]` at
+`v20250819`, and the two authentication documents `[MS-NLMP]` and `[MS-SPNG]` on their own
+schedule. They are **never committed**; [`SPEC.md`](SPEC.md) carries the URLs and one command
 fetches them into a gitignored `spec/`:
 
 ```powershell

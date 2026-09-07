@@ -137,7 +137,9 @@ async fn run(cli: Cli) -> Result<(), Failure> {
         }
         Command::State { folder, id } => command::state(&connection, &folder, &id).await,
         Command::Properties { tag } => command::properties(&connection, &tag).await,
-        Command::Discover { address } => command::discover(&connection, &address).await,
+        Command::Discover { address, at } => {
+            command::discover(&connection, &address, at.as_deref()).await
+        }
         Command::Mailboxes { address, open } => {
             command::mailboxes(&connection, &address, open).await
         }
