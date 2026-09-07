@@ -109,6 +109,28 @@ pub(crate) async fn send(
     Ok(())
 }
 
+/// Submit a message that is already in the mailbox.
+///
+/// Deliberately says nothing about where the message will end up: that is decided by properties the
+/// draft already carries, and this command did not write them.
+pub(crate) async fn submit(connection: &Connection, folder: &str, id: &str) -> Result<(), Failure> {
+    let client = connection.client()?;
+    let mut logon = client.connect().await?.logon().await?;
+    let folder_id = super::resolve(&mut logon, folder).await?;
+    let message = MessageId::new(super::parse_hexadecimal(id, "a message id")?);
+
+    logon.message(folder_id, message).send().await?;
+    println!("submitted {:#018x} from {folder}", message.as_u64());
+    println!("  the server accepted it; delivery is reported in a mailbox, not in a response");
+    println!(
+        "  where it goes now is PidTagSentMailSvrEID and PidTagDeleteAfterSubmit on the message, \
+         which this command did not write"
+    );
+
+    logon.disconnect().await?;
+    Ok(())
+}
+
 /// Move or copy messages between two folders.
 pub(crate) async fn move_messages(
     connection: &Connection,

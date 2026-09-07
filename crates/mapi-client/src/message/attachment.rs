@@ -108,9 +108,9 @@ impl<'a> Attachment<'a> {
 
 /// The message inside an attachment.
 ///
-/// Separate from [`Message`] because it is not named the same way: an embedded message has no
-/// folder and no id a caller could hold, only the attachment it lives in. Its id is reported by the
-/// open — see [`OpenMessageResponse::embedded_id`].
+/// Separate from [`Message`](super::Message) because it is not named the same way: an embedded
+/// message has no folder and no id a caller could hold, only the attachment it lives in. Its id is
+/// reported by the open — see [`OpenMessageResponse::embedded_id`].
 #[derive(Debug)]
 pub struct EmbeddedMessage<'a> {
     connection: &'a mut Connection,

@@ -19,12 +19,17 @@ use crate::wire::Writer;
 /// [MS-OXCROPS] §2.2.4.6.3
 #[test]
 fn a_null_destination_move_is_read_past_its_handle_index() {
+    // `DestHandleIndex` is four bytes and `PartialCompletion` is one, which is the whole of the
+    // body a refusal is not supposed to have.
+    const DESTINATION: u32 = 2;
+    const PARTIAL: u8 = 1;
+
     let mut w = Writer::new();
     w.u8(RopId::MOVE_COPY_MESSAGES.as_u8())
         .u8(1)
         .u32(ErrorCode::NULL_DESTINATION_OBJECT.as_u32())
-        .u32(2) // DestHandleIndex, four bytes
-        .u8(1); // PartialCompletion
+        .u32(DESTINATION)
+        .u8(PARTIAL);
     w.u8(RopId::SET_COLUMNS.as_u8()).u8(2).u32(0).u8(0);
 
     let responses = decode_all(&w.finish(), against(&no_columns())).unwrap();
@@ -64,13 +69,19 @@ fn a_null_destination_move_is_read_past_its_handle_index() {
 /// [MS-OXCROPS] §2.2.8.13.2
 #[test]
 fn an_unasked_for_progress_response_does_not_desynchronise_the_buffer() {
+    // A `LogonId`, then the two counts — nine bytes where a decoder that did not know this ROP
+    // would expect none.
+    const LOGON_ID: u8 = 0;
+    const COMPLETED: u32 = 3;
+    const TOTAL: u32 = 7;
+
     let mut w = Writer::new();
     w.u8(RopId::PROGRESS.as_u8())
         .u8(1)
         .u32(0)
-        .u8(0) // LogonId
-        .u32(3) // CompletedTaskCount
-        .u32(7); // TotalTaskCount
+        .u8(LOGON_ID)
+        .u32(COMPLETED)
+        .u32(TOTAL);
     w.u8(RopId::SET_COLUMNS.as_u8()).u8(2).u32(0).u8(0);
 
     let responses = decode_all(&w.finish(), against(&no_columns())).unwrap();

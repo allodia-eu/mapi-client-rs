@@ -154,13 +154,16 @@ pub(crate) fn set_read_flags_response(slot: u8, partial: bool) -> Vec<u8> {
 /// Nothing this crate sends asks for one — every such ROP carries `WantAsynchronous = 0` — so a
 /// scripted server is the only way to see what happens when a server sends one anyway.
 ///
+/// The `LogonId` the body repeats back, which this crate only ever uses one of.
+const LOGON_ID: u8 = 0;
+
 /// [MS-OXCROPS] §2.2.8.13.2
 pub(crate) fn progress_response(slot: u8, completed: u32, total: u32) -> Vec<u8> {
     Bytes::new()
         .u8(0x50)
         .u8(slot)
         .u32(0)
-        .u8(0) // LogonId
+        .u8(LOGON_ID)
         .u32(completed)
         .u32(total)
         .done()

@@ -9,7 +9,7 @@ mod writes;
 
 use std::collections::HashMap;
 
-pub(crate) use acts::{flag, mark, move_messages, send, state};
+pub(crate) use acts::{flag, mark, move_messages, send, state, submit};
 pub(crate) use items::{contacts, events, message, messages};
 use mapi_client::{
     ContainerClass, EmailAddress, FOLDER_PROPERTIES, FolderId, Logon, NamedProperty,

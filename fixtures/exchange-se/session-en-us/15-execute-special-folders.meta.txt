@@ -9,8 +9,8 @@ name = 15-execute-special-folders
 request-type = Execute
 url = https://exchange-lab-01/mapi/emsmdb/?MailboxId=00000000-0000-0000-0000-000000000001@lab.local
 status = 200
-request-bytes = 219
-response-bytes = 186
+request-bytes = 91
+response-bytes = 455
 
 [request-headers]
 Content-Type: application/mapi-http

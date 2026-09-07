@@ -9,8 +9,8 @@ name = 06-execute-named-properties
 request-type = Execute
 url = https://exchange-lab-01/mapi/emsmdb/?MailboxId=00000000-0000-0000-0000-000000000001@lab.local
 status = 200
-request-bytes = 454
-response-bytes = 130
+request-bytes = 540
+response-bytes = 144
 
 [request-headers]
 Content-Type: application/mapi-http

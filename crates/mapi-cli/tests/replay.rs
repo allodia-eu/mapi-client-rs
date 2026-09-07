@@ -31,6 +31,7 @@
     reason = "a test that walks a captured layout by offset is asserting something true about it"
 )]
 
+mod acts;
 mod corpus;
 mod items;
 mod replayed;
@@ -59,7 +60,7 @@ const DEEP_PAGE: u16 = 20;
 /// pages and a release, the two halves of the entry-id chain, the Calendar's properties, four
 /// contents pages and a release, and the `Disconnect` — which is `01-ping` through `22-disconnect`
 /// in either session directory.
-const SESSION_EXCHANGES: usize = 22;
+const SESSION_EXCHANGES: usize = 23;
 
 /// How many exchanges one captured item session holds, and one captured write session.
 ///
@@ -68,6 +69,7 @@ const SESSION_EXCHANGES: usize = 22;
 /// can hide in.
 const ITEM_EXCHANGES: usize = 27;
 const WRITE_EXCHANGES: usize = 18;
+const ACT_EXCHANGES: usize = 21;
 
 /// The comment `mapi-cli capture` tried to set on the Store object, and which Exchange refused.
 /// Same reason as the page sizes: the request bodies only match if the replay sends the same
@@ -191,19 +193,30 @@ async fn replay(name: &str, locale: Lcid) -> Replayed {
     }
 }
 
-/// The named-property half of a captured session: every name this crate catalogues plus one no
-/// store has registered, then the ids that came back plus two the client never resolved.
+/// The named-property half of a captured session: every name this crate catalogues, registered;
+/// then one no store has, resolved without being registered; then the ids that came back plus two
+/// the client never resolved.
+///
+/// **Three exchanges, and the middle one is the point.** The catalogued names are asked for with
+/// `CreateIfMissing`, because a store allocates an id the first time something writes a property
+/// and a mailbox that has never held a flagged message has none for `PidLidToDoTitle`. The
+/// unregistered probe has to be asked for *without* it, or the capture would create the very
+/// property it exists to prove a store does not have.
 ///
 /// The order and the extras are not free choices — they are what `mapi-cli capture` sent, and the
 /// request bodies are compared byte for byte.
 async fn named_properties(logon: &mut Logon) -> (NamedProperties, Vec<Option<PropertyName>>) {
+    logon
+        .register_names(NamedProperty::ALL)
+        .await
+        .expect("RopGetPropertyIdsFromNames");
+
+    // Taken after the probe rather than before it, so the map the assertions run against holds both
+    // answers: twenty-four ids and one refusal reported as a value.
     let unregistered = PropertyName::named(PropertySetId::PUBLIC_STRINGS, UNREGISTERED_NAME)
         .expect("a name this crate can carry");
-    let mut wanted: Vec<PropertyName> = NamedProperty::ALL.iter().map(|p| p.name()).collect();
-    wanted.push(unregistered);
-
     let named = logon
-        .resolve_names(wanted)
+        .resolve_names([unregistered])
         .await
         .expect("RopGetPropertyIdsFromNames")
         .clone();
@@ -368,6 +381,8 @@ fn every_committed_fixture_is_in_the_manifest() {
         "items-nl-nl",
         "writes-en-us",
         "writes-nl-nl",
+        "acts-en-us",
+        "acts-nl-nl",
         "connect-refused",
     ] {
         let directory = fixtures().join("exchange-se").join(scenario);
@@ -391,7 +406,8 @@ fn every_committed_fixture_is_in_the_manifest() {
     // chose.
     assert_eq!(
         counted,
-        (SESSION_EXCHANGES * 2 + ITEM_EXCHANGES * 2 + WRITE_EXCHANGES * 2 + 1) * 3
+        (SESSION_EXCHANGES * 2 + ITEM_EXCHANGES * 2 + WRITE_EXCHANGES * 2 + ACT_EXCHANGES * 2 + 1)
+            * 3
     );
 }
 

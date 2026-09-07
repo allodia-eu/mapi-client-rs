@@ -192,6 +192,7 @@ async fn run_changing(connection: Connection, command: Command) -> Result<(), Fa
             )
             .await
         }
+        Command::Submit { folder, id } => command::submit(&connection, &folder, &id).await,
         Command::Move {
             from,
             to,

@@ -9,8 +9,8 @@ name = 12-execute-hierarchy-deep
 request-type = Execute
 url = https://exchange-lab-01/mapi/emsmdb/?MailboxId=00000000-0000-0000-0000-000000000001@lab.local
 status = 200
-request-bytes = 37
-response-bytes = 401
+request-bytes = 96
+response-bytes = 1950
 
 [request-headers]
 Content-Type: application/mapi-http

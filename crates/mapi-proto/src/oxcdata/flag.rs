@@ -3,9 +3,9 @@
 //! JMAP's `$flagged` keyword and IMAP's `\Flagged` are one bit. MAPI has two mechanisms that a
 //! client has to offer separately or conflate wrongly:
 //!
-//! * **The read state** is a bit of `PidTagMessageFlags` ([MS-OXCMSG] §2.2.1.6). It has its own
-//!   ROP — `RopSetReadFlags` — because the server does more than write the property: it sends the
-//!   read receipt the sender asked for. See [`MessageFlags`].
+//! * **The read state** is a bit of `PidTagMessageFlags` ([MS-OXCMSG] §2.2.1.6). It has its own ROP
+//!   — `RopSetReadFlags` — because the server does more than write the property: it sends the read
+//!   receipt the sender asked for. See [`MessageFlags`].
 //! * **The follow-up flag** is a set of ordinary properties ([MS-OXOFLAG]), written with
 //!   `RopSetProperties` like any others. See [`FlagStatus`] and [`FollowupIcon`].
 //!
@@ -27,30 +27,9 @@
 pub struct MessageFlags(u32);
 
 impl MessageFlags {
-    /// `mfRead`, `0x00000001` — the message has been read.
-    pub const READ: u32 = 0x0000_0001;
-    /// `mfUnmodified`, `0x00000002` — unchanged since it was saved or delivered. Read-only.
-    pub const UNMODIFIED: u32 = 0x0000_0002;
-    /// `mfSubmitted`, `0x00000004` — marked for sending by `RopSubmitMessage`. Read-only.
-    pub const SUBMITTED: u32 = 0x0000_0004;
-    /// `mfUnsent`, `0x00000008` — still being composed, so a draft.
-    ///
-    /// **Cleared by the server when a `RopSubmitMessage` succeeds**, which makes it the one field
-    /// that distinguishes a draft from a message on its way out.
-    pub const UNSENT: u32 = 0x0000_0008;
-    /// `mfHasAttach`, `0x00000010` — at least one attachment. Read-only.
-    pub const HAS_ATTACHMENT: u32 = 0x0000_0010;
-    /// `mfFromMe`, `0x00000020` — the recipient also sent it. Read-only.
-    pub const FROM_ME: u32 = 0x0000_0020;
     /// `mfFAI`, `0x00000040` — a folder associated information message, which no contents table
     /// lists and `RopSubmitMessage` refuses with `ecAccessDenied`. Read-only.
     pub const ASSOCIATED: u32 = 0x0000_0040;
-    /// `mfResend`, `0x00000080` — a resend with a non-delivery report.
-    pub const RESEND: u32 = 0x0000_0080;
-    /// `mfNotifyRead`, `0x00000100` — the sender asked to be told when it is first read.
-    pub const NOTIFY_READ: u32 = 0x0000_0100;
-    /// `mfNotifyUnread`, `0x00000200` — the sender asked to be told if it is deleted unread.
-    pub const NOTIFY_UNREAD: u32 = 0x0000_0200;
     /// `mfEverRead`, `0x00000400` — read at least once.
     ///
     /// [MS-OXCMSG] §2.2.1.6 says clients SHOULD ignore this, and names Exchange 2007 as a server
@@ -65,6 +44,27 @@ impl MessageFlags {
     /// rather than the server contradicting the document; the consequence for a client is that
     /// marking a message unread does not restore the flags it had.
     pub const EVER_READ: u32 = 0x0000_0400;
+    /// `mfFromMe`, `0x00000020` — the recipient also sent it. Read-only.
+    pub const FROM_ME: u32 = 0x0000_0020;
+    /// `mfHasAttach`, `0x00000010` — at least one attachment. Read-only.
+    pub const HAS_ATTACHMENT: u32 = 0x0000_0010;
+    /// `mfNotifyRead`, `0x00000100` — the sender asked to be told when it is first read.
+    pub const NOTIFY_READ: u32 = 0x0000_0100;
+    /// `mfNotifyUnread`, `0x00000200` — the sender asked to be told if it is deleted unread.
+    pub const NOTIFY_UNREAD: u32 = 0x0000_0200;
+    /// `mfRead`, `0x00000001` — the message has been read.
+    pub const READ: u32 = 0x0000_0001;
+    /// `mfResend`, `0x00000080` — a resend with a non-delivery report.
+    pub const RESEND: u32 = 0x0000_0080;
+    /// `mfSubmitted`, `0x00000004` — marked for sending by `RopSubmitMessage`. Read-only.
+    pub const SUBMITTED: u32 = 0x0000_0004;
+    /// `mfUnmodified`, `0x00000002` — unchanged since it was saved or delivered. Read-only.
+    pub const UNMODIFIED: u32 = 0x0000_0002;
+    /// `mfUnsent`, `0x00000008` — still being composed, so a draft.
+    ///
+    /// **Cleared by the server when a `RopSubmitMessage` succeeds**, which makes it the one field
+    /// that distinguishes a draft from a message on its way out.
+    pub const UNSENT: u32 = 0x0000_0008;
 
     /// Wraps the value of `PidTagMessageFlags`.
     #[must_use]
