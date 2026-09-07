@@ -1,4 +1,5 @@
 use super::*;
+use crate::mailbox::MailboxAddress;
 
 /// A capture from the live Exchange lab, scrubbed. See the comment at the top of the file.
 const EXCHANGE_SE: &str = include_str!("../../tests/exchange-se-mapihttp.xml");
@@ -82,6 +83,117 @@ fn nested_protocols_are_not_hoisted_to_the_top_level() {
             .any(|protocol| *protocol.protocol_type() == ProtocolType::Exch),
         "the nested EXCH protocol was read as a top-level one"
     );
+}
+
+/// The whole of "list mailboxes": there is no ROP for it, so this element is the only place a
+/// shared or delegated mailbox is ever named.
+#[test]
+fn the_shared_mailbox_in_the_capture_is_read_whole() {
+    let settings = settings(EXCHANGE_SE);
+    let [shared] = settings.alternative_mailboxes() else {
+        panic!("the capture carries exactly one alternative mailbox");
+    };
+
+    assert_eq!(*shared.kind(), MailboxKind::Delegate);
+    assert_eq!(shared.display_name(), Some("Shared Mailbox"));
+    assert_eq!(shared.smtp_address(), Some("shared@dev.local"));
+    assert_eq!(shared.owner_smtp_address(), Some("shared@dev.local"));
+}
+
+/// **Measured against Exchange Server SE `15.02.2562.045`, and the reason opening one costs a
+/// second round trip.** [MS-OXDSCLI] §2.2.4.1.1.2.5.2 offers a `LegacyDN` — everything a `Connect`
+/// needs, with no further lookup — and Exchange sends the `SmtpAddress` form instead. A client
+/// written from §2.2.4.1.1.2.5.2 alone finds no distinguished name at all.
+#[test]
+fn exchange_names_a_shared_mailbox_by_address_rather_than_by_distinguished_name() {
+    let settings = settings(EXCHANGE_SE);
+    let [shared] = settings.alternative_mailboxes() else {
+        panic!("the capture carries exactly one alternative mailbox");
+    };
+
+    assert_eq!(shared.legacy_dn(), None);
+    assert_eq!(shared.server(), None);
+    assert_eq!(
+        shared.address(),
+        Some(MailboxAddress::Smtp("shared@dev.local"))
+    );
+}
+
+/// A mailbox with nothing shared with it is the ordinary case: [MS-OXDSCLI] §2.2.4.1.1.2.5 returns
+/// the element only when there is an alternative mailbox to name, so "none" is an answer.
+#[test]
+fn a_response_naming_no_alternative_mailbox_lists_none() {
+    let xml = response(
+        "<User><LegacyDN>/o=X/cn=y</LegacyDN></User>
+         <Account><Action>settings</Action></Account>",
+    );
+    assert!(settings(&xml).alternative_mailboxes().is_empty());
+}
+
+/// [MS-OXDSCLI] §6.2's XSD gives `AlternativeMailbox` no `maxOccurs`, which permits at most one.
+/// §2.2.4.1.1.2.5's prose describes a per-mailbox element, and a user with an archive *and* a
+/// shared mailbox has two. Reading only the first would drop mailboxes silently.
+#[test]
+fn every_alternative_mailbox_is_read_not_only_the_first() {
+    let xml = response(
+        "<User><LegacyDN>/o=X/cn=y</LegacyDN></User>
+         <Account>
+           <Action>settings</Action>
+           <AlternativeMailbox>
+             <Type>Archive</Type>
+             <DisplayName>In-Place Archive</DisplayName>
+             <SmtpAddress>alice@example.test</SmtpAddress>
+           </AlternativeMailbox>
+           <AlternativeMailbox>
+             <Type>Delegate</Type>
+             <DisplayName>Shared Mailbox</DisplayName>
+             <SmtpAddress>shared@example.test</SmtpAddress>
+           </AlternativeMailbox>
+           <AlternativeMailbox>
+             <Type>TeamMailbox</Type>
+             <DisplayName>Project Site</DisplayName>
+             <LegacyDN>/o=X/cn=team</LegacyDN>
+             <Server>mail.example.test</Server>
+           </AlternativeMailbox>
+         </Account>",
+    );
+
+    let settings = settings(&xml);
+    let kinds: Vec<_> = settings
+        .alternative_mailboxes()
+        .iter()
+        .map(|mailbox| mailbox.kind().to_string())
+        .collect();
+    assert_eq!(kinds, vec!["Archive", "Delegate", "TeamMailbox"]);
+
+    // The third is the directory form, which is the one Exchange does not send.
+    let team = settings.alternative_mailboxes().get(2).unwrap();
+    assert_eq!(
+        team.address(),
+        Some(MailboxAddress::Directory {
+            legacy_dn: "/o=X/cn=team",
+            server: "mail.example.test",
+        })
+    );
+}
+
+/// An `AlternativeMailbox` nested inside a `Protocol` — the shape the `WEB` protocol already uses
+/// for its own children — must not be hoisted to the top level, for the same reason a nested
+/// `Protocol` is not.
+#[test]
+fn nested_alternative_mailboxes_are_not_hoisted_to_the_top_level() {
+    let xml = response(
+        "<Account>
+           <Action>settings</Action>
+           <Protocol>
+             <Type>WEB</Type>
+             <Internal>
+               <AlternativeMailbox><Type>Delegate</Type></AlternativeMailbox>
+             </Internal>
+           </Protocol>
+         </Account>",
+    );
+    assert!(settings(&xml).alternative_mailboxes().is_empty());
 }
 
 #[test]

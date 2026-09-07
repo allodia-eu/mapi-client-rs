@@ -19,6 +19,7 @@ use roxmltree::{Document, Node};
 
 use crate::EmailAddress;
 use crate::error::{Error, Result};
+use crate::mailbox::{AlternativeMailbox, MailboxKind};
 use crate::settings::{Protocol, ProtocolType, ServerError, Settings, Urls, User};
 
 /// What a server answered.
@@ -96,6 +97,7 @@ impl AutodiscoverResponse {
             _ => Ok(Self::Settings(Settings {
                 user: child(response, "User").map(read_user).unwrap_or_default(),
                 protocols: account.map(read_protocols).unwrap_or_default(),
+                alternative_mailboxes: account.map(read_mailboxes).unwrap_or_default(),
             })),
         }
     }
@@ -138,6 +140,33 @@ fn read_protocol(node: Node<'_, '_>) -> Protocol {
         address_book: child(node, "AddressBook")
             .map(read_urls)
             .unwrap_or_default(),
+    }
+}
+
+/// Every `AlternativeMailbox` the account carries, in the order the server listed them.
+///
+/// A direct-child search like [`read_protocols`], and for a sharper reason: [MS-OXDSCLI] §6.2's
+/// XSD declares this element with `minOccurs="0"` and no `maxOccurs`, which permits **at most
+/// one**, while §2.2.4.1.1.2.5's prose describes a per-mailbox element and Exchange sends one per
+/// alternative mailbox. The document contradicts itself, the server is the tie-breaker, and this
+/// reads them all.
+fn read_mailboxes(account: Node<'_, '_>) -> Vec<AlternativeMailbox> {
+    children(account, "AlternativeMailbox")
+        .into_iter()
+        .map(read_mailbox)
+        .collect()
+}
+
+fn read_mailbox(node: Node<'_, '_>) -> AlternativeMailbox {
+    AlternativeMailbox {
+        // `Type` is the one child §2.2.4.1.1.2.5.5 makes required, and an element without one is
+        // still a mailbox the server offered — so it is named as such rather than dropped.
+        kind: MailboxKind::parse(&child(node, "Type").and_then(text).unwrap_or_default()),
+        display_name: child(node, "DisplayName").and_then(text),
+        legacy_dn: child(node, "LegacyDN").and_then(text),
+        server: child(node, "Server").and_then(text),
+        smtp_address: child(node, "SmtpAddress").and_then(text),
+        owner_smtp_address: child(node, "OwnerSmtpAddress").and_then(text),
     }
 }
 

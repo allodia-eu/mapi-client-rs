@@ -60,6 +60,7 @@
 
 mod discovery;
 mod email;
+mod mailbox;
 mod request;
 mod response;
 mod settings;
@@ -71,6 +72,7 @@ pub use crate::discovery::{
 };
 pub use crate::email::EmailAddress;
 pub use crate::error::{Error, Result};
+pub use crate::mailbox::{AlternativeMailbox, MailboxAddress, MailboxKind};
 pub use crate::request::AutodiscoverRequest;
 pub use crate::response::AutodiscoverResponse;
 pub use crate::settings::{
