@@ -35,6 +35,18 @@
     -Mailbox developer,developer2 sets them for each run in turn, so each mailbox sends to the
     other. The password is the one already given.
 
+    Two more are for Kerberos, which Negotiate tries first:
+
+        MAPI_LIVE_KDC                  host:port of a KDC for the account's realm, which the test
+                                       that drives mapi-auth directly asks for its ticket. Set from
+                                       this machine's domain controller when the script runs on one.
+        MAPI_LIVE_REFERRAL_USERNAME    a user of a child domain, by UPN, for the referral test; its
+                                       password is MAPI_LIVE_REFERRAL_PASSWORD, or the lab's own.
+
+    The client itself finds KDCs through DNS: the suite is built with the hickory-dns feature, so
+    the realm's _kerberos._tcp SRV records are what it asks, as a caller with no resolver of its own
+    would.
+
     One more selects the authentication scheme, and defaults to Basic:
 
         MAPI_LIVE_AUTH       basic, ntlm or negotiate. Setting it runs the *whole* suite over that
@@ -78,6 +90,10 @@
 .PARAMETER Password
     Overrides MAPI_LIVE_PASSWORD.
 
+.PARAMETER ReferralUser
+    A user of a child domain of the Exchange server's own, by UPN. Sets
+    MAPI_LIVE_REFERRAL_USERNAME. Omit it and the referral test fails by name.
+
 .PARAMETER Auth
     Overrides MAPI_LIVE_AUTH: basic (the default), ntlm or negotiate.
 
@@ -106,6 +122,7 @@ param(
     [string]   $UserDn,
     [string]   $Username,
     [string]   $Password,
+    [string]   $ReferralUser,
     [ValidateSet('basic', 'ntlm', 'negotiate')]
     [string]   $Auth
 )
@@ -129,6 +146,17 @@ if ($UserDn)   { $env:MAPI_LIVE_USER_DN  = $UserDn }
 if ($Username) { $env:MAPI_LIVE_USERNAME = $Username }
 if ($Password) { $env:MAPI_LIVE_PASSWORD = $Password }
 if ($Auth)     { $env:MAPI_LIVE_AUTH     = $Auth }
+if ($ReferralUser) { $env:MAPI_LIVE_REFERRAL_USERNAME = $ReferralUser }
+
+# The KDC the direct mapi-auth test asks: this machine's domain controller, when it is in a domain.
+if (-not $env:MAPI_LIVE_KDC) {
+    try {
+        $dc = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().FindDomainController().Name
+        $env:MAPI_LIVE_KDC = "${dc}:88"
+    } catch {
+        Write-Host '    Not in a domain: the Kerberos tests need MAPI_LIVE_KDC.' -ForegroundColor DarkGray
+    }
+}
 
 $cargo = Get-CargoPath
 
@@ -144,7 +172,7 @@ function Invoke-LiveSuite {
     Write-Host '    Nothing here runs in CI. This is the only thing that proves the protocol.' -ForegroundColor DarkGray
 
     Invoke-Native -FilePath $script:cargo -WorkingDirectory (Get-RepoRoot) -Arguments @(
-        'test', '--package', 'mapi-client', '--test', 'live',
+        'test', '--package', 'mapi-client', '--test', 'live', '--features', 'hickory-dns',
         '--', '--ignored', '--nocapture', '--test-threads', '1'
     )
 }

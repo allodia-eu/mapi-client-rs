@@ -12,6 +12,13 @@ authors.workspace = true
 keywords.workspace = true
 categories.workspace = true
 
+[features]
+# A Kerberos KDC and service for tests (`mapi_auth::testing::TestKdc`), so that a crate driving
+# this one can run its Kerberos path end to end in CI, where no domain controller is. Additive, and
+# for dev-dependencies only: its tickets are real but its keys are a counter, and it accepts any
+# AP-REQ for a ticket it issued.
+testing = []
+
 [dependencies]
 thiserror.workspace = true
 

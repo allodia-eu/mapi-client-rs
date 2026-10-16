@@ -123,6 +123,8 @@ mod identity;
 mod kerberos;
 mod ntlm;
 mod spnego;
+#[cfg(feature = "testing")]
+pub mod testing;
 
 pub use binding::ChannelBinding;
 pub use entropy::Entropy;

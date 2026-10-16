@@ -60,6 +60,10 @@ mod shared;
 /// to, since the whole question is what happens when the credentials differ.
 mod schemes;
 
+/// Kerberos: what authenticates `Negotiate`, across a referral and through a skew retry.
+#[cfg(feature = "kerberos")]
+mod kerberos;
+
 /// Reads one of the variables that describe the lab, failing with the name of the missing one.
 ///
 /// Deliberately a hard failure rather than a skip: this test only runs when somebody asked for it

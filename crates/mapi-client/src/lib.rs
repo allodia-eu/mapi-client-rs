@@ -100,7 +100,8 @@
 //!
 //! Authentication is Basic, Bearer, `NTLM` or `Negotiate` — the last two, behind the default `ntlm`
 //! feature, being what a default-configured Exchange offers. They authenticate a TCP connection
-//! rather than a request, which reaches the transport: see [`Credentials`].
+//! rather than a request, which reaches the transport: see [`Credentials`]. With the `kerberos`
+//! feature, also on by default, `Negotiate` offers Kerberos first and NTLM behind it.
 //!
 //! # Seeing the bytes
 //!
@@ -124,6 +125,8 @@ mod draft;
 mod folder;
 #[cfg(feature = "ntlm")]
 mod handshake;
+#[cfg(feature = "kerberos")]
+mod kerberos;
 mod logon;
 mod message;
 mod named;
@@ -183,6 +186,10 @@ pub use crate::credentials::Credentials;
 pub use crate::draft::{NewAttachment, NewMessage, SavedMessage};
 pub use crate::error::{Error, Result};
 pub use crate::folder::Folder;
+#[cfg(feature = "ntlm")]
+pub use crate::handshake::Authentication;
+#[cfg(feature = "kerberos")]
+pub use crate::kerberos::{KdcLocator, SrvLookup, SrvRecord, SrvResolver};
 pub use crate::logon::Logon;
 #[cfg(feature = "autodiscover")]
 pub use crate::mailbox::Mailbox;

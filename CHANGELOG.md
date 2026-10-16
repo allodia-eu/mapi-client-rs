@@ -30,6 +30,11 @@ client required somebody to enable Basic on the MAPI virtual directory before it
 otherwise untouched deployment. A new crate, `mapi-auth`, implements both; the whole live suite
 passes over each of them, against both lab mailboxes.
 
+**And `Negotiate` speaks Kerberos.** It offers a Kerberos ticket first and NTLM behind it, as a
+domain-joined Windows client does, and the whole live suite runs over it — authenticated with
+Kerberos, which the client now reports rather than leaving to be guessed — including a user from a
+second realm reaching Exchange through a referral.
+
 Verified against Exchange Server SE `15.02.2562.045` and both lab mailboxes, with mail actually sent
 between them in both directions and a shared mailbox opened on a delegate's own credentials. The
 corpus grows by three scenarios and the whole of it re-captures byte for byte — 546 files identical
@@ -39,6 +44,31 @@ corpus grows by three scenarios and the whole of it re-captures byte for byte �
 behavioural change is not visible to `cargo-semver-checks` at all. Both are listed under *Changed*.
 
 ### Added
+
+- **Kerberos**, offered first inside `Negotiate`, with NTLM behind it. Sans-io in `mapi-auth`, like
+  the NTLM it sits beside: `TicketRequest` turns a password into a service ticket one KDC message at
+  a time — the AS exchange, the TGS exchange, and referrals across realms in both directions
+  ([RFC 6806] §7 and §8) — and `Handshake::kerberos` offers that ticket inside SPNEGO, checking the
+  server's AP-REP rather than assuming it. The four AES encryption types [MS-KILE] §3.1.5.2
+  requires, pinned to the RFC 3961, 3962 and 8009 vectors; `PA-REQ-ENC-PA-REP`, which makes the
+  unauthenticated first request tamper-evident; clock-skew recovery at the KDC and at the server;
+  the channel binding Extended Protection needs, in the authenticator.
+
+  `mapi-client` carries the messages: a **`kerberos`** feature, on by default, finds a realm's KDCs
+  through DNS SRV records ([RFC 4120] §7.2.3.2) answered by an **`SrvResolver`** the host supplies —
+  its own resolver knows its VPN and its split DNS — or a KDC named outright in a **`KdcLocator`**;
+  a **`hickory-dns`** feature supplies a resolver for a caller with none. Tickets are cached per
+  client and shared by its clones, so a second connection costs an AP-REQ rather than another trip
+  to the KDC; a realm's KDCs are looked up once, the one that answered is tried first, and a realm
+  or a service that came to nothing is left alone for a minute rather than waited for by every
+  connection. Each KDC is given the connect timeout, not the request's.
+  **`MapiClient::authentication()`** says which mechanism authenticated and, when `Negotiate` fell
+  back to NTLM, why.
+
+  Three rules, stated in the crate docs with their reasons rather than left as gaps: no RC4 or DES
+  ([RFC 8429] deprecates RC4 in Kerberos); no FAST, which needs a machine account a client outside
+  the domain does not have; and no Kerberos for `DOMAIN\user`, because a NetBIOS domain is not a
+  realm — give `user@realm`, or a realm with `Identity::realm`.
 
 - **`NTLM` and `Negotiate` authentication**, in a new crate: **`mapi-auth`**. The gap the changelog
   has listed since `0.1.0` is closed, and with it the requirement that Basic be enabled on the MAPI
@@ -162,8 +192,29 @@ behavioural change is not visible to `cargo-semver-checks` at all. Both are list
 
 ### Measured, and worth knowing
 
-Each of these is recorded in the doc comment of whatever it bears on, and four are drafted as
+Each of these is recorded in the doc comment of whatever it bears on, and six are drafted as
 Open Specification feedback.
+
+- **Kerberos, on Windows Server 2025 (`10.0.26100`) KDCs in a two-domain forest.** Measured before
+  each piece was written, because the documents leave each one open:
+  - The KDC honours [RFC 6806] §11's `PA-REQ-ENC-PA-REP`, which [MS-KILE] does not list: ticket
+    flag 15 and a checksum of the request as sent, which the client now verifies.
+  - It reads the request nonce as a signed 32-bit integer — [RFC 4120] says unsigned — and answers
+    one with the top bit set with a length of zero and nothing else. Nonces keep to 31 bits.
+  - A UPN sent to the wrong realm of the forest, as `NT-ENTERPRISE`, is answered
+    `KDC_ERR_WRONG_REALM` with the user's realm in `crealm`, which the client follows.
+  - `PA-PAC-OPTIONS` is `SEQUENCE { [0] KerberosFlags }` on the wire; [MS-KILE] §2.2.10 prints the
+    field untagged.
+  - The two AES-SHA2 types [MS-KILE] §3.1.5.2 makes a MUST are refused — as the document's notes to
+    §2.2.7 say they are by default — even with the "Future encryption types" policy on.
+- **Kerberos, on Exchange Server SE `15.02.2562.045` with Extended Protection `Require`.** The
+  channel binding's `Bnd` field in the authenticator is what Extended Protection checks: the wrong
+  one is refused, the right one accepted with or without the `KERB_AP_OPTIONS_CBT` element
+  [MS-KILE] §3.2.5.8 also asks for — which is sent anyway. IIS answers a good AP-REQ in one round
+  trip with the AP-REP and no `mechListMIC`. With the client's clock an hour slow it answers
+  `KRB_AP_ERR_SKEW`; the retry on the server's clock is accepted with the AP-REP and its own
+  `mechListMIC` on a 401, because [RFC 4178] §5 requires the MIC exchange once the accepted token
+  was not the optimistic one, and the client's MIC completes it: three legs on one connection.
 
 - **Extended Protection is on by default, and it is not optional.** The lab's MAPI virtual
   directory reports `ExtendedProtectionTokenChecking: Require`, and an `AUTHENTICATE_MESSAGE`
@@ -282,6 +333,15 @@ Open Specification feedback.
 
 ### Changed
 
+- **`Credentials::Negotiate` offers Kerberos first.** With the default `kerberos` feature, a
+  `Negotiate` client whose account is named `user@realm` asks the realm's KDCs for a ticket once the
+  server's first 401 offers `Negotiate`, and authenticates with it when it gets one — so an
+  Autodiscover candidate that does not answer costs no trip to a KDC. When it does not — no realm in the
+  name, no KDC found, a KDC that will not issue the ticket — it uses NTLM exactly as before, and
+  `MapiClient::authentication()` says why. A KDC's refusal of the credential itself — a wrong
+  password, a locked or expired account — is reported as `Error::Unauthorized` instead, because NTLM
+  would only fail it less clearly.
+
 - **Choosing a connection-oriented scheme reconfigures the HTTP client.** `Credentials::Ntlm` and
   `Credentials::Negotiate` make `MapiClientBuilder::build` pin the connection pool to one connection
   per host, force HTTP/1.1, and retain the server certificate; the transport then serialises
@@ -336,12 +396,6 @@ Open Specification feedback.
   `rfGenerateReceiptOnly` is modelled and reachable from the library; the command line does not offer
   it, because sending a receipt without changing the read state is a thing a mail client does on the
   user's behalf rather than a thing a diagnostic tool should make easy.
-- **Kerberos is not implemented.** `Negotiate` here is SPNEGO offering NTLM as its only mechanism,
-  which is what every non-Windows client does and what a server with `Negotiate` enabled and `NTLM`
-  disabled accepts. Kerberos needs a KDC round trip, a credential cache to read tickets from, clock
-  skew handling and a great deal of unrelated ASN.1 — and advertising it without completing it would
-  break deployments that work today. A server that selects it is reported by name rather than
-  guessed at.
 - **A client using a connection-oriented scheme does not run requests concurrently.** See *Changed*.
 - **Everything `0.3.0` listed that this release does not name above is still a gap**: an
   attachment's content is held in memory, an embedded message cannot be created, a recurrence is

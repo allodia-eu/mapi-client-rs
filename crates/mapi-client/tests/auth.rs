@@ -148,7 +148,7 @@ async fn a_negotiate_handshake_wraps_the_messages_in_spnego() {
 
     let client = server
         .builder()
-        .credentials(Credentials::negotiate("alice@example.test", "hunter2"))
+        .credentials(Credentials::negotiate("EXAMPLE\\alice", "hunter2"))
         .build()
         .unwrap();
     client.connect().await.unwrap();
@@ -209,6 +209,49 @@ async fn a_negotiate_handshake_wraps_the_messages_in_spnego() {
     let mut mic = vec![0xA3, 0x12, 0x04, 0x10, 0x01];
     mic.extend_from_slice(&[0; 15]);
     assert!(second.ends_with(&mic), "{second:02X?}");
+
+    // A NetBIOS domain names no realm, so the handshake was NTLM — and the client says so, with
+    // the reason, rather than leaving a deployment that meant Kerberos to guess.
+    let authentication = client.authentication().unwrap();
+    assert_eq!(authentication.mechanism, mapi_auth::Mechanism::Ntlm);
+    assert!(authentication.kerberos_unavailable.is_some());
+}
+
+/// A KDC that is named but does not answer leaves `Negotiate` to NTLM, and the reason names it.
+#[cfg(feature = "kerberos")]
+#[tokio::test]
+async fn a_kdc_that_does_not_answer_leaves_negotiate_to_ntlm_and_says_so() {
+    let server = MapiServer::start().await;
+    server.reply(challenge("Negotiate"));
+    server.reply(challenge("Negotiate"));
+    server.reply(connect_ok("Alice Example"));
+
+    // Port 1 on loopback: refused at once, which is what makes this test quick.
+    let locator = mapi_client::KdcLocator::new().kdc("EXAMPLE.TEST", "127.0.0.1:1");
+    let client = server
+        .builder()
+        .credentials(Credentials::negotiate("alice@example.test", "hunter2"))
+        .kdc_locator(locator)
+        .build()
+        .unwrap();
+    assert_eq!(client.authentication(), None, "no handshake yet");
+    client.connect().await.unwrap();
+
+    let reason = client
+        .authentication()
+        .unwrap()
+        .kerberos_unavailable
+        .unwrap();
+    assert!(
+        reason.contains("no KDC for EXAMPLE.TEST answered") && reason.contains("127.0.0.1:1"),
+        "{reason}"
+    );
+    // The fallback is the NTLM-only handshake, two legs, after the 401 that sent the client to
+    // the KDC.
+    assert_eq!(
+        authorizations(&server).await,
+        ["(none)", "Negotiate", "Negotiate"]
+    );
 }
 
 /// A completing `NegTokenResp` on the final `200`, whose `mechListMIC` is the server's half of
@@ -230,7 +273,7 @@ async fn a_servers_mech_list_mic_is_verified_and_a_forged_one_refused() {
 
         let client = server
             .builder()
-            .credentials(Credentials::negotiate("alice@example.test", "hunter2"))
+            .credentials(Credentials::negotiate("EXAMPLE\\alice", "hunter2"))
             .build()
             .unwrap();
         let outcome = client.connect().await;
