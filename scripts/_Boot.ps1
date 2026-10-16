@@ -344,6 +344,77 @@ function Get-SpecManifest {
     return $docs.ToArray()
 }
 
+function Get-RfcManifest {
+    <#
+    .SYNOPSIS
+        Parses the pinned-RFC table out of SPEC.md.
+
+    .DESCRIPTION
+        An RFC's number is its version, so what is pinned is the set of later RFCs that update it,
+        as the RFC Editor records them. The metadata URL is the text URL with .txt replaced by
+        .json, which is how rfc-editor.org publishes both.
+
+    .OUTPUTS
+        One object per RFC with Name (RFC4120), Number, UpdatedBy (RFC-prefixed names), Covers,
+        Url, MetadataUrl, TxtPath and JsonPath.
+    #>
+    [CmdletBinding()]
+    [OutputType([psobject])]
+    param()
+
+    $content = Get-Content -LiteralPath (Join-Path (Get-RepoRoot) 'SPEC.md') -Raw
+    $between = [regex]::Match(
+        $content,
+        '<!--\s*RFC-TABLE-START\s*-->(.*?)<!--\s*RFC-TABLE-END\s*-->',
+        [System.Text.RegularExpressions.RegexOptions]::Singleline)
+
+    if (-not $between.Success) {
+        throw "SPEC.md is missing its RFC-TABLE-START / RFC-TABLE-END markers."
+    }
+
+    $specDir = Join-Path (Get-RepoRoot) 'spec'
+    $rfcs = New-Object System.Collections.Generic.List[psobject]
+
+    foreach ($line in ($between.Groups[1].Value -split "`r?`n")) {
+        $trimmed = $line.Trim()
+        if (-not $trimmed.StartsWith('|')) { continue }
+
+        $cells = @($trimmed.Trim('|') -split '\|' | ForEach-Object { $_.Trim() })
+        if ($cells.Count -lt 4) { continue }
+        if ($cells[0] -eq 'RFC') { continue }           # header row
+        if ($cells[0] -match '^-{2,}$') { continue }    # separator row
+        if ($cells[0] -notmatch '^RFC(\d+)$') {
+            throw "SPEC.md's RFC table names '$($cells[0])', which is not of the form RFC<number>."
+        }
+
+        $updatedBy = @()
+        if ($cells[1] -ne 'none') {
+            $updatedBy = @($cells[1] -split ',' | ForEach-Object { 'RFC' + $_.Trim() })
+        }
+        # Computed outside the literal: in a 5.1 hashtable the comma of `-replace a, b` is read
+        # as building an array, and the parse fails three lines further down.
+        $number = $cells[0].Substring(3)
+        $metadataUrl = $cells[3] -replace '\.txt$', '.json'
+
+        $rfcs.Add([pscustomobject]@{
+            Name        = $cells[0]
+            Number      = $number
+            UpdatedBy   = $updatedBy
+            Covers      = $cells[2]
+            Url         = $cells[3]
+            MetadataUrl = $metadataUrl
+            TxtPath     = Join-Path $specDir "$($cells[0]).txt"
+            JsonPath    = Join-Path $specDir "$($cells[0]).json"
+        })
+    }
+
+    if ($rfcs.Count -eq 0) {
+        throw "No RFC rows parsed from the SPEC.md table. Has its format changed?"
+    }
+
+    return $rfcs.ToArray()
+}
+
 # ---------------------------------------------------------------------------
 # codecov.yml — the coverage floor, defined once
 # ---------------------------------------------------------------------------

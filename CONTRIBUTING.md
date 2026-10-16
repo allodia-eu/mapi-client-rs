@@ -60,7 +60,8 @@ Get the documents (never committed, gitignored under `spec/`):
 powershell.exe -File scripts\Get-Specs.ps1
 ```
 
-Then grep the text extracts rather than the PDFs — 2,101 pages across nineteen documents:
+Then grep the text extracts rather than the PDFs — 2,192 pages across twenty documents, plus
+fifteen RFCs as `spec\RFC<n>.txt`:
 
 ```powershell
 Select-String -Path spec\MS-OXCROPS.txt -Pattern 'RopQueryRows' -Context 2
