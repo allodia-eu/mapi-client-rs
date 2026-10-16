@@ -108,6 +108,18 @@ behavioural change is not visible to `cargo-semver-checks` at all. Both are list
   §3.1.4.2.3 sets nine properties back to named values and *deletes* the rest; the first version did
   only the first half, which `mapi-cli state` printed as "not flagged, red".
 
+### Security
+
+- **`rustls` moved from `0.23.43` to `0.23.46` in the lockfile**, for four advisories published
+  against it: RUSTSEC-2026-0285 (TLS 1.3 handshake messages accepted across a key change),
+  RUSTSEC-2026-0346 (`Debug` on client session values prints the master secret or resumption PSK),
+  RUSTSEC-2026-0348 (Brotli certificate decompression allocating up to 1 GiB before authentication)
+  and RUSTSEC-2026-0349 (an unauthenticated `ServerHello` downgrading later connections to classical
+  key exchange). Nothing in the workspace names `rustls` — it arrives under `reqwest` — and neither
+  a custom session store nor the `brotli` feature is used here. What the bump is for is
+  `cargo deny`, which is a gate rather than advice, and `mapi-cli` built `--locked`.
+  `aws-lc-rs`, `aws-lc-sys` and `rustls-webpki` move with it.
+
 ### Measured, and worth knowing
 
 Each of these is recorded in the doc comment of whatever it bears on, and four are drafted as
