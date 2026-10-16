@@ -199,7 +199,7 @@ impl Handshake {
     ///
     /// [`Error::WrongScheme`] if the value names a different scheme, [`Error::Refused`] if the
     /// server restarted the handshake instead of challenging — which is how a rejected credential
-    /// arrives — [`Error::NotBase64`], [`Error::MalformedToken`], [`Error::NotAChallenge`] or
+    /// arrives — [`Error::NotBase64`], [`Error::Malformed`], [`Error::NotAChallenge`] or
     /// [`Error::Truncated`] if what came back will not parse, [`Error::UnsupportedMechanism`] if a
     /// `Negotiate` server chose something other than NTLM, and [`Error::OutOfOrder`] if no
     /// challenge was expected.

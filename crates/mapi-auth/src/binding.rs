@@ -99,7 +99,9 @@ fn gss_channel_bindings(application_data: &[u8]) -> Vec<u8> {
 /// `Certificate ::= SEQUENCE { tbsCertificate, signatureAlgorithm, signatureValue }` ([RFC 5280]
 /// §4.1), so this skips the first element and reads the OID out of the second.
 fn signature_hash(certificate_der: &[u8]) -> CertificateHash {
-    let Ok(mut certificate) = Reader::new(certificate_der).expect_nested(der::SEQUENCE, "") else {
+    let Ok(mut certificate) =
+        Reader::new("certificate", certificate_der).expect_nested(der::SEQUENCE, "")
+    else {
         return CertificateHash::Sha256;
     };
     // tbsCertificate, which is skipped rather than parsed.
