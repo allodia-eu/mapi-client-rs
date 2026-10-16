@@ -186,6 +186,14 @@ caller, the script then runs with no helpers defined and exits 0. `Invoke-Gate.p
 
 ## Working conventions
 
+- **Work leaves no known gaps.** A change is finished when nothing it found is left open: a
+  shortfall in its own surface, the same fault on another platform, a script or doc it made wrong.
+  Close it in the same PR or in one stacked on it, even when that makes the work take longer. A PR
+  description, a code comment and a doc's "Known gaps" section are not places to park one. What
+  this host cannot build or run goes to an issue carrying the steps to reproduce, fix and verify
+  it, and the work is not done until that issue is closed. What a platform cannot do at all is a
+  decision, stated as a rule in its contract with the reason. Existing "Known gaps" entries are
+  debt to pay down; nothing new is added to them.
 - **Run the gate before pushing:** `powershell.exe -File scripts\Invoke-Gate.ps1`. If local and CI
   ever disagree, that is a bug in the gate worth fixing before the change that exposed it.
 - **A green CI badge never means "verified against Exchange."** Live verification is
