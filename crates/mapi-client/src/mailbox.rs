@@ -28,7 +28,7 @@ use std::collections::VecDeque;
 use std::sync::Arc;
 
 use mapi_autodiscover::{
-    AlternativeMailbox, EmailAddress, MailboxAddress, MailboxKind, candidate_urls,
+    AlternativeMailbox, EmailAddress, MailboxAddress, MailboxKind, MapiHttpEndpoint, candidate_urls,
 };
 use mapi_proto::LegacyDn;
 
@@ -112,15 +112,14 @@ impl Mailbox {
     }
 
     /// The mailbox the lookup was made for, which needs no second round trip.
-    fn own(settings: &mapi_autodiscover::Settings) -> Option<Self> {
-        let endpoint = settings.mapi_http()?;
-        Some(Self {
+    fn own(settings: &mapi_autodiscover::Settings, endpoint: &MapiHttpEndpoint) -> Self {
+        Self {
             kind: None,
             display_name: settings.user().display_name().map(str::to_owned),
             smtp_address: settings.user().smtp_address().map(str::to_owned),
             endpoint: endpoint.mail_store_url().map(str::to_owned),
             user_dn: LegacyDn::new(endpoint.legacy_dn()).ok(),
-        })
+        }
     }
 
     /// An alternative that named a distinguished name rather than an address: listed, and honest
@@ -167,8 +166,10 @@ impl MapiClientBuilder {
     ///
     /// # Errors
     ///
-    /// As [`lookup`](MapiClientBuilder::lookup), for the first lookup only. A failure looking up an
-    /// alternative is reported as that mailbox being unopenable rather than as an error.
+    /// As [`lookup`](MapiClientBuilder::lookup), for the first lookup only — including
+    /// [`Error::NoEndpoint`] when the account's own settings carry no `mapiHttp` block, whatever
+    /// alternatives they name. A failure looking up an alternative is reported as that mailbox
+    /// being unopenable rather than as an error.
     ///
     /// [MS-OXDSCLI] §2.2.4.1.1.2.5 — `AlternativeMailbox`
     pub async fn mailboxes(&self, address: &EmailAddress) -> Result<Vec<Mailbox>> {
@@ -199,20 +200,40 @@ impl MapiClientBuilder {
         address: &EmailAddress,
         url: Option<String>,
     ) -> Result<Vec<Mailbox>> {
-        let settings = self
-            .search(address, queue(address, url.clone()), true)
-            .await?;
-        let settings = settings.settings;
-        let mut mailboxes: Vec<Mailbox> = Mailbox::own(&settings).into_iter().collect();
+        // One HTTP client for all n + 1 lookups, so that they share its pool rather than each
+        // paying for a TLS handshake — and, under NTLM, a fresh connection to authenticate.
+        let http = self.http()?;
+        // An account whose own settings carry no mapiHttp block is refused, as `lookup` refuses
+        // it, rather than listed without its own mailbox: a caller reading `[0]` as the account's
+        // own would otherwise be handed a delegate's.
+        let (settings, endpoint) = self
+            .search_with(
+                http.clone(),
+                address,
+                queue(address, url.as_deref()),
+                url.is_none(),
+            )
+            .await?
+            .with_endpoint(address)?;
+        let mut mailboxes = vec![Mailbox::own(&settings, &endpoint)];
 
         for alternative in settings.alternative_mailboxes() {
-            mailboxes.push(self.resolve(alternative, url.clone()).await);
+            mailboxes.push(self.resolve(&http, alternative, url.as_deref()).await);
         }
         Ok(mailboxes)
     }
 
     /// Turns one `AlternativeMailbox` into something openable, if it can be.
-    async fn resolve(&self, alternative: &AlternativeMailbox, url: Option<String>) -> Mailbox {
+    ///
+    /// The plain-HTTP redirect probe runs only when no URL was given, which is the rule
+    /// [`lookup_at`](MapiClientBuilder::lookup_at) follows: a caller who named the service has
+    /// said where to look, and falling back to a plaintext guess at another host is not that.
+    async fn resolve(
+        &self,
+        http: &reqwest::Client,
+        alternative: &AlternativeMailbox,
+        url: Option<&str>,
+    ) -> Mailbox {
         // The directory form carries no MailboxId, and there is no second question to ask: it
         // names a mailbox without naming an address to look it up by.
         let Some(MailboxAddress::Smtp(smtp)) = alternative.address() else {
@@ -222,7 +243,10 @@ impl MapiClientBuilder {
             return Mailbox::unopenable(alternative);
         };
 
-        let Ok(found) = self.search(&address, queue(&address, url), true).await else {
+        let found = self
+            .search_with(http.clone(), &address, queue(&address, url), url.is_none())
+            .await;
+        let Ok(found) = found else {
             return Mailbox::unopenable(alternative);
         };
 
@@ -313,10 +337,10 @@ impl MapiClient {
 }
 
 /// Where to look for one lookup: a URL that was given, or the documented candidate sequence.
-fn queue(address: &EmailAddress, url: Option<String>) -> VecDeque<String> {
+fn queue(address: &EmailAddress, url: Option<&str>) -> VecDeque<String> {
     url.map_or_else(
         || candidate_urls(address).collect(),
-        |url| VecDeque::from([url]),
+        |url| VecDeque::from([url.to_owned()]),
     )
 }
 

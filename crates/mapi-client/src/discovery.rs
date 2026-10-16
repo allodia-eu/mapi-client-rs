@@ -147,14 +147,28 @@ impl MapiClientBuilder {
     }
 
     /// Works through the queue, following redirects, until something answers with settings.
-    pub(crate) async fn search(
+    async fn search(
         &self,
+        address: &EmailAddress,
+        queue: VecDeque<String>,
+        probe: bool,
+    ) -> Result<Found> {
+        self.search_with(self.http()?, address, queue, probe).await
+    }
+
+    /// The same, over an HTTP client the caller already has.
+    ///
+    /// For a caller making several lookups in a row, which then shares one client — and with it
+    /// the TLS configuration and the pooled connections — rather than building one per lookup.
+    pub(crate) async fn search_with(
+        &self,
+        http: Client,
         address: &EmailAddress,
         mut queue: VecDeque<String>,
         probe: bool,
     ) -> Result<Found> {
         let search = Search {
-            http: self.http()?,
+            http,
             credentials: &self.credentials,
             allow_plaintext_http: self.allows_plaintext_http(),
         };
@@ -233,10 +247,21 @@ pub(crate) struct Found {
 impl Found {
     /// The `mapiHttp` block, or a refusal naming everywhere that was asked.
     fn endpoint(self, address: &EmailAddress) -> Result<MapiHttpEndpoint> {
-        self.settings.mapi_http().ok_or(Error::NoEndpoint {
-            address: address.to_string(),
-            tried: self.tried,
-        })
+        self.with_endpoint(address).map(|(_, endpoint)| endpoint)
+    }
+
+    /// The settings and their `mapiHttp` block together, or the same refusal.
+    pub(crate) fn with_endpoint(
+        self,
+        address: &EmailAddress,
+    ) -> Result<(Settings, MapiHttpEndpoint)> {
+        match self.settings.mapi_http() {
+            Some(endpoint) => Ok((self.settings, endpoint)),
+            None => Err(Error::NoEndpoint {
+                address: address.to_string(),
+                tried: self.tried,
+            }),
+        }
     }
 }
 
