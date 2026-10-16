@@ -21,7 +21,38 @@ pub(crate) mod padata {
     pub(crate) const ETYPE_INFO2: i32 = 19;
     /// `PA-PAC-REQUEST` — [MS-KILE] §2.2.3.
     pub(crate) const PAC_REQUEST: i32 = 128;
+    /// `PA-REQ-ENC-PA-REP` — [RFC 6806] §11: asks the KDC to checksum the request inside the
+    /// reply's encrypted part.
+    pub(crate) const REQ_ENC_PA_REP: i32 = 149;
+    /// `PA-PAC-OPTIONS` — [MS-KILE] §2.2.10.
+    pub(crate) const PAC_OPTIONS: i32 = 167;
 }
+
+/// `error-code` values a client acts on or names — [RFC 4120] §7.5.9, [RFC 6806] §7.
+pub(crate) mod code {
+    /// `KDC_ERR_C_PRINCIPAL_UNKNOWN`.
+    pub(crate) const C_PRINCIPAL_UNKNOWN: i32 = 6;
+    /// `KDC_ERR_S_PRINCIPAL_UNKNOWN`.
+    pub(crate) const S_PRINCIPAL_UNKNOWN: i32 = 7;
+    /// `KDC_ERR_ETYPE_NOSUPP`.
+    pub(crate) const ETYPE_NOSUPP: i32 = 14;
+    /// `KDC_ERR_CLIENT_REVOKED`: the account is disabled, locked out or expired.
+    pub(crate) const CLIENT_REVOKED: i32 = 18;
+    /// `KDC_ERR_KEY_EXPIRED`: the password has expired.
+    pub(crate) const KEY_EXPIRED: i32 = 23;
+    /// `KDC_ERR_PREAUTH_FAILED`: what a wrong password earns.
+    pub(crate) const PREAUTH_FAILED: i32 = 24;
+    /// `KDC_ERR_PREAUTH_REQUIRED`.
+    pub(crate) const PREAUTH_REQUIRED: i32 = 25;
+    /// `KRB_AP_ERR_SKEW`.
+    pub(crate) const SKEW: i32 = 37;
+    /// `KDC_ERR_WRONG_REALM`: a client referral ([RFC 6806] §7).
+    pub(crate) const WRONG_REALM: i32 = 68;
+}
+
+/// The `PA-PAC-OPTIONS` Branch Aware flag — [MS-KILE] §2.2.10, which §3.2.5.7 has a client set in
+/// every TGS-REQ.
+pub(crate) const BRANCH_AWARE: u32 = super::asn1::flag(1);
 
 /// `msg-type` and the application tag of each message — [RFC 4120] §5.4.1, §5.4.2, §5.9.1.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -168,6 +199,13 @@ pub(crate) struct KrbError {
     pub(crate) susec: u32,
     /// `realm`: the realm of the service that answered.
     pub(crate) realm: String,
+    /// `crealm`, which after `KDC_ERR_WRONG_REALM` names the realm to ask instead.
+    ///
+    /// [RFC 6806] §7 says both that "the crealm field will contain either the true realm of the
+    /// client or another realm" and that the client then asks "the realm specified by the realm
+    /// field". Measured on Windows Server 2025, a UPN sent to the wrong realm of its forest:
+    /// `realm` is the realm that answered, and `crealm` is the user's.
+    pub(crate) crealm: Option<String>,
     /// `e-text`, when the KDC wrote one.
     pub(crate) e_text: Option<String>,
     /// `e-data`: `METHOD-DATA` after `KDC_ERR_PREAUTH_REQUIRED`, `KERB-ERROR-DATA` from a Windows
@@ -223,6 +261,10 @@ fn read_error(reader: &mut Reader<'_>) -> Result<KrbError> {
         stime: KerberosTime::read(&mut fields.required(4, "an stime")?, "an stime")?,
         susec: read_uint32(&mut fields.required(5, "a susec")?, "a susec")?,
         realm: read_string(&mut fields.required(9, "a realm")?, "a realm")?,
+        crealm: fields
+            .optional(7)
+            .map(|mut field| read_string(&mut field, "a crealm"))
+            .transpose()?,
         e_text: fields
             .optional(11)
             .map(|mut field| read_string(&mut field, "an e-text"))
@@ -249,6 +291,9 @@ pub(crate) struct EncKdcRepPart {
     pub(crate) srealm: String,
     /// `sname`, which must match the ticket's.
     pub(crate) sname: PrincipalName,
+    /// `encrypted-pa-data` — [RFC 6806] §11's field `[12]`, where `PA-REQ-ENC-PA-REP`'s checksum
+    /// comes back.
+    pub(crate) encrypted_pa_data: Vec<PaData>,
 }
 
 impl EncKdcRepPart {
@@ -277,6 +322,11 @@ impl EncKdcRepPart {
             endtime: KerberosTime::read(&mut fields.required(7, "an endtime")?, "an endtime")?,
             srealm: read_string(&mut fields.required(9, "an srealm")?, "an srealm")?,
             sname: PrincipalName::read(&mut fields.required(10, "an sname")?)?,
+            encrypted_pa_data: fields
+                .optional(12)
+                .map(|mut field| PaData::read_all(&mut field))
+                .transpose()?
+                .unwrap_or_default(),
         })
     }
 }
@@ -293,6 +343,16 @@ pub(crate) fn pa_enc_ts_enc(time: KerberosTime, usec: u32) -> Vec<u8> {
 /// `KERB-PA-PAC-REQUEST` — [MS-KILE] §2.2.3, which §3.2.5.5 says a client "will always include".
 pub(crate) fn pac_request(include: bool) -> Vec<u8> {
     sequence(&[explicit(0, &boolean(include))])
+}
+
+/// `PA-PAC-OPTIONS` — [MS-KILE] §2.2.10.
+///
+/// The document prints it as `SEQUENCE { KerberosFlags }`, with no tag on the field, which in this
+/// `EXPLICIT TAGS` module cannot be read either way with confidence. Measured instead, from a
+/// Windows Server 2025 client's own TGS-REQ (SSPI with explicit credentials): `30 09 a0 07 03 05
+/// 00 40 00 00 00` — the field carries `[0]`, and Branch Aware is flag 1.
+pub(crate) fn pac_options(flags: u32) -> Vec<u8> {
+    sequence(&[explicit(0, &super::asn1::flags(flags))])
 }
 
 /// One `ETYPE-INFO2-ENTRY` — [RFC 4120] §5.2.7.5: a key the KDC holds, and how to make it.

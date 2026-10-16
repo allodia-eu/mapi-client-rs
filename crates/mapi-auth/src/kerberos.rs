@@ -4,6 +4,8 @@
 //! and ignores. Each module here cites both, and where they differ the Microsoft document wins,
 //! because the server on the other end is a Windows KDC.
 
+pub(crate) mod ap;
 pub(crate) mod asn1;
 pub(crate) mod crypto;
+pub(crate) mod exchange;
 pub(crate) mod kdc;

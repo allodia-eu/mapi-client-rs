@@ -200,6 +200,7 @@ fn krb_error(code: i64, e_data: Option<&[u8]>) -> Vec<u8> {
         explicit(4, &KerberosTime::from_unix(1_800_000_000).encode()),
         explicit(5, &int(123_456)),
         explicit(6, &int(code)),
+        explicit(7, &string("OTHER.EXAMPLE.TEST")),
         explicit(9, &string("EXAMPLE.TEST")),
         explicit(
             10,
@@ -223,6 +224,7 @@ fn a_krb_error_is_read_with_its_time_text_and_data() {
     assert_eq!(error.stime, KerberosTime::from_unix(1_800_000_000));
     assert_eq!(error.susec, 123_456);
     assert_eq!(error.realm, "EXAMPLE.TEST");
+    assert_eq!(error.crealm.as_deref(), Some("OTHER.EXAMPLE.TEST"));
     assert_eq!(error.e_text.as_deref(), Some("NEEDED_PREAUTH"));
     assert_eq!(error.e_data.as_deref(), Some(&b"md"[..]));
 
@@ -261,8 +263,18 @@ fn enc_part(tag: u8) -> Vec<u8> {
                 10,
                 &PrincipalName::new(2, &["krbtgt", "EXAMPLE.TEST"]).encode(),
             ),
-            // [RFC 6806] §11's encrypted-pa-data, which this client does not read.
-            explicit(12, &der::tlv(der::SEQUENCE, &[])),
+            // [RFC 6806] §11's encrypted-pa-data.
+            explicit(
+                12,
+                &der::tlv(
+                    der::SEQUENCE,
+                    &PaData {
+                        padata_type: padata::REQ_ENC_PA_REP,
+                        value: vec![1, 2],
+                    }
+                    .encode(),
+                ),
+            ),
         ]),
     )
 }
@@ -278,6 +290,8 @@ fn an_encrypted_reply_part_is_read_under_either_tag() {
         assert_eq!(part.endtime, KerberosTime::from_unix(1_800_036_000));
         assert_eq!(part.srealm, "EXAMPLE.TEST");
         assert!(part.sname.is_krbtgt());
+        assert_eq!(part.encrypted_pa_data[0].padata_type, 149);
+        assert_eq!(part.encrypted_pa_data[0].value, [1, 2]);
     }
     assert!(EncKdcRepPart::read(&enc_part(27)).is_err());
     assert!(EncKdcRepPart::read(&[]).is_err());
@@ -289,6 +303,13 @@ fn pre_authentication_data_is_written_and_read() {
         pac_request(true),
         [0x30, 0x05, 0xA0, 0x03, 0x01, 0x01, 0xFF],
         "the encoding every Windows client sends"
+    );
+    assert_eq!(
+        pac_options(BRANCH_AWARE),
+        [
+            0x30, 0x09, 0xA0, 0x07, 0x03, 0x05, 0x00, 0x40, 0x00, 0x00, 0x00
+        ],
+        "the encoding measured from a Windows client's TGS-REQ"
     );
     assert_eq!(
         pa_enc_ts_enc(KerberosTime::from_unix(0), 5),

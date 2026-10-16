@@ -117,6 +117,39 @@ pub enum Error {
         reason: &'static str,
     },
 
+    /// A Kerberos KDC refused a request.
+    ///
+    /// `code` is the [RFC 4120] §7.5.9 error code. `status` is the `NTSTATUS` a Windows KDC adds in
+    /// a `KERB-EXT-ERROR` ([MS-KILE] §2.2.1), which is often the more specific of the two: one
+    /// `KDC_ERR_CLIENT_REVOKED` covers a disabled, a locked-out and an expired account, and the
+    /// status says which.
+    #[error(
+        "the KDC for {realm} refused the request: {}{}",
+        describe_kdc_code(*.code),
+        describe_status(*.status)
+    )]
+    KdcRefused {
+        /// The realm whose KDC answered.
+        realm: String,
+        /// The error code.
+        code: i32,
+        /// The Windows status, when the KDC sent one.
+        status: Option<u32>,
+    },
+
+    /// A Kerberos KDC's reply cannot be used: it does not answer the request that was sent, it
+    /// fails a check the exchange requires, or a chain of referrals went nowhere.
+    ///
+    /// [RFC 4120] §3.1.5 and §3.3.4 list the checks; [RFC 6806] §7, §8 and §11 add the referral
+    /// limits and the request checksum.
+    #[error("the reply from the KDC for {realm} cannot be used: {reason}")]
+    KdcReply {
+        /// The realm whose KDC sent it.
+        realm: String,
+        /// Which check it failed.
+        reason: &'static str,
+    },
+
     /// A SPNEGO token, a Kerberos message or a certificate is not well-formed DER, or is not the
     /// structure it was supposed to be.
     ///
@@ -149,6 +182,29 @@ pub enum Error {
 /// Names a key usage in an error, or says there was none.
 fn describe_usage(usage: Option<u32>) -> String {
     usage.map_or_else(|| "key".to_owned(), |usage| format!("key usage {usage}"))
+}
+
+/// Names a KDC error code, with what it usually means where that is not obvious from the name.
+fn describe_kdc_code(code: i32) -> String {
+    use crate::kerberos::kdc::code;
+    let name = match code {
+        code::C_PRINCIPAL_UNKNOWN => "KDC_ERR_C_PRINCIPAL_UNKNOWN, no such account in that realm",
+        code::S_PRINCIPAL_UNKNOWN => "KDC_ERR_S_PRINCIPAL_UNKNOWN, no account holds that SPN",
+        code::ETYPE_NOSUPP => "KDC_ERR_ETYPE_NOSUPP, no AES key for the account",
+        code::CLIENT_REVOKED => "KDC_ERR_CLIENT_REVOKED, the account is disabled or locked out",
+        code::KEY_EXPIRED => "KDC_ERR_KEY_EXPIRED, the password has expired",
+        code::PREAUTH_FAILED => "KDC_ERR_PREAUTH_FAILED, which is what a wrong password earns",
+        code::PREAUTH_REQUIRED => "KDC_ERR_PREAUTH_REQUIRED",
+        code::SKEW => "KRB_AP_ERR_SKEW, the clocks differ by more than the KDC allows",
+        code::WRONG_REALM => "KDC_ERR_WRONG_REALM",
+        _ => "an error",
+    };
+    format!("{name} (code {code})")
+}
+
+/// Renders a Windows status, when there is one.
+fn describe_status(status: Option<u32>) -> String {
+    status.map_or_else(String::new, |status| format!(", NTSTATUS 0x{status:08X}"))
 }
 
 /// Renders the scheme a server offered, or says that it offered none.
@@ -228,6 +284,32 @@ mod tests {
             }
             .to_string()
             .contains("buffer says message type 1")
+        );
+        assert_eq!(
+            Error::KdcRefused {
+                realm: "EXAMPLE.TEST".to_owned(),
+                code: 24,
+                status: Some(0xC000_006A),
+            }
+            .to_string(),
+            "the KDC for EXAMPLE.TEST refused the request: KDC_ERR_PREAUTH_FAILED, which is what a \
+             wrong password earns (code 24), NTSTATUS 0xC000006A"
+        );
+        for code in [6, 7, 14, 18, 23, 25, 37, 68, 60] {
+            let refused = Error::KdcRefused {
+                realm: "EXAMPLE.TEST".to_owned(),
+                code,
+                status: None,
+            };
+            assert!(refused.to_string().ends_with(&format!("(code {code})")));
+        }
+        assert!(
+            Error::KdcReply {
+                realm: "EXAMPLE.TEST".to_owned(),
+                reason: "a nonce that is not the request's",
+            }
+            .to_string()
+            .contains("EXAMPLE.TEST cannot be used: a nonce")
         );
         assert!(
             Error::NotBase64 {

@@ -37,8 +37,8 @@ contract (crate docs, README, CHANGELOG) with its reason, per the no-known-gaps 
 | [RFC 4120] §3.1, §5.2.7.5 | Pre-auth from PA-ETYPE-INFO2: the salt and `s2kparams` come from the KDC | Yes — the salt is never guessed. |
 | [MS-KILE] §3.2.5.1 | Set `canonicalize` | Yes. |
 | [RFC 6806] §11 | MUST send `PA-REQ-ENC-PA-REP` (149) in every AS-REQ, and reject a reply whose `enc-pa-rep` ticket flag is set but whose checksum over the request is absent or wrong | Yes. [MS-KILE] cites [Referrals-11], which predates §11 and does not list 149 — but **measured**, Windows Server 2025 KDCs in both lab realms set flag 15 and return the checksum (type 16, key usage 56, over the AS-REQ as sent). It is what makes the unauthenticated first leg tamper-evident. |
-| [MS-KILE] §3.1.5.10, [RFC 6806] | MUST support cross-realm referrals | Implemented, unit-tested against a synthetic KDC, and verified live: a child-domain user's TGS-REQ to its own KDC is answered with a referral TGT for the parent realm, which the client follows. |
-| [MS-KILE] §3.2.5.7 | TGS-REQ: PA-PAC-OPTIONS (branch aware) | Yes. §2.2.10 prints the structure as `SEQUENCE { KerberosFlags }` with no tag, so its encoding is **measured** from a Windows client's own TGS-REQ before it is written. |
+| [MS-KILE] §3.1.5.10, [RFC 6806] §7–8 | MUST support cross-realm referrals | Both kinds, at most five per acquisition, never back to a realm already asked; unit-tested against a synthetic KDC and **verified live in both directions**: a child-domain user's TGS-REQ for the parent's Exchange is answered with a referral TGT, which the client follows; and a UPN sent to the wrong realm as `NT-ENTERPRISE` is answered `KDC_ERR_WRONG_REALM` naming the user's realm in `crealm` (measured — §7 itself also says "realm field"), which the client follows. |
+| [MS-KILE] §3.2.5.7 | TGS-REQ: PA-PAC-OPTIONS (branch aware) | Yes. §2.2.10 prints the structure as `SEQUENCE { KerberosFlags }` with no tag; **measured** from a Windows client's own TGS-REQ (SSPI, explicit credentials) it is `SEQUENCE { [0] KerberosFlags }`, Branch Aware being flag 1. The same host's logon-session client sent none. |
 | [MS-KILE] §3.2.5.7–8 | KERB_AUTH_DATA_LOOPBACK (142) | **Rule: not sent.** §2.2.4 makes its content implementation-specific Windows LSA data that the server MUST ignore unless the client is local. |
 | [MS-KILE] §3.2.5.8 | KERB_AUTH_DATA_TOKEN_RESTRICTIONS (141) | **Rule: not sent.** Note `<43>`: Windows does not use it. |
 | [MS-KILE] §3.2.5.8 | KERB_AUTH_DATA_CLIENT_TARGET (144) | **Rule: not sent.** The document describes its content ("the server's name qualified with the realm name") and gives it no encoding, and it travels inside the encrypted authenticator, so no capture can show Windows' choice. §3.1.5.5: a server "ignores the unknown data". |
@@ -46,12 +46,14 @@ contract (crate docs, README, CHANGELOG) with its reason, per the no-known-gaps 
 | [RFC 4121] §4.1.1, [RFC 2744] §3.11 | Authenticator checksum 0x8003: `Bnd` = MD5 of the channel-bindings structure, GSS flags | Yes; `Bnd` reuses the NTLM work's `tls-server-end-point` binding. |
 | [RFC 6542] | Channel binding hash agility | Read; adopted only if Windows is measured to use it. |
 | [MS-KILE] §3.2.5.1 | MUTUAL-REQUIRED; verify the AP-REP | Yes — the AP-REP's `ctime`/`cusec` must match, and its subkey is taken. |
-| [MS-KILE] §3.2.5.8 | On KRB_AP_ERR_SKEW with KERB-ERROR-DATA, retry with the KDC's time | Yes. |
+| [MS-KILE] §3.2.5.8, [RFC 4120] §3.1.5 | On KRB_AP_ERR_SKEW, retry with the KDC's time | Yes, once per exchange, keeping the offset rather than trusting it further: the KDC's `KRB-ERROR` is not authenticated. Done for the KDC exchanges here; the AP exchange follows with GSS. |
 | [MS-SPNG] note `<8>` | AES Kerberos: a server's `mechListMIC` has to be processed | Verified when present ([RFC 4121] §4.2.6.1 MIC token). The lab sends none (measured). |
 | [RFC 4178] §5 | `mechListMIC` when the selected mechanism is not the preferred one | NTLM selected after Kerberos was offered first: the NTLM `mechListMIC`, which exists. |
 | [MS-KILE] §3.2.5.4, §3.2.1 | FAST only when EnableCBACandArmor (default FALSE) on a domain-joined client | **Rule: no FAST.** Armoring needs a TGT for a machine account, which a non-joined client has none of; the spec's own default is off. |
 | [MS-KILE] §3.1.5.5 | KRB_ERR_RESPONSE_TOO_BIG | TCP only ([RFC 4120] §7.2.2 makes TCP mandatory for clients), so the UDP size limit never arises. |
 | [MS-KILE] §3.1.5.7 | Names: UTF-8, case-insensitive comparison, no normalisation | Yes. |
+| [RFC 4120] §5.4.1 | `nonce` is a `UInt32` | Kept to 31 bits: a Windows Server 2025 KDC was **measured** closing the connection without a reply when the top bit is set. |
+| [RFC 4120] §5.4.1 | `till` of `19700101000000Z` asks for the KDC's maximum | Used; measured honoured (ten hours, the default policy). |
 
 ## Measured on the lab, before any code
 

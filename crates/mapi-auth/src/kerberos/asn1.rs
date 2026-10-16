@@ -458,6 +458,15 @@ impl Checksum {
             explicit(1, &octets(&self.checksum)),
         ])
     }
+
+    /// Reads one.
+    pub(crate) fn read(reader: &mut Reader<'_>) -> Result<Self> {
+        let fields = Fields::of(reader, "a Checksum")?;
+        Ok(Self {
+            cksumtype: read_int32(&mut fields.required(0, "a cksumtype")?, "a cksumtype")?,
+            checksum: read_octets(&mut fields.required(1, "a checksum")?, "a checksum")?,
+        })
+    }
 }
 
 /// `PA-DATA` — [RFC 4120] §5.2.7. Note the first tag is `[1]`, not `[0]`.
