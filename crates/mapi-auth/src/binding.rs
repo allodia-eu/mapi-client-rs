@@ -64,9 +64,18 @@ impl ChannelBinding {
         Self { hash: [0; 16] }
     }
 
-    /// The sixteen bytes that go into the `MsvAvChannelBindings` AV pair.
+    /// The sixteen bytes that go into NTLM's `MsvAvChannelBindings` AV pair and Kerberos's `Bnd`
+    /// field — [RFC 4121] §4.1.1.2 hashes the same structure the same way.
     pub(crate) const fn as_bytes(&self) -> &crypto::Digest128 {
         &self.hash
+    }
+
+    /// Whether there is a binding at all, rather than the all-zero "none".
+    ///
+    /// Kerberos says so separately: [MS-KILE] §3.2.5.8 has a client that binds also send
+    /// `KERB_AP_OPTIONS_CBT`, and one that does not, not.
+    pub(crate) fn is_bound(&self) -> bool {
+        self.hash != [0; 16]
     }
 }
 
@@ -82,8 +91,10 @@ impl Default for ChannelBinding {
 /// [RFC 2744] §3.11 gives the structure; the two address fields are left empty because the
 /// `tls-server-end-point` binding type carries everything it needs in the application data, and
 /// because an address that differed between the two ends would break a binding that is supposed to
-/// be about the certificate. Every length is little-endian, which is not in RFC 2744 — it is how
-/// Windows lays the structure out in memory, and the hash has to match what the server computes.
+/// be about the certificate. Every length is little-endian: [RFC 4121] §4.1.1.2 says so for the
+/// Kerberos `Bnd` field ("each integer field and input length field SHALL be formatted into four
+/// octets, using little-endian octet ordering"), and NTLM's binding is the same hash of the same
+/// structure.
 fn gss_channel_bindings(application_data: &[u8]) -> Vec<u8> {
     let mut out = Vec::with_capacity(application_data.len().saturating_add(20));
     // initiator_addrtype, initiator_address.length, acceptor_addrtype, acceptor_address.length
@@ -296,5 +307,7 @@ mod tests {
             ChannelBinding::tls_server_end_point(b"anything"),
             ChannelBinding::unbound()
         );
+        assert!(!ChannelBinding::unbound().is_bound());
+        assert!(ChannelBinding::tls_server_end_point(b"certificate").is_bound());
     }
 }

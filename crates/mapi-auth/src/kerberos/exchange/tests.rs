@@ -1,5 +1,7 @@
 //! The AS and TGS exchanges, driven end to end against [`double::Forest`].
 
+use core::time::Duration;
+
 use super::double::{Fault, Forest, KDC_TIME, Realm, User, WRONG_PASSWORD};
 use super::*;
 
@@ -83,7 +85,7 @@ fn upn(name: &str) -> PrincipalName {
 fn fresh(seed: u8) -> Fresh {
     Fresh {
         now: Duration::from_secs(KDC_TIME),
-        random: [seed; 20],
+        random: [seed; 64],
     }
 }
 
@@ -376,21 +378,6 @@ fn a_kdc_that_sends_no_salt_gets_the_default_one() {
         "hunter2",
     )
     .unwrap();
-}
-
-#[test]
-fn fresh_input_is_split_and_the_nonce_kept_to_31_bits() {
-    let mut random = [0xFF; 20];
-    random[4..].copy_from_slice(&[7; 16]);
-    let fresh = Fresh {
-        now: Duration::new(1_000, 123_456_789),
-        random,
-    };
-    assert_eq!(fresh.nonce(), 0x7FFF_FFFF);
-    assert_eq!(fresh.confounder(), [7; 16]);
-    assert_eq!(fresh.stamp(0), (KerberosTime::from_unix(1_000), 123_456));
-    assert_eq!(fresh.stamp(-400).0, KerberosTime::from_unix(600));
-    assert_eq!(fresh.stamp(i64::MIN).0, KerberosTime::from_unix(0));
 }
 
 /// [MS-KILE] §3.1.5.7: case-insensitive, beyond ASCII, and nothing else.

@@ -18,11 +18,10 @@
 //! the client's name alone ([RFC 6806] §6). Its ticket is either the service's or a referral to
 //! another realm; anything else is refused.
 
-use core::time::Duration;
-
 use crate::error::{Error, Result};
 use crate::kerberos::asn1::{EncryptedData, KerberosTime, PrincipalName, flag};
-use crate::kerberos::crypto::{CONFOUNDER, Enctype, Key};
+use crate::kerberos::crypto::{Enctype, Key};
+pub(crate) use crate::kerberos::fresh::Fresh;
 use crate::kerberos::kdc::{EncKdcRepPart, ErrorData, KdcRep, KrbError, Ticket};
 
 /// Key usage numbers — [RFC 4120] §7.5.1, and [RFC 6806] §11 for the request checksum.
@@ -56,43 +55,6 @@ const ENC_PA_REP: u32 = flag(15);
 /// '19700101000000Z', the requested ticket is to have the maximum endtime permitted according to
 /// KDC policy". Measured: a Windows Server 2025 KDC honours it, with its default ten hours.
 const MAXIMUM_ENDTIME: KerberosTime = KerberosTime::from_unix(0);
-
-/// The clock and the randomness one request needs.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct Fresh {
-    /// The time since the Unix epoch, by the caller's clock.
-    pub(crate) now: Duration,
-    /// Twenty bytes from a cryptographically secure source: four for the nonce, sixteen for the
-    /// confounder of whatever the request encrypts.
-    pub(crate) random: [u8; 20],
-}
-
-impl Fresh {
-    /// The request's nonce.
-    ///
-    /// [RFC 4120] §5.4.1 makes it a `UInt32`, but a Windows Server 2025 KDC was measured answering
-    /// a nonce with the top bit set — `0xFFFFFFF0`, `0x80000001` — by closing the connection with
-    /// no reply at all. It reads the field as an `Int32`, so the top bit is never set here.
-    fn nonce(&self) -> u32 {
-        let [a, b, c, d, ..] = self.random;
-        u32::from_be_bytes([a, b, c, d]) & 0x7FFF_FFFF
-    }
-
-    /// The confounder for one encryption.
-    fn confounder(&self) -> [u8; CONFOUNDER] {
-        let mut out = [0u8; CONFOUNDER];
-        for (slot, byte) in out.iter_mut().zip(self.random.iter().skip(4)) {
-            *slot = *byte;
-        }
-        out
-    }
-
-    /// The time to put in a message, moved by the offset a KDC's skew error taught us.
-    fn stamp(&self, offset: i64) -> (KerberosTime, u32) {
-        let seconds = self.now.as_secs().saturating_add_signed(offset);
-        (KerberosTime::from_unix(seconds), self.now.subsec_micros())
-    }
-}
 
 /// A ticket and what goes with it: everything needed to present it again.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -323,17 +285,6 @@ fn same_name(a: &PrincipalName, b: &PrincipalName) -> bool {
             .iter()
             .zip(&b.components)
             .all(|(a, b)| same_text(a, b))
-}
-
-/// The offset that would have made our clock read the KDC's.
-///
-/// [RFC 4120] §3.1.5: a client keeps "the difference (offset) between the authtime value and the
-/// local clock" rather than changing the clock. A `KRB-ERROR` is not authenticated, so the offset
-/// it teaches is used for one retry and reported, never trusted further than that.
-fn skew_offset(error: &KrbError, fresh: &Fresh) -> i64 {
-    let kdc = i64::try_from(error.stime.unix()).unwrap_or(i64::MAX);
-    let ours = i64::try_from(fresh.now.as_secs()).unwrap_or(i64::MAX);
-    kdc.saturating_sub(ours)
 }
 
 fn sealed(key: &Key, cipher: Vec<u8>) -> EncryptedData {

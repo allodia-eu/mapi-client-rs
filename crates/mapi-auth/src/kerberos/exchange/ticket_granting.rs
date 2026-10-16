@@ -4,7 +4,7 @@
 use super::{
     Acquisition, CANONICALIZE, Credential, Fresh, KdcRequest, MAXIMUM_ENDTIME, State, Step,
     TgsSent, Tickets, credential, decrypt, referral_realm, refused, reply_error, same_name,
-    same_text, sealed, skew_offset, usage,
+    same_text, sealed, usage,
 };
 use crate::error::Result;
 use crate::kerberos::ap::{self, Authenticator};
@@ -52,6 +52,9 @@ impl Acquisition {
             }),
             cusec,
             ctime,
+            subkey: None,
+            seq_number: None,
+            authorization_data: None,
         };
         let cipher = key.encrypt(
             usage::TGS_REQ_AUTHENTICATOR,
@@ -89,7 +92,7 @@ impl Acquisition {
     ) -> Result<Step> {
         let rep = match kdc::read_reply(Exchange::Tgs, reply)? {
             KdcReply::Error(error) if error.error_code == code::SKEW && !sent.skew_retried => {
-                self.offset = skew_offset(&error, fresh);
+                self.offset = fresh.offset_to(error.stime);
                 return self
                     .send_tgs(
                         sent.tgt,

@@ -8,4 +8,6 @@ pub(crate) mod ap;
 pub(crate) mod asn1;
 pub(crate) mod crypto;
 pub(crate) mod exchange;
+pub(crate) mod fresh;
+pub(crate) mod gss;
 pub(crate) mod kdc;

@@ -129,6 +129,12 @@ impl<'a> Reader<'a> {
             .ok_or_else(|| self.malformed(self.base.saturating_add(start), "an element"))
     }
 
+    /// Everything not yet read, raw — for the one structure here that is not TLV all the way down:
+    /// [RFC 2743] §3.1's token framing, whose `innerToken` is whatever the mechanism makes it.
+    pub(crate) fn rest(self) -> &'a [u8] {
+        self.bytes.get(self.pos..).unwrap_or_default()
+    }
+
     /// Reads the next element and insists it carries the expected tag.
     pub(crate) fn expect(&mut self, tag: u8, reason: &'static str) -> Result<&'a [u8]> {
         let offset = self.offset();
@@ -384,6 +390,16 @@ mod tests {
         assert_eq!(read_integer(&[]), None);
         assert_eq!(read_integer(&[1; 9]), None);
         assert_eq!(read_integer(&i64::MIN.to_be_bytes()), Some(i64::MIN));
+    }
+
+    #[test]
+    fn what_is_left_after_the_last_element_comes_back_raw() {
+        let mut buffer = tlv(OID, &[1, 2]);
+        buffer.extend_from_slice(&[0x01, 0x00, 0xAB]);
+        let mut reader = Reader::new("test", &buffer);
+        reader.expect(OID, "an OID").unwrap();
+        assert_eq!(reader.rest(), [0x01, 0x00, 0xAB]);
+        assert_eq!(Reader::new("test", &[]).rest(), [0u8; 0]);
     }
 
     #[test]

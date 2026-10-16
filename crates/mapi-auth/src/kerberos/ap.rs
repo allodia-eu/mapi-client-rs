@@ -2,17 +2,28 @@
 //! ticket-granting service inside a TGS-REQ's `PA-TGS-REQ` (§5.4.1), and to an application server
 //! inside a GSS-API token ([RFC 4121] §4.1).
 
-use crate::der;
+use crate::der::{self, Reader};
+use crate::error::Result;
 use crate::kerberos::asn1::{
-    Checksum, EncryptedData, KerberosTime, PVNO, PrincipalName, explicit, flags, int, sequence,
-    string,
+    Checksum, EncryptedData, EncryptionKey, Fields, KerberosTime, PVNO, PrincipalName, STRUCTURE,
+    explicit, flags, int, read_int32, read_uint32, sequence, string,
 };
 
 /// The application tag and `msg-type` of an `AP-REQ` — [RFC 4120] §5.5.1.
 const AP_REQ: u8 = 14;
 
+/// The application tag and `msg-type` of an `AP-REP` — [RFC 4120] §5.5.2.
+const AP_REP: u8 = 15;
+
 /// The application tag of an `Authenticator` — [RFC 4120] §5.5.1.
 const AUTHENTICATOR: u8 = 2;
+
+/// The application tag of an `EncAPRepPart` — [RFC 4120] §5.5.2.
+const ENC_AP_REP_PART: u8 = 27;
+
+/// `mutual-required` — [RFC 4120] §5.5.1's `APOptions` bit 2: the client wants an `AP-REP` back,
+/// which is what lets it check that the server holds the service key.
+pub(crate) const MUTUAL_REQUIRED: u32 = super::asn1::flag(2);
 
 /// `Authenticator` — [RFC 4120] §5.5.1: the part of an `AP-REQ` encrypted under the session key,
 /// which is what makes it fresh.
@@ -29,6 +40,12 @@ pub(crate) struct Authenticator {
     pub(crate) cusec: u32,
     /// `ctime`: the client's time, corrected for any skew the KDC has reported.
     pub(crate) ctime: KerberosTime,
+    /// `subkey`: a key of the client's choosing for what follows the exchange.
+    pub(crate) subkey: Option<EncryptionKey>,
+    /// `seq-number`: the client's initial sequence number.
+    pub(crate) seq_number: Option<u32>,
+    /// `authorization-data`, already encoded as `AuthorizationData`.
+    pub(crate) authorization_data: Option<Vec<u8>>,
 }
 
 impl Authenticator {
@@ -44,6 +61,15 @@ impl Authenticator {
         }
         fields.push(explicit(4, &int(i64::from(self.cusec))));
         fields.push(explicit(5, &self.ctime.encode()));
+        if let Some(subkey) = &self.subkey {
+            fields.push(explicit(6, &subkey.encode()));
+        }
+        if let Some(seq_number) = self.seq_number {
+            fields.push(explicit(7, &int(i64::from(seq_number))));
+        }
+        if let Some(data) = &self.authorization_data {
+            fields.push(explicit(8, data));
+        }
         der::tlv(der::application(AUTHENTICATOR), &sequence(&fields))
     }
 }
@@ -65,6 +91,54 @@ pub(crate) fn request(options: u32, ticket: &[u8], authenticator: &EncryptedData
     )
 }
 
+/// Reads an `AP-REP` — [RFC 4120] §5.5.2 — down to its encrypted part.
+pub(crate) fn read_reply(bytes: &[u8]) -> Result<EncryptedData> {
+    let mut reader = Reader::new(STRUCTURE, bytes);
+    let mut inner = reader.expect_nested(der::application(AP_REP), "an AP-REP")?;
+    let fields = Fields::of(&mut inner, "an AP-REP")?;
+    let pvno = read_int32(&mut fields.required(0, "a pvno")?, "a pvno")?;
+    let msg_type = read_int32(&mut fields.required(1, "a msg-type")?, "a msg-type")?;
+    if i64::from(pvno) != PVNO || msg_type != i32::from(AP_REP) {
+        return Err(reader.malformed(0, "an AP-REP with the wrong pvno or msg-type"));
+    }
+    EncryptedData::read(&mut fields.required(2, "an enc-part")?)
+}
+
+/// `EncAPRepPart` — [RFC 4120] §5.5.2: the server's proof that it could read the authenticator.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct EncApRepPart {
+    /// `ctime`, which must be the authenticator's.
+    pub(crate) ctime: KerberosTime,
+    /// `cusec`, which must be the authenticator's.
+    pub(crate) cusec: u32,
+    /// `subkey`: the server's own key for what follows, when it sends one.
+    pub(crate) subkey: Option<EncryptionKey>,
+    /// `seq-number`: the server's initial sequence number.
+    pub(crate) seq_number: Option<u32>,
+}
+
+impl EncApRepPart {
+    /// Reads one from decrypted bytes.
+    pub(crate) fn read(bytes: &[u8]) -> Result<Self> {
+        let mut reader = Reader::new(STRUCTURE, bytes);
+        let mut inner =
+            reader.expect_nested(der::application(ENC_AP_REP_PART), "an EncAPRepPart")?;
+        let fields = Fields::of(&mut inner, "an EncAPRepPart")?;
+        Ok(Self {
+            ctime: KerberosTime::read(&mut fields.required(0, "a ctime")?, "a ctime")?,
+            cusec: read_uint32(&mut fields.required(1, "a cusec")?, "a cusec")?,
+            subkey: fields
+                .optional(2)
+                .map(|mut field| EncryptionKey::read(&mut field))
+                .transpose()?,
+            seq_number: fields
+                .optional(3)
+                .map(|mut field| read_uint32(&mut field, "a seq-number"))
+                .transpose()?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -78,6 +152,9 @@ mod tests {
             cksum,
             cusec: 42,
             ctime: KerberosTime::from_unix(1_800_000_000),
+            subkey: None,
+            seq_number: None,
+            authorization_data: None,
         }
     }
 

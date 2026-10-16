@@ -254,6 +254,14 @@ pub(crate) fn read_reply(exchange: Exchange, bytes: &[u8]) -> Result<KdcReply> {
     }))
 }
 
+/// Reads a `KRB-ERROR` on its own — [RFC 4120] §5.9.1 — as an application server sends one inside
+/// a GSS token ([RFC 4121] §4.1).
+pub(crate) fn read_error_message(bytes: &[u8]) -> Result<KrbError> {
+    let mut reader = Reader::new(STRUCTURE, bytes);
+    let mut inner = reader.expect_nested(der::application(KRB_ERROR), "a KRB-ERROR")?;
+    read_error(&mut inner)
+}
+
 fn read_error(reader: &mut Reader<'_>) -> Result<KrbError> {
     let fields = Fields::of(reader, "a KRB-ERROR")?;
     Ok(KrbError {

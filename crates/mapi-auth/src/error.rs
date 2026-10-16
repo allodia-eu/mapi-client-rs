@@ -150,6 +150,35 @@ pub enum Error {
         reason: &'static str,
     },
 
+    /// The server refused a Kerberos AP-REQ, with a `KRB-ERROR` in its `Negotiate` token.
+    ///
+    /// This is a refusal of a ticket the KDC issued, so it is not a reason to fall back to NTLM:
+    /// the server was offered Kerberos, chose it, and said no. The code is the [RFC 4120] §7.5.9
+    /// one; `KRB_AP_ERR_SKEW` (37) is retried once before it is reported ([MS-KILE] §3.2.5.8).
+    #[error(
+        "the server refused the Kerberos ticket: {}{}",
+        describe_kdc_code(*.code),
+        describe_status(*.status)
+    )]
+    ServiceRefused {
+        /// The error code.
+        code: i32,
+        /// The Windows status, when the server sent one.
+        status: Option<u32>,
+    },
+
+    /// The server's Kerberos reply cannot be used: an AP-REP that does not answer the AP-REQ, or a
+    /// token that is not the one the exchange expected.
+    ///
+    /// [RFC 4120] §3.2.5 and [RFC 4121] §4.1 give the checks. An AP-REP that fails them did not
+    /// come from a server holding the service key, which is the one thing mutual authentication
+    /// exists to establish.
+    #[error("the server's Kerberos reply cannot be used: {reason}")]
+    ServiceReply {
+        /// Which check it failed.
+        reason: &'static str,
+    },
+
     /// A SPNEGO token, a Kerberos message or a certificate is not well-formed DER, or is not the
     /// structure it was supposed to be.
     ///
@@ -195,7 +224,7 @@ fn describe_kdc_code(code: i32) -> String {
         code::KEY_EXPIRED => "KDC_ERR_KEY_EXPIRED, the password has expired",
         code::PREAUTH_FAILED => "KDC_ERR_PREAUTH_FAILED, which is what a wrong password earns",
         code::PREAUTH_REQUIRED => "KDC_ERR_PREAUTH_REQUIRED",
-        code::SKEW => "KRB_AP_ERR_SKEW, the clocks differ by more than the KDC allows",
+        code::SKEW => "KRB_AP_ERR_SKEW, the clocks differ by more than is allowed",
         code::WRONG_REALM => "KDC_ERR_WRONG_REALM",
         _ => "an error",
     };
@@ -285,6 +314,19 @@ mod tests {
             .to_string()
             .contains("buffer says message type 1")
         );
+        assert!(
+            Error::NotBase64 {
+                scheme: "NTLM",
+                detail: "invalid symbol".to_owned(),
+            }
+            .to_string()
+            .contains("not base64")
+        );
+    }
+
+    /// The Kerberos variants, which name the realm or the server that said no and why.
+    #[test]
+    fn kerberos_errors_name_who_refused_and_why() {
         assert_eq!(
             Error::KdcRefused {
                 realm: "EXAMPLE.TEST".to_owned(),
@@ -311,13 +353,21 @@ mod tests {
             .to_string()
             .contains("EXAMPLE.TEST cannot be used: a nonce")
         );
+        assert_eq!(
+            Error::ServiceRefused {
+                code: 37,
+                status: None,
+            }
+            .to_string(),
+            "the server refused the Kerberos ticket: KRB_AP_ERR_SKEW, the clocks differ by more \
+             than is allowed (code 37)"
+        );
         assert!(
-            Error::NotBase64 {
-                scheme: "NTLM",
-                detail: "invalid symbol".to_owned(),
+            Error::ServiceReply {
+                reason: "an AP-REP for another authenticator",
             }
             .to_string()
-            .contains("not base64")
+            .ends_with("cannot be used: an AP-REP for another authenticator")
         );
     }
 }
