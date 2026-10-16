@@ -74,6 +74,17 @@ mod entropy;
 mod error;
 mod handshake;
 mod identity;
+// Built from the bottom up: the cryptography first, then the messages and exchanges that use it.
+// Until the handshake reaches it nothing outside its own tests calls into it, and `expect` rather
+// than `allow` is what makes this line fail the build the moment that stops being true.
+#[cfg_attr(
+    not(test),
+    expect(
+        dead_code,
+        reason = "consumed once the Kerberos exchanges are wired into the handshake"
+    )
+)]
+mod kerberos;
 mod ntlm;
 mod spnego;
 

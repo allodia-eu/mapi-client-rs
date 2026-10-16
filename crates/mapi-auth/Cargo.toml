@@ -30,6 +30,15 @@ md-5 = "0.10"
 sha2 = "0.10"
 hmac = "0.12"
 
+# What Kerberos adds, for the four AES encryption types [MS-KILE] 3.1.5.2
+# requires and nothing more: AES itself, PBKDF2 for every string-to-key
+# ([RFC3962] 4, [RFC8009] 4), and SHA-1 for the HMAC of the older two
+# ([RFC3962] 6). The newer two use the SHA-2 above. Held on the same RustCrypto
+# generation as the hashes NTLM uses, so the tree carries one `digest`.
+aes = "0.8"
+pbkdf2 = { version = "0.12", default-features = false, features = ["hmac"] }
+sha1 = "0.10"
+
 # The `Authorization` and `WWW-Authenticate` values are base64, and producing a
 # whole header value rather than a byte string is what lets this crate be used
 # with an HTTP client it knows nothing about.

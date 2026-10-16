@@ -103,6 +103,20 @@ pub enum Error {
         received: Vec<u8>,
     },
 
+    /// Kerberos cryptography failed: a key of the wrong shape, string-to-key parameters this client
+    /// will not run, or something encrypted that did not decrypt.
+    ///
+    /// `usage` is the key usage ([RFC 4120] §7.5.1) when there is one, which says which part of
+    /// which message it was. An integrity failure under a key made from a password is what a wrong
+    /// password looks like.
+    #[error("Kerberos {}: {reason}", describe_usage(*.usage))]
+    Crypto {
+        /// The key usage the operation was under, if it was under one.
+        usage: Option<u32>,
+        /// What was wrong.
+        reason: &'static str,
+    },
+
     /// A SPNEGO token is not well-formed DER.
     ///
     /// [RFC 4178] §4.2 — `NegTokenInit` and `NegTokenResp`
@@ -127,6 +141,11 @@ pub enum Error {
         /// What was asked of it.
         attempted: &'static str,
     },
+}
+
+/// Names a key usage in an error, or says there was none.
+fn describe_usage(usage: Option<u32>) -> String {
+    usage.map_or_else(|| "key".to_owned(), |usage| format!("key usage {usage}"))
 }
 
 /// Renders the scheme a server offered, or says that it offered none.
