@@ -406,7 +406,7 @@ mod tests {
                     "MapiContext=abc-123; MapiSequence=def-456".to_owned(),
                 ),
             ],
-            request_body: b"/o=Dev/cn=win-m382a5je4u9".to_vec(),
+            request_body: b"/o=Lab/cn=mail-host-0815a".to_vec(),
             status: 200,
             response_headers: vec![
                 ("X-ResponseCode".to_owned(), "0".to_owned()),
@@ -418,14 +418,14 @@ mod tests {
                     "Date".to_owned(),
                     "Sun, 02 Aug 2026 09:12:44 GMT".to_owned(),
                 ),
-                ("X-FEServer".to_owned(), "WIN-M382A5JE4U9".to_owned()),
+                ("X-FEServer".to_owned(), "MAIL-HOST-0815A".to_owned()),
             ],
             response_body: b"PROCESSING\r\nDONE\r\nX-ElapsedTime: 5\r\n\r\n".to_vec(),
         }
     }
 
     fn rules() -> Rules {
-        Rules::parse("text\twin-m382a5je4u9\texchange-lab-01").expect("valid rules")
+        Rules::parse("text\tmail-host-0815a\texchange-lab-01").expect("valid rules")
     }
 
     fn temporary() -> PathBuf {
@@ -444,7 +444,7 @@ mod tests {
 
         let written = write_scenario(
             &directory,
-            "https://win-m382a5je4u9/mapi/emsmdb/",
+            "https://mail-host-0815a/mapi/emsmdb/",
             &exchanges,
             &[],
             &rules(),
@@ -477,7 +477,7 @@ mod tests {
 
         let written = write_scenario(
             &directory,
-            "https://win-m382a5je4u9/mapi/emsmdb/?MailboxId=x@dev.local",
+            "https://mail-host-0815a/mapi/emsmdb/?MailboxId=x@lab.local",
             &exchanges,
             &[],
             &rules,
@@ -503,7 +503,7 @@ mod tests {
         assert!(meta.contains("X-FEServer: EXCHANGE-LAB-01"));
         // The report says what was written, never what was removed.
         assert!(meta.contains("text:exchange-lab-01"), "{meta}");
-        assert!(!meta.contains("win-m382a5je4u9"), "{meta}");
+        assert!(!meta.contains("mail-host-0815a"), "{meta}");
         // The lowercase form in the request body and the URL, and the uppercase form Exchange
         // echoed in `X-FEServer` — one rule, two casings, both counted.
         assert_eq!(
@@ -516,7 +516,7 @@ mod tests {
         // The raw copy is the unscrubbed original, which is why it is gitignored.
         let raw =
             fs::read(directory.join("raw").join("01-connect.request.bin")).expect("a raw copy");
-        assert_eq!(raw, b"/o=Dev/cn=win-m382a5je4u9");
+        assert_eq!(raw, b"/o=Lab/cn=mail-host-0815a");
 
         fs::remove_dir_all(&directory).ok();
     }

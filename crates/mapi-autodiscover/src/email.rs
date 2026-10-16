@@ -91,11 +91,11 @@ mod tests {
 
     #[test]
     fn an_ordinary_address_splits_into_its_two_halves() {
-        let address = EmailAddress::new("developer@dev.local").unwrap();
+        let address = EmailAddress::new("developer@example.test").unwrap();
         assert_eq!(address.local_part(), "developer");
-        assert_eq!(address.domain(), "dev.local");
-        assert_eq!(address.as_str(), "developer@dev.local");
-        assert_eq!(address.to_string(), "developer@dev.local");
+        assert_eq!(address.domain(), "example.test");
+        assert_eq!(address.as_str(), "developer@example.test");
+        assert_eq!(address.to_string(), "developer@example.test");
     }
 
     #[test]
@@ -111,17 +111,17 @@ mod tests {
         for bad in [
             "",
             "no-at-sign",
-            "@dev.local",
+            "@example.test",
             "developer@",
             "two@at@signs",
-            "developer@.dev.local",
-            "developer@dev.local.",
-            "dev eloper@dev.local",
-            "developer@dev.local/../evil",
-            "developer@dev.local?x=1",
-            "developer@dev.local#frag",
-            "<script>@dev.local",
-            "developer@dev.local\u{7}",
+            "developer@.example.test",
+            "developer@example.test.",
+            "dev eloper@example.test",
+            "developer@example.test/../evil",
+            "developer@example.test?x=1",
+            "developer@example.test#frag",
+            "<script>@example.test",
+            "developer@example.test\u{7}",
         ] {
             assert!(
                 EmailAddress::new(bad).is_err(),

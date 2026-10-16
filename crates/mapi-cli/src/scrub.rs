@@ -89,7 +89,7 @@ impl core::error::Error for RuleError {}
 /// Two labels, and the distinction is load-bearing. `found` names what is being removed and is
 /// only ever printed to whoever is running the capture — they already know their own host name.
 /// `placed` names the placeholder that replaced it and is the only one that may be written into a
-/// committed file: a fixture that helpfully recorded "3 occurrences of win-m382a5je4u9 removed"
+/// committed file: a fixture that helpfully recorded "3 occurrences of `<host name>` removed"
 /// would have leaked exactly what the scrub existed to remove.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 struct Rule {
@@ -110,7 +110,7 @@ impl Rules {
     ///
     /// ```text
     /// # everything after a hash is a comment
-    /// text    win-m382a5je4u9                         exchange-lab-01
+    /// text    mail-host-0815a                         exchange-lab-01
     /// bytes   59496a17d3ac6742913a19997ffd7e93        00000000000000000000000000000001
     /// ```
     ///
@@ -331,7 +331,7 @@ mod tests {
     /// different length is refused, not padded, not truncated, not applied.
     #[test]
     fn a_replacement_of_a_different_length_is_refused() {
-        let error = Rules::parse("text\twin-m382a5je4u9\tlab").expect_err("lengths differ");
+        let error = Rules::parse("text\tmail-host-0815a\tlab").expect_err("lengths differ");
         assert!(
             matches!(error, RuleError::LengthMismatch { .. }),
             "{error:?}"
@@ -349,14 +349,14 @@ mod tests {
     /// the URL carries it lowercase. One rule, every casing.
     #[test]
     fn one_text_rule_catches_every_casing_in_both_encodings() {
-        let rules = rules("text\twin-m382a5je4u9\texchange-lab-01");
+        let rules = rules("text\tmail-host-0815a\texchange-lab-01");
 
         // The two forms one Exchange sends: lowercase in the URL it was given, uppercase in the
         // `X-FEServer` header it echoes back — plus the UTF-16 a display name would carry.
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(b"https://win-m382a5je4u9/mapi ");
-        bytes.extend_from_slice(b"WIN-M382A5JE4U9 ");
-        bytes.extend_from_slice(&utf16le("win-m382a5je4u9"));
+        bytes.extend_from_slice(b"https://mail-host-0815a/mapi ");
+        bytes.extend_from_slice(b"MAIL-HOST-0815A ");
+        bytes.extend_from_slice(&utf16le("mail-host-0815a"));
 
         let before = bytes.len();
         let hits = rules.apply(&mut bytes);
@@ -380,14 +380,14 @@ mod tests {
     /// case-insensitively for exactly this reason — it is the backstop, not a duplicate.
     #[test]
     fn a_casing_that_is_none_of_the_three_needs_its_own_rule() {
-        let automatic = rules("text	win-m382a5je4u9	exchange-lab-01");
-        let mut mixed = b"Win-M382a5je4u9".to_vec();
+        let automatic = rules("text	mail-host-0815a	exchange-lab-01");
+        let mut mixed = b"Mail-Host-0815a".to_vec();
         assert!(automatic.apply(&mut mixed).is_empty());
-        assert_eq!(mixed, b"Win-M382a5je4u9");
+        assert_eq!(mixed, b"Mail-Host-0815a");
 
         let explicit = rules(
-            "text	win-m382a5je4u9	exchange-lab-01
-             text	Win-M382a5je4u9	Exchange-Lab-01",
+            "text	mail-host-0815a	exchange-lab-01
+             text	Mail-Host-0815a	Exchange-Lab-01",
         );
         assert_eq!(explicit.apply(&mut mixed).len(), 1);
         assert_eq!(mixed, b"Exchange-Lab-01");
@@ -453,17 +453,17 @@ mod tests {
     /// the placeholder, never the thing being hidden.
     #[test]
     fn a_report_that_reaches_a_file_names_placeholders_only() {
-        let rules = rules("text\twin-m382a5je4u9\texchange-lab-01");
-        let mut body = b"https://win-m382a5je4u9/mapi".to_vec();
+        let rules = rules("text\tmail-host-0815a\texchange-lab-01");
+        let mut body = b"https://mail-host-0815a/mapi".to_vec();
 
         let placed = rules.apply(&mut body);
         let rendered = format!("{placed:?}");
         assert!(rendered.contains("exchange-lab-01"), "{rendered}");
-        assert!(!rendered.contains("win-m382a5je4u9"), "{rendered}");
+        assert!(!rendered.contains("mail-host-0815a"), "{rendered}");
 
         // `find` is the operator's diagnostic, so it may — and must — name what survived.
-        let survived = format!("{:?}", rules.find(b"WIN-M382A5JE4U9"));
-        assert!(survived.contains("WIN-M382A5JE4U9"), "{survived}");
+        let survived = format!("{:?}", rules.find(b"MAIL-HOST-0815A"));
+        assert!(survived.contains("MAIL-HOST-0815A"), "{survived}");
     }
 
     #[test]
@@ -477,9 +477,9 @@ mod tests {
     /// `find` is the self-check, so it has to actually notice.
     #[test]
     fn find_reports_what_a_scrub_would_have_left_behind() {
-        let rules = rules("text\twin-m382a5je4u9\texchange-lab-01");
-        let left = rules.find(b"X-FEServer: WIN-M382A5JE4U9");
-        assert_eq!(left, vec!["text:WIN-M382A5JE4U9".to_owned()]);
+        let rules = rules("text\tmail-host-0815a\texchange-lab-01");
+        let left = rules.find(b"X-FEServer: MAIL-HOST-0815A");
+        assert_eq!(left, vec!["text:MAIL-HOST-0815A".to_owned()]);
     }
 
     #[test]

@@ -101,7 +101,7 @@ mod tests {
     use super::*;
 
     fn address() -> EmailAddress {
-        EmailAddress::new("developer@dev.local").unwrap()
+        EmailAddress::new("developer@example.test").unwrap()
     }
 
     #[test]
@@ -110,8 +110,8 @@ mod tests {
         assert_eq!(
             urls,
             vec![
-                "https://dev.local/Autodiscover/Autodiscover.xml",
-                "https://autodiscover.dev.local/Autodiscover/Autodiscover.xml",
+                "https://example.test/Autodiscover/Autodiscover.xml",
+                "https://autodiscover.example.test/Autodiscover/Autodiscover.xml",
             ]
         );
     }
@@ -140,14 +140,14 @@ mod tests {
 
     #[test]
     fn the_srv_query_and_host_form_follow_the_specification() {
-        assert_eq!(srv_query(&address()), "_autodiscover._tcp.dev.local");
+        assert_eq!(srv_query(&address()), "_autodiscover._tcp.example.test");
         assert_eq!(
-            url_for_host("mail.dev.local"),
-            "https://mail.dev.local/Autodiscover/Autodiscover.xml"
+            url_for_host("mail.example.test"),
+            "https://mail.example.test/Autodiscover/Autodiscover.xml"
         );
         assert_eq!(
             redirect_probe_url(&address()),
-            "http://autodiscover.dev.local/Autodiscover/Autodiscover.xml"
+            "http://autodiscover.example.test/Autodiscover/Autodiscover.xml"
         );
     }
 }

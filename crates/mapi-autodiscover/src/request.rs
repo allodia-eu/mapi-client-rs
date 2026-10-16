@@ -98,7 +98,7 @@ mod tests {
     use super::*;
 
     fn request() -> AutodiscoverRequest {
-        AutodiscoverRequest::new(&EmailAddress::new("developer@dev.local").unwrap())
+        AutodiscoverRequest::new(&EmailAddress::new("developer@example.test").unwrap())
     }
 
     #[test]
@@ -108,12 +108,12 @@ mod tests {
 
         assert!(body.starts_with("<?xml version=\"1.0\" encoding=\"utf-8\"?>"));
         assert!(body.contains(&format!("<Autodiscover xmlns=\"{REQUEST_NAMESPACE}\">")));
-        assert!(body.contains("<EMailAddress>developer@dev.local</EMailAddress>"));
+        assert!(body.contains("<EMailAddress>developer@example.test</EMailAddress>"));
         assert!(body.contains(&format!(
             "<AcceptableResponseSchema>{RESPONSE_SCHEMA}</AcceptableResponseSchema>"
         )));
         assert!(body.trim_end().ends_with("</Autodiscover>"));
-        assert_eq!(request.address().as_str(), "developer@dev.local");
+        assert_eq!(request.address().as_str(), "developer@example.test");
     }
 
     /// The one header that decides whether the answer is useful at all.
@@ -125,7 +125,7 @@ mod tests {
         assert_eq!(headers[1], ("X-MapiHttpCapability", "1"));
         assert_eq!(headers[0].0, "Content-Type");
         assert!(headers[0].1.starts_with("text/xml"));
-        assert_eq!(headers[2], ("X-AnchorMailbox", "developer@dev.local"));
+        assert_eq!(headers[2], ("X-AnchorMailbox", "developer@example.test"));
     }
 
     #[test]
@@ -140,8 +140,8 @@ mod tests {
     fn no_address_that_could_reshape_the_document_can_be_built() {
         for attempt in [
             "a@b</EMailAddress><Evil>x</Evil><EMailAddress>c",
-            "a&amp;b@dev.local",
-            "\"quoted\"@dev.local",
+            "a&amp;b@example.test",
+            "\"quoted\"@example.test",
         ] {
             assert!(
                 EmailAddress::new(attempt).is_err(),

@@ -20,6 +20,15 @@
          plus whatever -Forbidden adds. On a CI runner these match nothing, which is fine: checks
          1 to 3 are the ones that carry CI.
 
+    Check 4 then runs again over every other file git would commit - source, docs, scripts, the
+    tracked ones and the new ones not yet added - when the repository's own fixtures are being
+    checked. New files count because the gate runs before a commit, and a file only scanned once
+    tracked would pass the gate with a name in it and be caught by nothing until after it landed. The other three would drown source code in OIDs
+    and test vectors, but a lab's names have no business anywhere in it, and three of them had
+    reached it unnoticed: the host name in mapi-cli's scrubber tests, the AD domain across
+    mapi-autodiscover's, and the lab password in the NTLM tests. On the lab, the machine's names
+    are exactly the ones that leaked; on a CI runner they match nothing.
+
     Binary fixtures are searched for the ASCII and UTF-16LE forms of each pattern rather than
     decoded, because a ROP buffer is not text and forcing it through a decoder would both miss
     matches and invent them.
@@ -34,7 +43,7 @@
     powershell.exe -File scripts\Assert-NoSecrets.ps1
 
 .EXAMPLE
-    powershell.exe -File scripts\Assert-NoSecrets.ps1 -Forbidden 'win-m382a5je4u9'
+    powershell.exe -File scripts\Assert-NoSecrets.ps1 -Forbidden '<lab host name>'
 #>
 [CmdletBinding()]
 param(
@@ -46,12 +55,10 @@ $ErrorActionPreference = 'Stop'
 . "$PSScriptRoot\_Boot.ps1"
 Assert-BootLoaded   # a dot-sourced file that fails to parse does not stop us; this does
 
+# The source pass belongs to the repository's own check. Verify-Fixtures.ps1 points -Root at a
+# fresh capture in TEMP, and re-reading the whole tree for each of those would only repeat this.
+$scanTracked = -not $Root
 if (-not $Root) { $Root = Join-Path (Get-RepoRoot) 'fixtures' }
-
-if (-not (Test-Path -LiteralPath $Root)) {
-    Write-Ok "no fixtures directory at $Root; nothing to check"
-    exit 0
-}
 
 # The hosts a committed fixture is allowed to name. `example.test` is the reserved-for-testing
 # domain this repository uses throughout; `exchange-lab-01` is the placeholder every capture's real
@@ -94,23 +101,28 @@ function Get-SearchableText {
     return @($latin, $utf16)
 }
 
-$files = @(Get-ChildItem -Path $Root -Recurse -File |
-    Where-Object { $_.FullName -notmatch '[\\/]raw[\\/]' })
-
-if ($files.Count -eq 0) {
-    Write-Ok "no fixture files under $Root yet; nothing to check"
-    exit 0
-}
-
-Write-Step "Checking $($files.Count) fixture file(s) under $Root"
-
 # This machine's own names, resolved once. Inside the file loop this was a DNS lookup per file per
 # encoding, and it cannot change between files.
 $names = @(@($Forbidden) + @(
     $env:COMPUTERNAME
     $env:USERDNSDOMAIN
+    # The lab password, when this session has been given it. Only the scripts that need it are,
+    # so a session that has run the live suite checks for it and one that has not cannot.
+    $env:MAPI_LIVE_PASSWORD
     try { [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName } catch { $null }
 ) | Where-Object { $_ -and $_.Length -ge 4 } | Select-Object -Unique)
+
+$files = @()
+if (Test-Path -LiteralPath $Root) {
+    $files = @(Get-ChildItem -Path $Root -Recurse -File |
+        Where-Object { $_.FullName -notmatch '[\\/]raw[\\/]' })
+}
+
+if ($files.Count -eq 0) {
+    Write-Ok "no fixture files under $Root yet"
+} else {
+    Write-Step "Checking $($files.Count) fixture file(s) under $Root"
+}
 
 $repoRoot = Get-RepoRoot
 
@@ -165,8 +177,26 @@ foreach ($file in $files) {
     }
 }
 
+if ($scanTracked -and $names.Count -gt 0) {
+    Initialize-GitOnPath
+    $tracked = @(& git -C $repoRoot ls-files --cached --others --exclude-standard |
+        Where-Object { $_ -notlike 'fixtures/*' })
+    Write-Step "Checking $($tracked.Count) other file(s) git would commit for this machine's names"
+    foreach ($path in $tracked) {
+        $full = Join-Path $repoRoot $path
+        if (-not (Test-Path -LiteralPath $full -PathType Leaf)) { continue }
+        foreach ($text in (Get-SearchableText -Path $full)) {
+            foreach ($name in $names) {
+                if ($text.IndexOf($name, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) {
+                    Add-Finding -File $path -Check 'name' -Detail $name
+                }
+            }
+        }
+    }
+}
+
 if ($findings.Count -gt 0) {
-    Write-Bad "$($findings.Count) finding(s). Do not commit these fixtures."
+    Write-Bad "$($findings.Count) finding(s). Do not commit these files."
     Write-Host ''
     foreach ($group in ($findings | Group-Object File)) {
         Write-Host "    $($group.Name)" -ForegroundColor Red
@@ -175,10 +205,11 @@ if ($findings.Count -gt 0) {
         }
     }
     Write-Host ''
-    Write-Host '    Widen the rules in Capture-Fixtures.ps1 and capture again. Remember that' -ForegroundColor Yellow
-    Write-Host '    replacements must be the same length as what they replace.' -ForegroundColor Yellow
+    Write-Host '    In a fixture: widen the rules in Capture-Fixtures.ps1 and capture again, with' -ForegroundColor Yellow
+    Write-Host '    replacements the same length as what they replace. Anywhere else: use the' -ForegroundColor Yellow
+    Write-Host '    example.test names the rest of the repository uses.' -ForegroundColor Yellow
     exit 1
 }
 
-Write-Ok 'nothing in the fixtures identifies a real deployment'
+Write-Ok 'nothing tracked identifies a real deployment'
 exit 0

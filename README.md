@@ -170,7 +170,7 @@ until now.
 ```rust
 let client = MapiClient::builder()
     .credentials(Credentials::ntlm(r"DEV\developer", "…"))   // or ::negotiate
-    .discover(&EmailAddress::new("developer@dev.local")?)
+    .discover(&EmailAddress::new("alice@example.test")?)
     .await?;
 ```
 
