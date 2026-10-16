@@ -169,7 +169,10 @@ fn the_shared_structures_round_trip() {
         cksumtype: 0x8003,
         checksum: vec![0; 24],
     };
-    assert_eq!(checksum.encode()[0], der::SEQUENCE);
+    assert_eq!(
+        Checksum::read(&mut reader(&checksum.encode())).unwrap(),
+        checksum
+    );
     assert_eq!(
         authorization_data(&[(143, vec![0, 0x40, 0, 0])]),
         der::tlv(
