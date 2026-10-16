@@ -90,6 +90,45 @@ foreach ($doc in $docs) {
     if (-not $Quiet) { Write-Ok "$($doc.Name) $found" }
 }
 
+$rfcs = Get-RfcManifest
+if (-not $Quiet) { Write-Step "Verifying $($rfcs.Count) RFCs against SPEC.md" }
+
+foreach ($rfc in $rfcs) {
+    if (-not ((Test-Path -LiteralPath $rfc.TxtPath) -and (Test-Path -LiteralPath $rfc.JsonPath))) {
+        $missing.Add($rfc.Name)
+        continue
+    }
+
+    # The text has to be the RFC it is filed as: every RFC's header names its own number.
+    $header = Get-Content -LiteralPath $rfc.TxtPath -TotalCount 40 | Out-String
+    if ($header -notmatch "Request for Comments:\s*$($rfc.Number)\b") {
+        $failures.Add("$($rfc.Name): spec\$($rfc.Name).txt does not say 'Request for Comments: $($rfc.Number)'.")
+        continue
+    }
+
+    # An RFC never changes, but the RFCs around it do. An update or an obsoleting RFC that the
+    # table does not name is the RFC counterpart of a Microsoft version bump.
+    $metadata = Get-Content -LiteralPath $rfc.JsonPath -Raw | ConvertFrom-Json
+    $obsoletedBy = @($metadata.obsoleted_by | Where-Object { $_ })
+    if ($obsoletedBy.Count -gt 0) {
+        $failures.Add("$($rfc.Name): obsoleted by $($obsoletedBy -join ', '). Read it, then re-pin.")
+        continue
+    }
+    $recorded = @($metadata.updated_by | Where-Object { $_ })
+    $unpinned = @($recorded | Where-Object { $rfc.UpdatedBy -notcontains $_ })
+    $phantom = @($rfc.UpdatedBy | Where-Object { $recorded -notcontains $_ })
+    if ($unpinned.Count -gt 0) {
+        $failures.Add("$($rfc.Name): updated by $($unpinned -join ', '), which SPEC.md does not name. Read it, then add it to the row.")
+        continue
+    }
+    if ($phantom.Count -gt 0) {
+        $failures.Add("$($rfc.Name): SPEC.md names $($phantom -join ', ') as an update, and the RFC Editor does not.")
+        continue
+    }
+
+    if (-not $Quiet) { Write-Ok "$($rfc.Name), updated by $(if ($recorded.Count) { $recorded -join ', ' } else { 'nothing' })" }
+}
+
 if ($missing.Count -gt 0) {
     Write-Bad "Not downloaded: $($missing -join ', ')"
     Write-Host "    Run: powershell.exe -File scripts\Get-Specs.ps1" -ForegroundColor Yellow
@@ -106,5 +145,5 @@ if ($failures.Count -gt 0) {
     exit 1
 }
 
-if (-not $Quiet) { Write-Ok "All $($docs.Count) documents match SPEC.md" }
+if (-not $Quiet) { Write-Ok "All $($docs.Count) documents and $($rfcs.Count) RFCs match SPEC.md" }
 exit 0

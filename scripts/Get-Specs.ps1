@@ -67,6 +67,24 @@ foreach ($doc in $docs) {
     Write-Ok "$($doc.Name).txt extracted ($lines lines)"
 }
 
+$rfcs = Get-RfcManifest
+Write-Step "Fetching $($rfcs.Count) RFCs, and the RFC Editor's metadata for each, into $specDir"
+
+foreach ($rfc in $rfcs) {
+    # The text is what gets read; the metadata is what Check-SpecVersion.ps1 pins, because it is
+    # the only place a later update to an RFC is recorded. They are fetched together so that one
+    # can never be newer than the other.
+    if ((Test-Path -LiteralPath $rfc.TxtPath) -and (Test-Path -LiteralPath $rfc.JsonPath) -and -not $Force) {
+        Write-Ok "$($rfc.Name) already present — use -Force to re-download"
+        continue
+    }
+    Write-Host "    GET  $($rfc.Name)"
+    Invoke-WebRequest -Uri $rfc.Url -OutFile $rfc.TxtPath -UseBasicParsing
+    Invoke-WebRequest -Uri $rfc.MetadataUrl -OutFile $rfc.JsonPath -UseBasicParsing
+    $lines = (Get-Content -LiteralPath $rfc.TxtPath | Measure-Object -Line).Lines
+    Write-Ok "$($rfc.Name).txt downloaded ($lines lines), with its metadata"
+}
+
 Write-Host ''
 Write-Host 'The text extracts are the useful artefact day to day:' -ForegroundColor DarkGray
 Write-Host '    Select-String -Path spec\MS-OXCROPS.txt -Pattern ''RopQueryRows'' -Context 2' -ForegroundColor DarkGray
