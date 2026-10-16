@@ -13,7 +13,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-default = ["autodiscover", "ntlm"]
+default = ["autodiscover", "ntlm", "kerberos"]
 # Locating an endpoint from an email address. Additive: it adds `MapiClientBuilder::discover`
 # and nothing anywhere else changes. Turn it off if you already know the endpoint URL and the
 # distinguished name, and would rather not compile an XML parser.
@@ -23,6 +23,15 @@ autodiscover = ["dep:mapi-autodiscover"]
 # hash crates and a mutex from the tree, and leaves a client that needs Basic or OAuth on the MAPI
 # virtual directory.
 ntlm = ["dep:mapi-auth", "dep:tokio", "dep:getrandom"]
+# Kerberos inside `Negotiate`, tried first, with NTLM behind it — what a domain-joined Windows
+# client does. Additive: it adds `KdcLocator`, the `SrvResolver` trait and the builder step that
+# takes them, and makes `Credentials::Negotiate` offer Kerberos when a ticket can be had. It asks
+# tokio for the TCP and timer features the KDC exchanges need, which reqwest's tokio already has.
+kerberos = ["ntlm", "tokio/net", "tokio/io-util", "tokio/time"]
+# A DNS SRV resolver for a caller without one of its own, reading the system's resolver
+# configuration. Additive: without it, KDCs are found through a resolver the host supplies or
+# named outright, and with it a client given neither still finds them.
+hickory-dns = ["kerberos", "dep:hickory-resolver"]
 
 [dependencies]
 mapi-proto.workspace = true
@@ -65,7 +74,18 @@ uuid = { version = "1", features = ["v4"] }
 # crate has no source of randomness.
 getrandom = { version = "0.4", optional = true }
 
+# The `hickory-dns` feature's resolver: SRV lookups for KDCs, through the system's configuration.
+# `default-features = false` drops nothing this needs — `system-config` and `tokio` are named — and
+# keeps DNS-over-TLS and DNSSEC, and the second TLS stack they would bring, out of the tree.
+hickory-resolver = { version = "0.26", default-features = false, features = [
+    "system-config",
+    "tokio",
+], optional = true }
+
 [dev-dependencies]
+# `mapi-auth`'s test KDC, so that the Kerberos path runs end to end in CI, where no domain
+# controller is. Only the tests see the feature.
+mapi-auth = { workspace = true, features = ["testing"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 wiremock = "0.6"
 

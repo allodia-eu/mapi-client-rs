@@ -16,8 +16,8 @@
       2. Long hexadecimal runs. The blob inside a legacyExchangeDN is 32 hex characters; the same
          rule catches a leaked hash or handle. Placeholders are zeros but for a suffix.
       3. URL hosts. Every host named in a fixture must be one this repository chose.
-      4. This machine's own names, when it has any - its NetBIOS name, its FQDN and its AD domain -
-         plus whatever -Forbidden adds. On a CI runner these match nothing, which is fine: checks
+      4. This machine's own names, when it has any - its NetBIOS name, its FQDN and its AD domain,
+         and every domain and domain controller of its forest - plus whatever -Forbidden adds. On a CI runner these match nothing, which is fine: checks
          1 to 3 are the ones that carry CI.
 
     Check 4 then runs again over every other file git would commit - source, docs, scripts, the
@@ -110,6 +110,18 @@ $names = @(@($Forbidden) + @(
     # so a session that has run the live suite checks for it and one that has not cannot.
     $env:MAPI_LIVE_PASSWORD
     try { [System.Net.Dns]::GetHostEntry($env:COMPUTERNAME).HostName } catch { $null }
+    # Every domain and domain controller of this machine's forest, by full and by short name. A lab
+    # with a child domain for Kerberos referrals has a second controller whose name is no less the
+    # lab's than this machine's, and nothing else here would know it.
+    try {
+        foreach ($domain in [System.DirectoryServices.ActiveDirectory.Forest]::GetCurrentForest().Domains) {
+            $domain.Name
+            foreach ($controller in $domain.DomainControllers) {
+                $controller.Name
+                ($controller.Name -split '\.')[0]
+            }
+        }
+    } catch { $null }
 ) | Where-Object { $_ -and $_.Length -ge 4 } | Select-Object -Unique)
 
 $files = @()

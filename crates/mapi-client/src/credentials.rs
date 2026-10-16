@@ -13,9 +13,9 @@
 //! clone of such a client does not add concurrency; the benefit is that it works against a
 //! default-configured Exchange, which offers exactly those two schemes and nothing else.
 //!
-//! What is still missing is **Kerberos**. `Negotiate` here is SPNEGO carrying NTLM, which is what
-//! every non-Windows client does and what a server with `Negotiate` enabled and `NTLM` disabled
-//! accepts. A server that insists on Kerberos is reported as such rather than guessed at.
+//! `Negotiate` offers **Kerberos** first, with the `kerberos` feature, and NTLM behind it — what a
+//! domain-joined Windows client does. Which one authenticated is
+//! [`MapiClient::authentication`](crate::MapiClient::authentication)'s to say.
 //!
 //! # The password is always passed in
 //!
@@ -90,10 +90,20 @@ pub enum Credentials {
     ///
     /// [RFC 4559] §4 — the HTTP binding for SPNEGO
     ///
-    /// This offers NTLM as its only mechanism. A server that would rather speak Kerberos is told
-    /// Kerberos is not available and selects NTLM, which is what SPNEGO exists to arrange; a server
-    /// that refuses to select anything else reports
-    /// [`Error::Unauthorized`](crate::Error::Unauthorized) with the mechanism named.
+    /// With the `kerberos` feature, this offers **Kerberos first**: when the account is named
+    /// `user@realm` — or given a realm with [`mapi_auth::Identity::realm`] — the realm's KDCs are
+    /// asked for a ticket to the server once its first 401 offers `Negotiate`, through the
+    /// `KdcLocator` given to the builder. The handshake then costs what NTLM's
+    /// does: one extra round trip per connection. When no ticket comes of it, NTLM's opening
+    /// follows on a leg of its own — once: the next connection remembers, for a minute, and
+    /// opens with NTLM.
+    ///
+    /// When no ticket can be had it offers NTLM alone, as it does without the feature, and
+    /// [`MapiClient::authentication`](crate::MapiClient::authentication) says why. A KDC that
+    /// refuses the credential itself — a wrong password, a locked or expired account — is reported
+    /// as [`Error::Unauthorized`](crate::Error::Unauthorized) instead, since NTLM would only fail
+    /// it less clearly. `DOMAIN\user` names no realm and so is always NTLM: a NetBIOS domain is
+    /// not a Kerberos realm.
     #[cfg(feature = "ntlm")]
     Negotiate {
         /// The account, its password, and optionally the workstation name to report.
@@ -132,7 +142,7 @@ impl Credentials {
         }
     }
 
-    /// SPNEGO credentials, carrying NTLM.
+    /// SPNEGO credentials: Kerberos first with the `kerberos` feature, NTLM behind it.
     #[cfg(feature = "ntlm")]
     #[must_use]
     pub fn negotiate(username: &str, password: impl Into<String>) -> Self {

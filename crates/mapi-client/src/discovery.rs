@@ -171,6 +171,12 @@ impl MapiClientBuilder {
             http,
             credentials: &self.credentials,
             allow_plaintext_http: self.allows_plaintext_http(),
+            #[cfg(feature = "kerberos")]
+            kerberos: Some(&self.kerberos),
+            #[cfg(all(feature = "ntlm", not(feature = "kerberos")))]
+            kerberos: None,
+            #[cfg(feature = "ntlm")]
+            kdc_timeout: self.connect_timeout,
         };
 
         let mut address = address.clone();
@@ -282,6 +288,13 @@ struct Search<'a> {
     http: Client,
     credentials: &'a Credentials,
     allow_plaintext_http: bool,
+    /// The builder's KDCs and tickets, for `Negotiate`.
+    #[cfg(feature = "ntlm")]
+    kerberos: Option<&'a crate::handshake::Kdcs>,
+    /// How long to wait for each KDC: the connect timeout. See
+    /// [`Context::kdc_timeout`](crate::handshake::Context::kdc_timeout).
+    #[cfg(feature = "ntlm")]
+    kdc_timeout: core::time::Duration,
 }
 
 impl Search<'_> {
@@ -360,61 +373,6 @@ impl Search<'_> {
         builder.body(request.into_body()).send().await.ok()
     }
 
-    /// Sends the request, running a handshake first when the credentials need one.
-    ///
-    /// The opening leg carries the whole Autodiscover request rather than an empty body, which is
-    /// the opposite of what the MAPI transport does and for the opposite reason: an Autodiscover
-    /// request is a few hundred bytes of XML rather than a ROP buffer, so re-sending it costs less
-    /// than the round trip an empty leg would add.
-    ///
-    /// `None` means the candidate did not answer, which is a reason to try the next one.
-    #[cfg(feature = "ntlm")]
-    async fn authenticate(&self, url: &Url, address: &EmailAddress) -> Result<Option<Response>> {
-        let Some((scheme, identity)) = self.credentials.handshake() else {
-            return Ok(self.post(url, address, None).await);
-        };
-
-        let url_text = url.to_string();
-        let context = crate::handshake::Context {
-            url: &url_text,
-            credentials: self.credentials,
-        };
-
-        let (negotiation, opening) =
-            crate::handshake::Negotiation::start(scheme, identity, url.host_str())?;
-        let Some(challenged) = self.post(url, address, Some(&opening)).await else {
-            return Ok(None);
-        };
-
-        // A candidate that did not challenge has already answered the request the opening leg
-        // carried — it wants no authentication, or none this client would have to prove. There is
-        // no handshake to finish, so the reply is the reply; treating it as a refusal would turn a
-        // candidate that answered into an error that ends the whole search.
-        if challenged.status() != StatusCode::UNAUTHORIZED {
-            return Ok(Some(challenged));
-        }
-
-        let certificate = crate::transport::peer_certificate(&challenged);
-        let offered = challenges(&challenged);
-
-        // Reading the body is what returns the connection to the pool, and a handshake depends on
-        // it: NTLM authenticates a connection, so the answer has to travel on the one that was
-        // challenged. Leaving the body unread hands the last leg a fresh connection, on which the
-        // server has no challenge outstanding — the same trap the MAPI transport documents.
-        let _ = challenged.bytes().await;
-
-        let (mut negotiation, answer) =
-            negotiation.answer(&offered, certificate.as_deref(), context)?;
-
-        let reply = self.post(url, address, Some(&answer)).await;
-        if let Some(reply) = &reply
-            && reply.status() != StatusCode::UNAUTHORIZED
-        {
-            negotiation.finish(&challenges(reply), context)?;
-        }
-        Ok(reply)
-    }
-
     /// The plain-HTTP redirect probe: a `GET` whose `Location` header names the real service.
     ///
     /// Redirects are not followed automatically anywhere in this crate, which is what makes this
@@ -440,6 +398,9 @@ impl Search<'_> {
             .map(str::to_owned)
     }
 }
+
+#[cfg(feature = "ntlm")]
+mod negotiated;
 
 #[cfg(test)]
 mod tests {

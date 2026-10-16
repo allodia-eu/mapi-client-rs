@@ -106,6 +106,20 @@ impl MapiClient {
         &self.user_dn
     }
 
+    /// How the last NTLM or `Negotiate` handshake on this client's connection authenticated, or
+    /// `None` before the first one — and always for Basic, a bearer token or no credentials.
+    ///
+    /// Clones share it, as they share the connection it describes.
+    #[cfg(feature = "ntlm")]
+    #[must_use]
+    pub fn authentication(&self) -> Option<crate::Authentication> {
+        self.transport
+            .authentication
+            .lock()
+            .ok()
+            .and_then(|last| last.clone())
+    }
+
     /// Establishes a Session Context.
     ///
     /// One round trip. The [`Connection`] that comes back owns the session's cookies and its

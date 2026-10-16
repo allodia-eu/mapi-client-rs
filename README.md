@@ -41,11 +41,11 @@ repository existed. Two findings make it tractable:
 > by that, the read bit and the follow-up flag, which it keeps apart and so does this. And then
 > **more than one mailbox**: list the shared, delegated and archive mailboxes an account can open,
 > and open one on that account's own credentials. It authenticates with **`NTLM`** and
-> **`Negotiate`** as well as Basic, which is what a default-configured Exchange offers. All verified
-> against Exchange Server SE `15.02.2562.045`, in two mailboxes, in two languages, with mail
-> actually sent between them, a shared mailbox read by a delegate, and the whole suite run over each
-> authentication scheme. What is missing is Kerberos. The gaps are stated below and in the changelog
-> rather than left to be discovered.
+> **`Negotiate`** as well as Basic, which is what a default-configured Exchange offers — and
+> `Negotiate` with **Kerberos**, across realms, NTLM behind it. All verified against Exchange Server
+> SE `15.02.2562.045`, in two mailboxes, in two languages, with mail actually sent between them, a
+> shared mailbox read by a delegate, and the whole suite run over each authentication scheme. The
+> gaps are stated below and in the changelog rather than left to be discovered.
 
 ## Install
 
@@ -180,8 +180,11 @@ add concurrency, and could not. The handshakes themselves live in [`mapi-auth`](
 which is sans-io for the same reason `mapi-proto` is: [MS-NLMP]'s published test vectors are only
 reproducible when the client challenge and the timestamp are inputs rather than ambient.
 
-**Kerberos is not implemented.** `Negotiate` here is SPNEGO offering NTLM as its only mechanism,
-which is what every non-Windows client does; a server that insists on Kerberos is reported by name.
+**`Negotiate` offers Kerberos first**, as a domain-joined Windows client does, when the account is
+named `user@realm` and a ticket can be had — KDCs found through DNS SRV records, by a resolver your
+host supplies (`KdcLocator`), or by the `hickory-dns` feature's — and NTLM when not.
+`MapiClient::authentication()` says which, and why, because a silent fall back to NTLM would
+otherwise pass for Kerberos. A user of another realm in the forest is followed there by referral.
 
 **Three correctness traps encoded in the types, not the docs.**
 

@@ -67,12 +67,16 @@ pub struct MapiClientBuilder {
     pub(crate) credentials: Credentials,
     client_application: String,
     locale: Lcid,
-    timeout: Duration,
-    connect_timeout: Duration,
+    pub(crate) timeout: Duration,
+    pub(crate) connect_timeout: Duration,
     root_certificates: Vec<Vec<u8>>,
     accept_invalid_certificates: bool,
     allow_plaintext_http: bool,
     observer: Option<Arc<dyn Observer>>,
+    /// Shared with every client this builds, so that a lookup's tickets serve the session after
+    /// it.
+    #[cfg(feature = "kerberos")]
+    pub(crate) kerberos: Arc<crate::kerberos::Kerberos>,
 }
 
 impl Default for MapiClientBuilder {
@@ -97,6 +101,8 @@ impl MapiClientBuilder {
             accept_invalid_certificates: false,
             allow_plaintext_http: false,
             observer: None,
+            #[cfg(feature = "kerberos")]
+            kerberos: Arc::default(),
         }
     }
 
@@ -145,6 +151,12 @@ impl MapiClientBuilder {
     #[must_use]
     pub fn credentials(mut self, credentials: Credentials) -> Self {
         self.credentials = credentials;
+        // The ticket cache is keyed by service, not by account, and a builder's clones share it:
+        // a clone given someone else's credentials must not present the first account's tickets.
+        #[cfg(feature = "kerberos")]
+        {
+            self.kerberos = Arc::new(self.kerberos.without_tickets());
+        }
         self
     }
 
@@ -271,7 +283,7 @@ impl MapiClientBuilder {
     /// [`Error::Setup`] if a certificate will not parse or the TLS backend will not start.
     #[cfg(feature = "autodiscover")]
     pub(crate) fn http(&self) -> Result<reqwest::Client> {
-        http_client(
+        crate::transport::http_client(
             self.timeout,
             self.connect_timeout,
             &self.root_certificates,
@@ -306,7 +318,7 @@ impl MapiClientBuilder {
         })?;
         let endpoint = parse_endpoint(&endpoint, self.allow_plaintext_http)?;
 
-        let http = http_client(
+        let http = crate::transport::http_client(
             self.timeout,
             self.connect_timeout,
             &self.root_certificates,
@@ -314,70 +326,26 @@ impl MapiClientBuilder {
             self.credentials.is_connection_oriented(),
         )?;
 
+        #[cfg(feature = "kerberos")]
+        let kerberos = Some(self.kerberos);
+        #[cfg(not(feature = "kerberos"))]
+        let kerberos = None;
         Ok(MapiClient {
-            transport: Transport {
+            transport: Transport::new(
                 http,
                 endpoint,
-                credentials: self.credentials,
-                timeout: self.timeout,
-                observer: self.observer,
-                #[cfg(feature = "ntlm")]
-                connection: Arc::default(),
-            },
+                self.credentials,
+                self.timeout,
+                self.connect_timeout,
+                self.observer,
+                kerberos,
+            ),
             identity: Identity::new(),
             user_dn,
             locale: self.locale,
             client_application: self.client_application,
         })
     }
-}
-
-/// Builds the underlying HTTP client.
-///
-/// Redirects are **not** followed. A MAPI endpoint has no reason to redirect, and following one
-/// would mean deciding whether to carry the `Authorization` header to wherever it points. A 3xx is
-/// reported as [`Error::Http`] instead, which says where the server tried to send us.
-///
-/// `connection_oriented` says whether the credentials authenticate a connection rather than a
-/// request, which changes three settings. See
-/// [`MapiClientBuilder::credentials`](MapiClientBuilder::credentials) for what and why.
-pub(crate) fn http_client(
-    timeout: Duration,
-    connect_timeout: Duration,
-    root_certificates: &[Vec<u8>],
-    accept_invalid_certificates: bool,
-    connection_oriented: bool,
-) -> Result<reqwest::Client> {
-    let mut builder = reqwest::Client::builder()
-        .user_agent(concat!(
-            env!("CARGO_PKG_NAME"),
-            "/",
-            env!("CARGO_PKG_VERSION")
-        ))
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(timeout)
-        .connect_timeout(connect_timeout)
-        .danger_accept_invalid_certs(accept_invalid_certificates);
-
-    if connection_oriented {
-        builder = builder
-            .http1_only()
-            .pool_max_idle_per_host(1)
-            .tls_info(true);
-    }
-
-    for certificate in root_certificates {
-        let certificate = reqwest::Certificate::from_pem(certificate)
-            .or_else(|_| reqwest::Certificate::from_der(certificate))
-            .map_err(|error| Error::Setup {
-                source: Box::new(error),
-            })?;
-        builder = builder.add_root_certificate(certificate);
-    }
-
-    builder.build().map_err(|error| Error::Setup {
-        source: Box::new(error),
-    })
 }
 
 /// Checks the endpoint URL before anything is sent to it.
@@ -538,5 +506,18 @@ mod tests {
             .credentials(Credentials::basic("alice", "hunter2"));
         assert!(!format!("{builder:?}").contains("hunter2"));
         assert!(!format!("{:?}", builder.build().unwrap()).contains("hunter2"));
+    }
+
+    /// A builder's clones share its ticket cache, and one given other credentials does not: the
+    /// cache is keyed by service, so sharing it would present one account's tickets for another.
+    #[cfg(feature = "kerberos")]
+    #[test]
+    fn other_credentials_get_a_ticket_cache_of_their_own() {
+        let alice = MapiClientBuilder::new().credentials(Credentials::negotiate("alice", "a"));
+        assert!(Arc::ptr_eq(&alice.kerberos, &alice.clone().kerberos));
+        let bob = alice
+            .clone()
+            .credentials(Credentials::negotiate("bob", "b"));
+        assert!(!Arc::ptr_eq(&alice.kerberos, &bob.kerberos));
     }
 }

@@ -29,6 +29,10 @@ pub(crate) struct Transport {
     pub(crate) endpoint: Url,
     pub(crate) credentials: Credentials,
     pub(crate) timeout: Duration,
+    /// How long to wait for each KDC: the connect timeout. See
+    /// [`Context::kdc_timeout`](crate::handshake::Context::kdc_timeout).
+    #[cfg(feature = "ntlm")]
+    pub(crate) kdc_timeout: Duration,
     pub(crate) observer: Option<Arc<dyn Observer>>,
     /// Whether this transport's connection has already been authenticated, and the lock that keeps
     /// only one request at a time near it.
@@ -36,10 +40,17 @@ pub(crate) struct Transport {
     /// Shared across clones, because clones share the connection pool that the state is about.
     #[cfg(feature = "ntlm")]
     pub(crate) connection: Arc<tokio::sync::Mutex<negotiated::ConnectionAuth>>,
+    /// The KDCs and the tickets got from them, shared with the builder this came from, with its
+    /// clones and with every client [`for_mailbox`](crate::MapiClient::for_mailbox) makes.
+    #[cfg(feature = "ntlm")]
+    pub(crate) kerberos: Option<Arc<crate::handshake::Kdcs>>,
+    /// How the last handshake authenticated.
+    #[cfg(feature = "ntlm")]
+    pub(crate) authentication: Arc<std::sync::Mutex<Option<crate::Authentication>>>,
 }
 
 /// One HTTP exchange, before anything has decided whether it was a success.
-struct Reply {
+pub(crate) struct Reply {
     status: StatusCode,
     headers: Headers,
     body: Vec<u8>,
@@ -53,7 +64,92 @@ struct Reply {
     certificate: Option<Vec<u8>>,
 }
 
+/// Builds the underlying HTTP client.
+///
+/// Redirects are **not** followed. A MAPI endpoint has no reason to redirect, and following one
+/// would mean deciding whether to carry the `Authorization` header to wherever it points. A 3xx is
+/// reported as [`Error::Http`] instead, which says where the server tried to send us.
+///
+/// `connection_oriented` says whether the credentials authenticate a connection rather than a
+/// request, which changes three settings. See
+/// [`MapiClientBuilder::credentials`](crate::MapiClientBuilder::credentials) for what and why.
+pub(crate) fn http_client(
+    timeout: Duration,
+    connect_timeout: Duration,
+    root_certificates: &[Vec<u8>],
+    accept_invalid_certificates: bool,
+    connection_oriented: bool,
+) -> Result<Client> {
+    let mut builder = Client::builder()
+        .user_agent(concat!(
+            env!("CARGO_PKG_NAME"),
+            "/",
+            env!("CARGO_PKG_VERSION")
+        ))
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(timeout)
+        .connect_timeout(connect_timeout)
+        .danger_accept_invalid_certs(accept_invalid_certificates);
+
+    if connection_oriented {
+        builder = builder
+            .http1_only()
+            .pool_max_idle_per_host(1)
+            .tls_info(true);
+    }
+
+    for certificate in root_certificates {
+        let certificate = reqwest::Certificate::from_pem(certificate)
+            .or_else(|_| reqwest::Certificate::from_der(certificate))
+            .map_err(|error| Error::Setup {
+                source: Box::new(error),
+            })?;
+        builder = builder.add_root_certificate(certificate);
+    }
+
+    builder.build().map_err(|error| Error::Setup {
+        source: Box::new(error),
+    })
+}
+
+/// The Kerberos side a transport is built with: the builder's, shared — or, without the
+/// `kerberos` feature, nothing at all.
+#[cfg(feature = "ntlm")]
+pub(crate) type KerberosSide = Option<Arc<crate::handshake::Kdcs>>;
+/// The Kerberos side a transport is built with: without the `ntlm` feature there is none.
+#[cfg(not(feature = "ntlm"))]
+pub(crate) type KerberosSide = Option<core::convert::Infallible>;
+
 impl Transport {
+    /// A transport over `http` to `endpoint`, with a connection of its own not yet authenticated.
+    pub(crate) fn new(
+        http: Client,
+        endpoint: Url,
+        credentials: Credentials,
+        timeout: Duration,
+        connect_timeout: Duration,
+        observer: Option<Arc<dyn Observer>>,
+        kerberos: KerberosSide,
+    ) -> Self {
+        #[cfg(not(feature = "ntlm"))]
+        let _ = (kerberos, connect_timeout);
+        Self {
+            http,
+            endpoint,
+            credentials,
+            timeout,
+            #[cfg(feature = "ntlm")]
+            kdc_timeout: connect_timeout,
+            observer,
+            #[cfg(feature = "ntlm")]
+            connection: Arc::default(),
+            #[cfg(feature = "ntlm")]
+            kerberos,
+            #[cfg(feature = "ntlm")]
+            authentication: Arc::default(),
+        }
+    }
+
     /// POSTs one request and returns the response headers and payload.
     ///
     /// The payload is handed back whole rather than streamed. A MAPI response is bounded by the
