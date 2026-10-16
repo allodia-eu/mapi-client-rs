@@ -237,6 +237,7 @@ observed deviation, with the server version that produced it.
 |---|---|
 | `unsafe` | `forbid` at the workspace level, so no module can opt back in |
 | Clippy | `all` + `pedantic` + `cargo`, plus `indexing_slicing`, `arithmetic_side_effects`, `unwrap_used`, `panic`, `as_conversions` and friends. Relaxed in `#[cfg(test)]` only |
+| Features | Every combination of every crate's features linted and tested, not only `--all-features` |
 | rustdoc | `-D warnings`, `missing_docs` denied, every public item cites its spec section |
 | File length | 500 lines, CI-enforced |
 | Coverage | 95% floor, defined once in `codecov.yml`, and applied to a pull request's own diff as well as to the tree. Currently 98% of lines, excluding `mapi-cli` |

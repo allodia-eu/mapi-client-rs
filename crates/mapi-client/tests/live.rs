@@ -50,7 +50,9 @@ mod writes;
 mod acts;
 
 /// A mailbox the authenticated account does not own: listing it, opening it, and the pairing
-/// mistake that opening one invites. The only suite whose subject is not a ROP.
+/// mistake that opening one invites. The only suite whose subject is not a ROP, and the only one
+/// that needs `autodiscover`: Autodiscover is the only place a shared mailbox is ever named.
+#[cfg(feature = "autodiscover")]
 mod shared;
 
 /// A wrong password under each authentication scheme, and the fact that all of them reach the same

@@ -9,6 +9,7 @@
 //! *n* mailboxes costs *n + 1* Autodiscover round trips and each alternative arrives with its own
 //! endpoint.
 
+#![cfg(feature = "autodiscover")]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

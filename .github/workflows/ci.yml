@@ -103,6 +103,31 @@ jobs:
       - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
 
   # ---------------------------------------------------------------------------
+  # Every other job builds --all-features, the one combination no consumer who
+  # turns a feature off ever gets. The powerset is read from each crate's own
+  # [features] table, so a feature added later is covered without editing this.
+  # ---------------------------------------------------------------------------
+  features:
+    name: features
+    needs: toolchain
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ needs.toolchain.outputs.channel }}
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-hack
+      - run: cargo hack clippy --workspace --feature-powerset --skip default --all-targets -- -D warnings
+      - run: cargo hack test --workspace --feature-powerset --skip default
+      # A doc link to an item behind a feature is broken in every combination without it; the
+      # docs job sees only --all-features. Mirrors scripts/Invoke-Gate.ps1.
+      - run: cargo hack doc --workspace --feature-powerset --skip default --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # ---------------------------------------------------------------------------
   build:
     name: build
     needs: toolchain
@@ -323,7 +348,7 @@ jobs:
     name: ci-ok
     if: always()
     needs:
-      [toolchain, fmt, clippy, build, test, doc, coverage, deny, typos, file-length, no-secrets]
+      [toolchain, fmt, clippy, features, build, test, doc, coverage, deny, typos, file-length, no-secrets]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any needed job did not succeed

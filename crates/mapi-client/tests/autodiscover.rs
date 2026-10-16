@@ -4,6 +4,7 @@
 //! here is the part that needs a network: which answers end the search, which ones send it
 //! somewhere else, and which ones mean "try the next candidate".
 
+#![cfg(feature = "autodiscover")]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,

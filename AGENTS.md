@@ -60,6 +60,7 @@ All mechanically enforced. `scripts\Invoke-Gate.ps1` runs the lot and mirrors CI
 |---|---|
 | `unsafe` | `forbid` at the workspace level — `deny` can be overridden by a module, `forbid` cannot |
 | Clippy | `all` + `pedantic` + `cargo`, plus `indexing_slicing`, `arithmetic_side_effects`, `unwrap_used`, `expect_used`, `panic`, `as_conversions`, `todo`, `dbg_macro` and friends |
+| Features | Every combination of every crate's features is linted and tested (`cargo hack --feature-powerset`), not only `--all-features` — the one combination no consumer who turns a feature off ever gets |
 | rustdoc | `-D warnings`, `missing_docs` denied |
 | File length | 500 lines, checked by `scripts\Check-FileLength.ps1` |
 | Coverage | 95% floor, defined once in `codecov.yml` and read from there by both CI and the local gate |

@@ -42,7 +42,7 @@ $repoRoot = Get-RepoRoot
 $cargo    = Get-CargoPath
 
 $stepNames = @(
-    'toolchain', 'script-encoding', 'spec-version', 'fmt', 'clippy', 'build',
+    'toolchain', 'script-encoding', 'spec-version', 'fmt', 'clippy', 'features', 'build',
     'test', 'doc', 'coverage', 'deny', 'public-api', 'typos', 'file-length', 'no-secrets'
 )
 
@@ -185,6 +185,30 @@ try {
     Invoke-Step 'clippy' {
         Invoke-Native $cargo @(
             'clippy', '--workspace', '--all-targets', '--all-features', '--', '-D', 'warnings')
+    }
+
+    # -----------------------------------------------------------------------
+    Invoke-Step 'features' {
+        # Every other step builds --all-features, which is the one combination no consumer who
+        # turns a feature off ever gets. Integration tests calling autodiscover-only API with no
+        # cfg passed every step here while failing to compile under --no-default-features. The powerset
+        # comes from each crate's own [features] table, so a feature added later is covered without
+        # touching this; `default` is skipped because it names a combination already in the set.
+        Invoke-Native $cargo @(
+            'hack', 'clippy', '--workspace', '--feature-powerset', '--skip', 'default',
+            '--all-targets', '--', '-D', 'warnings')
+        Invoke-Native $cargo @(
+            'hack', 'test', '--workspace', '--feature-powerset', '--skip', 'default')
+        # rustdoc too: a doc link to an item behind a feature is broken in every combination
+        # without that feature, and the `doc` step below sees only --all-features, where none is.
+        $env:RUSTDOCFLAGS = '-D warnings'
+        try {
+            Invoke-Native $cargo @(
+                'hack', 'doc', '--workspace', '--feature-powerset', '--skip', 'default',
+                '--no-deps')
+        } finally {
+            Remove-Item Env:\RUSTDOCFLAGS -ErrorAction SilentlyContinue
+        }
     }
 
     # -----------------------------------------------------------------------
