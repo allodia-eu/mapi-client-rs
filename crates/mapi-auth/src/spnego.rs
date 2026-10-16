@@ -49,6 +49,9 @@
 use crate::der::{self, Reader};
 use crate::error::{Error, Result};
 
+/// What a reader of these tokens calls them in an error.
+const STRUCTURE: &str = "SPNEGO token";
+
 /// `iso.org.dod.internet.security.mechanism.snego` — [MS-SPNG] §1.9.1
 const SPNEGO_OID: &[u8] = &[0x2B, 0x06, 0x01, 0x05, 0x05, 0x02];
 
@@ -148,14 +151,13 @@ pub(crate) fn response_token(mech_token: &[u8], mech_list_mic: Option<&[u8]>) ->
 ///
 /// # Errors
 ///
-/// [`Error::MalformedToken`] if the DER does not parse or is not a negotiation token, and
+/// [`Error::Malformed`] if the DER does not parse or is not a negotiation token, and
 /// [`Error::UnsupportedMechanism`] if the server selected something other than NTLM.
 pub(crate) fn parse(bytes: &[u8]) -> Result<ServerToken> {
-    let mut outer = Reader::new(bytes);
-    let tag = outer.peek_tag().ok_or(Error::MalformedToken {
-        offset: 0,
-        reason: "an empty token",
-    })?;
+    let mut outer = Reader::new(STRUCTURE, bytes);
+    let tag = outer
+        .peek_tag()
+        .ok_or_else(|| outer.malformed(0, "an empty token"))?;
 
     let mut fields = if tag == der::application(0) {
         // [APPLICATION 0] { OID, NegotiationToken }
@@ -174,7 +176,7 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<ServerToken> {
     let mut token = ServerToken::default();
     while !fields.is_empty() {
         let (tag, value) = fields.read()?;
-        let mut inner = Reader::new(value);
+        let mut inner = Reader::new(STRUCTURE, value);
         match tag {
             tag if tag == der::context(0) => {
                 // In a NegTokenResp this is negState; in a NegTokenInit2 it is mechTypes, which
@@ -217,15 +219,14 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<ServerToken> {
 /// Unwraps the `NegotiationToken` CHOICE, whichever alternative it is.
 fn negotiation_token<'a>(reader: &mut Reader<'a>) -> Result<Reader<'a>> {
     let offset = reader.offset();
-    let tag = reader.peek_tag().ok_or(Error::MalformedToken {
-        offset,
-        reason: "a negotiation token was expected and the buffer ended",
+    let tag = reader.peek_tag().ok_or_else(|| {
+        reader.malformed(
+            offset,
+            "a negotiation token was expected and the buffer ended",
+        )
     })?;
     if tag != der::context(0) && tag != der::context(1) {
-        return Err(Error::MalformedToken {
-            offset,
-            reason: "neither a negTokenInit nor a negTokenResp",
-        });
+        return Err(reader.malformed(offset, "neither a negTokenInit nor a negTokenResp"));
     }
     let mut choice = reader.expect_nested(tag, "a negotiation token")?;
     choice.expect_nested(der::SEQUENCE, "the body of a negotiation token")

@@ -117,11 +117,14 @@ pub enum Error {
         reason: &'static str,
     },
 
-    /// A SPNEGO token is not well-formed DER.
+    /// A SPNEGO token, a Kerberos message or a certificate is not well-formed DER, or is not the
+    /// structure it was supposed to be.
     ///
-    /// [RFC 4178] §4.2 — `NegTokenInit` and `NegTokenResp`
-    #[error("malformed SPNEGO token at byte {offset}: {reason}")]
-    MalformedToken {
+    /// [RFC 4178] §4.2 for SPNEGO, [RFC 4120] §5 for Kerberos, both encoded per X.690.
+    #[error("malformed {structure} at byte {offset}: {reason}")]
+    Malformed {
+        /// What was being read: "SPNEGO token", "Kerberos message".
+        structure: &'static str,
         /// Where the reader stopped.
         offset: usize,
         /// Which rule the encoding broke.
@@ -195,12 +198,13 @@ mod tests {
                 .contains("refused credential")
         );
         assert!(
-            Error::MalformedToken {
+            Error::Malformed {
+                structure: "Kerberos message",
                 offset: 3,
                 reason: "a length that overruns the buffer",
             }
             .to_string()
-            .contains("byte 3")
+            .contains("malformed Kerberos message at byte 3")
         );
         assert!(
             Error::OutOfOrder {
