@@ -11,21 +11,21 @@ use crate::kerberos::crypto::{Enctype, Key};
 use crate::kerberos::kdc::padata;
 
 /// One reply to build.
-pub(super) struct Reply<'a> {
-    pub(super) as_rep: bool,
-    pub(super) realm: &'a str,
-    pub(super) crealm: String,
-    pub(super) cname: PrincipalName,
-    pub(super) key: Key,
-    pub(super) nonce: u32,
-    pub(super) sname: PrincipalName,
-    pub(super) tgs_for: Option<String>,
-    pub(super) outer: Vec<PaData>,
-    pub(super) checksum_over: Option<Vec<u8>>,
+pub(crate) struct Reply<'a> {
+    pub(crate) as_rep: bool,
+    pub(crate) realm: &'a str,
+    pub(crate) crealm: String,
+    pub(crate) cname: PrincipalName,
+    pub(crate) key: Key,
+    pub(crate) nonce: u32,
+    pub(crate) sname: PrincipalName,
+    pub(crate) tgs_for: Option<String>,
+    pub(crate) outer: Vec<PaData>,
+    pub(crate) checksum_over: Option<Vec<u8>>,
 }
 
 impl Forest {
-    pub(super) fn reply(&mut self, reply: Reply<'_>) -> Vec<u8> {
+    pub(crate) fn reply(&mut self, reply: Reply<'_>) -> Vec<u8> {
         let fault = self.fault.take();
         let realm = if fault == Some(Fault::TicketFromAnotherRealm) {
             "ELSEWHERE.TEST"

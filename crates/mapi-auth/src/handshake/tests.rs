@@ -45,7 +45,7 @@ fn a_negotiate_handshake_wraps_the_same_messages_in_spnego() {
     assert_eq!(token.first(), Some(&0x60));
     assert!(token.windows(8).any(|w| w == b"NTLMSSP\0"));
 
-    let inner = spnego::init_token(&documented_challenge());
+    let inner = spnego::init_token(&[spnego::NTLM_OID], &documented_challenge());
     let reply = format!("Negotiate {}", BASE64.encode(&inner));
     let second = handshake.advance(&reply).unwrap();
     let token = token_of(&second);
@@ -288,3 +288,5 @@ fn the_channel_binding_and_target_name_reach_the_message() {
     assert_ne!(plain, named);
     assert!(named.windows(2).any(|w| w == [0x48, 0x00]));
 }
+
+mod kerberos;

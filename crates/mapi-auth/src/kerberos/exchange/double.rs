@@ -17,18 +17,18 @@ use crate::kerberos::crypto::{Enctype, Key};
 use crate::kerberos::kdc::{BRANCH_AWARE, code, pac_options, padata};
 
 /// The KDC's clock, which the tests' [`super::Fresh`] matches unless a test says otherwise.
-pub(super) const KDC_TIME: u64 = 1_800_000_000;
+pub(crate) const KDC_TIME: u64 = 1_800_000_000;
 
 /// The string-to-key iteration count the forest hands out, kept low so that the tests stay fast.
 /// The test of a KDC that sends no salt takes [RFC 3962]'s default instead.
 const ITERATIONS: [u8; 4] = [0, 0, 0, 2];
 
 /// The `NTSTATUS` a Windows KDC attaches to a wrong password: `STATUS_WRONG_PASSWORD`.
-pub(super) const WRONG_PASSWORD: u32 = 0xC000_006A;
+pub(crate) const WRONG_PASSWORD: u32 = 0xC000_006A;
 
 /// What a test asks the next reply to get wrong.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Fault {
+pub(crate) enum Fault {
     WrongNonce,
     ChecksumOverOtherBytes,
     ChecksumMissing,
@@ -48,19 +48,19 @@ pub(super) enum Fault {
     ReferToItself,
 }
 
-pub(super) struct User {
-    pub(super) name: &'static str,
-    pub(super) upn: &'static str,
-    pub(super) password: &'static str,
-    pub(super) preauth: bool,
+pub(crate) struct User {
+    pub(crate) name: &'static str,
+    pub(crate) upn: &'static str,
+    pub(crate) password: &'static str,
+    pub(crate) preauth: bool,
 }
 
-pub(super) struct Realm {
-    pub(super) name: &'static str,
-    pub(super) users: Vec<User>,
-    pub(super) services: Vec<&'static str>,
+pub(crate) struct Realm {
+    pub(crate) name: &'static str,
+    pub(crate) users: Vec<User>,
+    pub(crate) services: Vec<&'static str>,
     /// Where a TGS-REQ for a service this realm does not hold is referred.
-    pub(super) referral: Option<&'static str>,
+    pub(crate) referral: Option<&'static str>,
 }
 
 struct Issued {
@@ -72,22 +72,22 @@ struct Issued {
     tgs_for: Option<String>,
 }
 
-pub(super) struct Forest {
-    pub(super) realms: Vec<Realm>,
-    pub(super) clock: u64,
-    pub(super) fault: Option<Fault>,
+pub(crate) struct Forest {
+    pub(crate) realms: Vec<Realm>,
+    pub(crate) clock: u64,
+    pub(crate) fault: Option<Fault>,
     /// Whether the KDCs honour `PA-REQ-ENC-PA-REP`, as Windows Server 2025 was measured to.
-    pub(super) enc_pa_rep: bool,
+    pub(crate) enc_pa_rep: bool,
     /// Whether `PA-ETYPE-INFO2` carries a salt and an iteration count, as Active Directory does.
-    pub(super) salts: bool,
+    pub(crate) salts: bool,
     /// The realm of every request, in order.
-    pub(super) asked: Vec<String>,
+    pub(crate) asked: Vec<String>,
     issued: Vec<Issued>,
     serial: u8,
 }
 
 impl Forest {
-    pub(super) fn new(realms: Vec<Realm>) -> Self {
+    pub(crate) fn new(realms: Vec<Realm>) -> Self {
         Self {
             realms,
             clock: KDC_TIME,
@@ -105,7 +105,7 @@ impl Forest {
     }
 
     /// Answers one request sent to `realm`'s KDC.
-    pub(super) fn answer(&mut self, realm: &str, message: &[u8]) -> Vec<u8> {
+    pub(crate) fn answer(&mut self, realm: &str, message: &[u8]) -> Vec<u8> {
         self.asked.push(realm.to_owned());
         if self.take(Fault::Unparsable) {
             return vec![0x30, 0x80];

@@ -7,19 +7,21 @@ use crate::binding::ChannelBinding;
 use crate::entropy::Entropy;
 use crate::error::{Error, Result};
 use crate::identity::Identity;
+use crate::kerberos::client::{KerberosEntropy, ServiceTicket};
 use crate::ntlm::{self, NegotiateFlags};
-use crate::spnego::{self, NegState};
+use crate::spnego::{self, NegState, ServerToken};
+
+mod kerberos;
 
 /// Which HTTP authentication scheme to speak.
 ///
-/// Both carry the same NTLM messages; they differ only in what is wrapped around them and in the
-/// name at the front of the header. See the [`spnego`](crate) module for why `Negotiate` is worth
-/// having when `Ntlm` already works.
+/// `Ntlm` carries NTLM messages bare. `Negotiate` carries them inside SPNEGO — and, for a
+/// handshake built with [`Handshake::kerberos`], offers Kerberos first.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scheme {
     /// `Authorization: NTLM …`, carrying an NTLM message directly.
     Ntlm,
-    /// `Authorization: Negotiate …`, carrying an NTLM message inside a SPNEGO token.
+    /// `Authorization: Negotiate …`, carrying a Kerberos or an NTLM token inside SPNEGO.
     ///
     /// [RFC 4559] §4 — the HTTP binding for SPNEGO
     Negotiate,
@@ -54,7 +56,8 @@ impl Scheme {
 pub enum State {
     /// Nothing has been sent. [`Handshake::initial`] is next.
     Ready,
-    /// The first message has been sent. [`Handshake::advance`] is next.
+    /// The first message has been sent. [`Handshake::advance`] is next on a 401 — or, when a
+    /// Kerberos server accepted the first message outright, [`Handshake::finish`] on the success.
     AwaitingChallenge,
     /// The last message has been produced. There is nothing more to send.
     Complete,
@@ -69,6 +72,19 @@ impl State {
             Self::Complete => "complete",
         }
     }
+}
+
+/// The mechanism a handshake authenticated with, which a `Negotiate` server chooses.
+///
+/// Worth asking: a server that cannot use Kerberos lets `Negotiate` fall back to NTLM silently, and
+/// a deployment that meant to run Kerberos would not otherwise know.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum Mechanism {
+    /// Kerberos V5 ([RFC 4121]), with a service ticket.
+    Kerberos,
+    /// NTLM v2 ([MS-NLMP]).
+    Ntlm,
 }
 
 /// One NTLM or SPNEGO handshake, from the first header value to the last.
@@ -116,6 +132,10 @@ pub struct Handshake {
     /// The flags the third message declared, once it exists: the session's `NegFlg`, which decides
     /// what signature a `mechListMIC` carries in either direction.
     negotiated: Option<NegotiateFlags>,
+    /// The Kerberos side, for a handshake that has a service ticket to offer.
+    kerberos: Option<Box<kerberos::Side>>,
+    /// The mechanism in use, once it is known.
+    mechanism: Option<Mechanism>,
 }
 
 impl Handshake {
@@ -131,7 +151,37 @@ impl Handshake {
             state: State::Ready,
             negotiate_message: Vec::new(),
             negotiated: None,
+            kerberos: None,
+            mechanism: None,
         }
+    }
+
+    /// A `Negotiate` handshake that offers Kerberos first, with `ticket` as its optimistic token,
+    /// and NTLM as `identity` second.
+    ///
+    /// A server that picks Kerberos is done in one round trip: [`initial`](Self::initial)'s header
+    /// earns a success whose token [`finish`](Self::finish) checks — the AP-REP that proves the
+    /// server holds the service key. A server that picks NTLM goes on through
+    /// [`advance`](Self::advance) as an NTLM handshake would. `entropy` is NTLM's, for that case;
+    /// `kerberos` is the first AP-REQ's and the one retry a clock-skew error allows
+    /// ([MS-KILE] §3.2.5.8).
+    #[must_use]
+    pub fn kerberos(
+        ticket: ServiceTicket,
+        identity: Identity,
+        entropy: Entropy,
+        kerberos: [KerberosEntropy; 2],
+    ) -> Self {
+        let mut handshake = Self::new(Scheme::Negotiate, identity, entropy);
+        handshake.kerberos = Some(Box::new(kerberos::Side::new(ticket, kerberos)));
+        handshake
+    }
+
+    /// The mechanism in use: known from the start for `NTLM` and for NTLM-only `Negotiate`, and
+    /// for a Kerberos-first `Negotiate` once the server has chosen.
+    #[must_use]
+    pub const fn mechanism(&self) -> Option<Mechanism> {
+        self.mechanism
     }
 
     /// Binds this handshake to the TLS connection it will run over.
@@ -178,10 +228,18 @@ impl Handshake {
             });
         }
 
-        self.negotiate_message = ntlm::negotiate(NegotiateFlags::REQUESTED);
-        let token = match self.scheme {
-            Scheme::Ntlm => self.negotiate_message.clone(),
-            Scheme::Negotiate => spnego::init_token(&self.negotiate_message),
+        let token = if let Some(side) = self.kerberos.as_deref_mut() {
+            let ap_req = side.start(self.binding)?;
+            spnego::init_token(&kerberos::OFFERED, &ap_req)
+        } else {
+            self.mechanism = Some(Mechanism::Ntlm);
+            self.negotiate_message = ntlm::negotiate(NegotiateFlags::REQUESTED);
+            match self.scheme {
+                Scheme::Ntlm => self.negotiate_message.clone(),
+                Scheme::Negotiate => {
+                    spnego::init_token(&[spnego::NTLM_OID], &self.negotiate_message)
+                }
+            }
         };
 
         self.state = State::AwaitingChallenge;
@@ -201,8 +259,9 @@ impl Handshake {
     /// server restarted the handshake instead of challenging — which is how a rejected credential
     /// arrives — [`Error::NotBase64`], [`Error::Malformed`], [`Error::NotAChallenge`] or
     /// [`Error::Truncated`] if what came back will not parse, [`Error::UnsupportedMechanism`] if a
-    /// `Negotiate` server chose something other than NTLM, and [`Error::OutOfOrder`] if no
-    /// challenge was expected.
+    /// `Negotiate` server chose a mechanism this handshake did not offer, [`Error::ServiceRefused`]
+    /// and [`Error::ServiceReply`] if a Kerberos server refused the ticket or answered it wrongly,
+    /// and [`Error::OutOfOrder`] if no challenge was expected.
     pub fn advance(&mut self, www_authenticate: &str) -> Result<String> {
         if self.state != State::AwaitingChallenge {
             return Err(Error::OutOfOrder {
@@ -216,10 +275,20 @@ impl Handshake {
             Scheme::Ntlm => (token, false),
             Scheme::Negotiate => {
                 let server = spnego::parse(&token)?;
+                if self.select(&server)? == Mechanism::Kerberos {
+                    return self.kerberos_answer(&server);
+                }
                 if server.state == Some(NegState::Reject) {
                     return Err(Error::Refused {
                         scheme: self.scheme.name(),
                     });
+                }
+                if self.negotiate_message.is_empty() {
+                    // [RFC 4178] §3.2: the server chose NTLM over the optimistic Kerberos token,
+                    // so the initiator sends NTLM's first token and the negotiation goes on.
+                    self.negotiate_message = ntlm::negotiate(NegotiateFlags::REQUESTED);
+                    let token = spnego::response_token(Some(&self.negotiate_message), None);
+                    return Ok(self.header(&token));
                 }
                 let requested = server.state == Some(NegState::RequestMic);
                 let inner = server.response_token.ok_or(Error::Refused {
@@ -244,17 +313,18 @@ impl Handshake {
             Scheme::Ntlm => message,
             Scheme::Negotiate => {
                 // Sent whenever the session can sign, not only when asked: [MS-SPNG] note <8>
-                // makes it mandatory once the AUTHENTICATE_MESSAGE carries a MIC, and a server
-                // that did not need it ignores it.
+                // makes it mandatory once the AUTHENTICATE_MESSAGE carries a MIC, [RFC 4178] §5
+                // makes it mandatory when NTLM is not the preferred mechanism — after Kerberos was
+                // offered first — and a server that did not need it ignores it.
                 let mic = ntlm::signature(flags);
-                if mic_requested && mic.is_none() {
+                if (mic_requested || self.kerberos.is_some()) && mic.is_none() {
                     return Err(Error::UnsupportedMechanism {
                         mechanism: "a mechListMIC, which a session that negotiated neither SIGN \
                                     nor ALWAYS_SIGN has no signature for"
                             .to_owned(),
                     });
                 }
-                spnego::response_token(&message, mic.as_ref().map(<[u8; 16]>::as_slice))
+                spnego::response_token(Some(&message), mic.as_ref().map(<[u8; 16]>::as_slice))
             }
         };
 
@@ -272,13 +342,21 @@ impl Handshake {
     /// man in the middle has edited is exactly what it is there to catch. Exchange Server SE
     /// `15.02.2562.045` sends the token with `accept-completed` and no `mechListMIC`.
     ///
+    /// For Kerberos the token is required: it carries the AP-REP, without which the server has not
+    /// proved it holds the service key, and a success without one is reported as an error rather
+    /// than trusted.
+    ///
     /// # Errors
     ///
     /// [`Error::OutOfOrder`] if the last message has not been produced, [`Error::Refused`] if the
     /// server's last word was `reject`, [`Error::MechListMicMismatch`] if its `mechListMIC` is not
-    /// the signature this session would produce, and the parse errors of
-    /// [`advance`](Self::advance) if the token will not read.
-    pub fn finish(&self, www_authenticate: Option<&str>) -> Result<()> {
+    /// the signature this session would produce, [`Error::ServiceReply`] if a Kerberos server's
+    /// AP-REP is missing or does not answer, and the parse errors of [`advance`](Self::advance) if
+    /// the token will not read.
+    pub fn finish(&mut self, www_authenticate: Option<&str>) -> Result<()> {
+        if self.kerberos.is_some() && self.mechanism != Some(Mechanism::Ntlm) {
+            return self.kerberos_finish(www_authenticate);
+        }
         if self.state != State::Complete {
             return Err(Error::OutOfOrder {
                 state: self.state.describe(),
@@ -311,6 +389,30 @@ impl Handshake {
         } else {
             Err(Error::MechListMicMismatch { received })
         }
+    }
+
+    /// Which offered mechanism the server's token selects — [RFC 4178] §4.2.2: `supportedMech` is
+    /// in the first reply only, so a later one without it continues with the mechanism already
+    /// chosen, and a first one without it accepted the preferred one.
+    fn select(&mut self, server: &ServerToken) -> Result<Mechanism> {
+        let selected = match server.supported_mech.as_deref() {
+            Some(spnego::NTLM_OID) => Mechanism::Ntlm,
+            Some(spnego::KERBEROS_OID | spnego::KERBEROS_LEGACY_OID) if self.kerberos.is_some() => {
+                Mechanism::Kerberos
+            }
+            Some(other) => {
+                return Err(Error::UnsupportedMechanism {
+                    mechanism: spnego::name_of(other),
+                });
+            }
+            None => self.mechanism.unwrap_or(if self.kerberos.is_some() {
+                Mechanism::Kerberos
+            } else {
+                Mechanism::Ntlm
+            }),
+        };
+        self.mechanism = Some(selected);
+        Ok(selected)
     }
 
     /// A header value: the scheme name, a space, and the token in base64.

@@ -220,8 +220,14 @@ impl Initiator {
                 // [MS-KILE] §3.2.5.8: "When the client receives a KRB_AP_ERR_SKEW error … with a
                 // KERB-ERROR-DATA structure … the client retries the AP-REQ using the time in the
                 // KRB-ERROR message". Once: a second skew is a clock that will not hold still.
+                // The structure's type is [MS-KILE] §2.2.2's KERB_AP_ERR_TYPE_SKEW_RECOVERY, which
+                // is what IIS was measured sending.
                 let recoverable = error.error_code == code::SKEW
-                    && error.e_data.as_deref().and_then(ErrorData::read).is_some();
+                    && error
+                        .e_data
+                        .as_deref()
+                        .and_then(ErrorData::read)
+                        .is_some_and(|data| data.data_type == ErrorData::SKEW_RECOVERY);
                 if recoverable && !self.skew_retried {
                     self.skew_retried = true;
                     self.offset = fresh.offset_to(error.stime);
@@ -367,5 +373,7 @@ fn refused(error: &KrbError) -> Error {
     }
 }
 
+#[cfg(test)]
+pub(crate) mod testing;
 #[cfg(test)]
 mod tests;

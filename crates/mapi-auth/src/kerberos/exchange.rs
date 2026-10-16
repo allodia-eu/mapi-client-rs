@@ -318,6 +318,6 @@ mod authentication;
 mod ticket_granting;
 
 #[cfg(test)]
-mod double;
+pub(crate) mod double;
 #[cfg(test)]
 mod tests;

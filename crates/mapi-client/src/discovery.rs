@@ -403,7 +403,7 @@ impl Search<'_> {
         // server has no challenge outstanding — the same trap the MAPI transport documents.
         let _ = challenged.bytes().await;
 
-        let (negotiation, answer) =
+        let (mut negotiation, answer) =
             negotiation.answer(&offered, certificate.as_deref(), context)?;
 
         let reply = self.post(url, address, Some(&answer)).await;
