@@ -17,6 +17,10 @@ extend-ignore-identifiers-re = [
 # where it is replayed; the `Ba` inside it reads as a misspelling of "by".
 extend-ignore-re = [
     "oQcwBaADCgEA",
+    # Test vectors as RFCs print them — runs of spaced hex byte pairs, `37 05 D9 60 BA 41 …` —
+    # where a lone `BA` or `ba` is a byte, not a misspelling of "by".
+    "(?:\\b[0-9A-Fa-f]{2} +){3,}[0-9A-Fa-f]{2}\\b",
+    "(?:\\b[0-9a-fA-F]{8} +){2,}[0-9a-fA-F]{2,8}\\b",
 ]
 
 [default.extend-words]
