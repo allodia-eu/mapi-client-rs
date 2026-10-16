@@ -37,6 +37,7 @@ pub struct Identity {
     username: String,
     password: String,
     workstation: String,
+    realm: Option<String>,
 }
 
 impl Identity {
@@ -49,6 +50,7 @@ impl Identity {
             username,
             password: password.into(),
             workstation: String::new(),
+            realm: None,
         }
     }
 
@@ -67,6 +69,7 @@ impl Identity {
             username: username.into(),
             password: password.into(),
             workstation: String::new(),
+            realm: None,
         }
     }
 
@@ -106,6 +109,48 @@ impl Identity {
     pub fn workstation_name(&self) -> &str {
         &self.workstation
     }
+
+    /// Names the Kerberos realm the account belongs to, for when its name does not say.
+    ///
+    /// A user-principal name carries one already — `alice@example.test` is in `EXAMPLE.TEST` —
+    /// so this is for the two cases it does not cover: a UPN whose suffix is not the account's
+    /// realm, which Active Directory allows, and a bare account name. A NetBIOS domain is **not** a
+    /// realm, and `EXAMPLE\alice` alone is authenticated with NTLM: mapping a NetBIOS name to a
+    /// realm is domain-controller locator work this crate does not do.
+    #[must_use]
+    pub fn realm(mut self, realm: impl Into<String>) -> Self {
+        self.realm = Some(realm.into());
+        self
+    }
+
+    /// The realm Kerberos asks a KDC about: the one set with [`realm`](Self::realm), or else a
+    /// user-principal name's suffix — upper-cased, as Active Directory's realms are and as Windows'
+    /// own client was measured sending them. `None` when there is neither, which is the case in
+    /// which `Negotiate` is NTLM.
+    #[must_use]
+    pub fn kerberos_realm(&self) -> Option<String> {
+        self.realm
+            .as_deref()
+            .or_else(|| self.username.rsplit_once('@').map(|(_, suffix)| suffix))
+            .filter(|realm| !realm.is_empty())
+            .map(str::to_uppercase)
+    }
+
+    /// The name and realm Kerberos asks a KDC about, or `None` when there is no realm to ask.
+    ///
+    /// A UPN goes as `NT-ENTERPRISE` ([RFC 6806] §5), whole, which is what Windows sends for one
+    /// and what lets a KDC find an account whose UPN suffix is not its realm; a bare name goes as
+    /// `NT-PRINCIPAL`. The realm is [`kerberos_realm`](Self::kerberos_realm).
+    pub(crate) fn kerberos_name(&self) -> Option<(crate::kerberos::asn1::PrincipalName, String)> {
+        use crate::kerberos::asn1::PrincipalName;
+        let realm = self.kerberos_realm()?;
+        let name_type = if self.username.contains('@') {
+            PrincipalName::NT_ENTERPRISE
+        } else {
+            PrincipalName::NT_PRINCIPAL
+        };
+        Some((PrincipalName::new(name_type, &[&self.username]), realm))
+    }
 }
 
 /// Splits `DOMAIN\user` and leaves every other form alone.
@@ -128,6 +173,7 @@ impl core::fmt::Debug for Identity {
             .field("username", &self.username)
             .field("password", &"<redacted>")
             .field("workstation", &self.workstation)
+            .field("realm", &self.realm)
             .finish()
     }
 }
@@ -171,6 +217,40 @@ mod tests {
     fn the_workstation_is_empty_until_it_is_asked_for() {
         let named = Identity::new("alice", "hunter2").workstation("BUILD-01");
         assert_eq!(named.workstation_name(), "BUILD-01");
+    }
+
+    /// [RFC 6806] §5 for a UPN, `NT-PRINCIPAL` for a bare name with a realm, and nothing at all
+    /// for a NetBIOS domain on its own.
+    #[test]
+    fn kerberos_needs_a_upn_or_a_realm() {
+        let (name, realm) = Identity::new("alice@example.test", "x")
+            .kerberos_name()
+            .unwrap();
+        assert_eq!(name.name_type, 10);
+        assert_eq!(name.components, ["alice@example.test"]);
+        assert_eq!(realm, "EXAMPLE.TEST");
+
+        // An alternate UPN suffix, with the realm it really lives in.
+        let alternate = Identity::new("alice@contoso.test", "x").realm("corp.example.test");
+        assert_eq!(
+            alternate.kerberos_realm().as_deref(),
+            Some("CORP.EXAMPLE.TEST")
+        );
+        let (name, realm) = alternate.kerberos_name().unwrap();
+        assert_eq!((name.name_type, realm.as_str()), (10, "CORP.EXAMPLE.TEST"));
+
+        let bare = Identity::new("alice", "x").realm("example.test");
+        let (name, realm) = bare.kerberos_name().unwrap();
+        assert_eq!((name.name_type, name.components[0].as_str()), (1, "alice"));
+        assert_eq!(realm, "EXAMPLE.TEST");
+
+        assert!(
+            Identity::new("EXAMPLE\\alice", "x")
+                .kerberos_name()
+                .is_none()
+        );
+        assert!(Identity::new("alice", "x").kerberos_name().is_none());
+        assert!(Identity::new("alice@", "x").kerberos_name().is_none());
     }
 
     /// The whole point of the hand-written `Debug`.

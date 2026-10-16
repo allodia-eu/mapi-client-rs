@@ -101,7 +101,7 @@ impl Negotiation {
     /// [`Error::Unauthorized`] if the last token refused or its `mechListMIC` did not verify — the
     /// request succeeded, but over a negotiation that cannot be shown to be the one this client
     /// started.
-    pub(crate) fn finish(&self, challenges: &[String], context: Context<'_>) -> Result<()> {
+    pub(crate) fn finish(&mut self, challenges: &[String], context: Context<'_>) -> Result<()> {
         let last = challenges.iter().find(|value| self.scheme.matches(value));
         self.handshake
             .finish(last.map(String::as_str))

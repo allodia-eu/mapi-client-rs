@@ -77,12 +77,12 @@ pub enum Error {
         found: String,
     },
 
-    /// The server asked for something this crate does not implement.
+    /// A `Negotiate` server selected a mechanism this handshake did not offer.
     ///
-    /// The one that occurs in practice is a `Negotiate` server selecting Kerberos: this crate
-    /// offers only the NTLM mechanism, so a server that picks another one has picked one that
-    /// cannot be answered. See the crate documentation for why Kerberos is absent.
-    #[error("the server selected {mechanism}, which this crate does not implement")]
+    /// The one that occurs in practice is Kerberos selected by a server the handshake offered NTLM
+    /// alone — a [`Handshake::new`](crate::Handshake::new) with no ticket. Build it with
+    /// [`Handshake::kerberos`](crate::Handshake::kerberos) to offer Kerberos.
+    #[error("the server selected {mechanism}, which this handshake did not offer")]
     UnsupportedMechanism {
         /// The mechanism, by OID where one was given.
         mechanism: String,
@@ -114,6 +114,20 @@ pub enum Error {
         /// The key usage the operation was under, if it was under one.
         usage: Option<u32>,
         /// What was wrong.
+        reason: &'static str,
+    },
+
+    /// A name Kerberos cannot use: an account with no realm to ask about it in, or a service name
+    /// that is not `service/host`.
+    ///
+    /// The first is the usual one and is a rule, not a fault: `EXAMPLE\alice` names a NetBIOS
+    /// domain, which is not a Kerberos realm. Give `alice@example.test`, or a realm with
+    /// [`Identity::realm`](crate::Identity::realm), or let `Negotiate` use NTLM.
+    #[error("Kerberos cannot use the name {name:?}: {reason}")]
+    KerberosName {
+        /// The name as given.
+        name: String,
+        /// What it lacks.
         reason: &'static str,
     },
 
@@ -304,7 +318,7 @@ mod tests {
                 mechanism: "1.2.840.113554.1.2.2 (Kerberos)".to_owned(),
             }
             .to_string()
-            .contains("does not implement")
+            .contains("did not offer")
         );
         assert!(
             Error::NotAChallenge {

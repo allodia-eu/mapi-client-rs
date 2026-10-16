@@ -1,6 +1,6 @@
 [package]
 name = "mapi-auth"
-description = "Sans-io NTLM and SPNEGO handshakes for MAPI over HTTP: what to put in Authorization, with no network, no clock and no entropy of its own."
+description = "Sans-io Kerberos, NTLM and SPNEGO for MAPI over HTTP: what to send a KDC and put in Authorization, with no network, no clock and no entropy of its own."
 readme = "README.md"
 version.workspace = true
 edition.workspace = true

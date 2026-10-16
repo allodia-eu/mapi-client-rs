@@ -1,158 +1,9 @@
 //! The GSS-API context tokens, against an acceptor that holds the session key — which is all an
 //! acceptor needs, once it has decrypted the ticket.
 
-use core::time::Duration;
-
+use super::testing::*;
 use super::*;
-use crate::kerberos::asn1::{
-    Fields, PrincipalName, explicit, int, octets, read_flags, read_int32, read_uint32, sequence,
-};
-use crate::kerberos::kdc::Ticket;
-
-const NOW: u64 = 1_800_000_000;
-
-fn fresh(seed: u8) -> Fresh {
-    Fresh {
-        now: Duration::new(NOW, 250_000_000),
-        random: [seed; 64],
-    }
-}
-
-fn ticket() -> Credential {
-    Credential {
-        crealm: "CHILD.EXAMPLE.TEST".to_owned(),
-        cname: PrincipalName::new(PrincipalName::NT_PRINCIPAL, &["bob"]),
-        ticket: Ticket {
-            raw: der::tlv(der::application(1), &[0x30, 0x00]),
-            realm: "EXAMPLE.TEST".to_owned(),
-            sname: PrincipalName::new(PrincipalName::NT_SRV_INST, &["HTTP", "mail.example.test"]),
-        },
-        key: Key::new(Enctype::Aes256Sha1, vec![0x42; 32]).unwrap(),
-        flags: 0,
-        endtime: KerberosTime::from_unix(NOW + 36_000),
-    }
-}
-
-fn bound() -> ChannelBinding {
-    ChannelBinding::tls_server_end_point(b"the server certificate")
-}
-
-/// What an acceptor reads out of an AP-REQ token.
-struct Seen {
-    options: u32,
-    raw_ticket: Vec<u8>,
-    checksum: Checksum,
-    ctime: KerberosTime,
-    cusec: u32,
-    subkey: EncryptionKey,
-    seq_number: u32,
-    authorization: Option<Vec<u8>>,
-}
-
-fn open(token: &[u8]) -> Seen {
-    let (id, message) = unframe(token).unwrap();
-    assert_eq!(id, tok_id::AP_REQ);
-    let mut reader = Reader::new(STRUCTURE, message);
-    let mut inner = reader.expect_nested(der::application(14), "").unwrap();
-    let fields = Fields::of(&mut inner, "").unwrap();
-    let options = read_flags(&mut fields.required(2, "").unwrap(), "").unwrap();
-    let raw_ticket = fields
-        .required(3, "")
-        .unwrap()
-        .read_element()
-        .unwrap()
-        .to_vec();
-    let sealed = EncryptedData::read(&mut fields.required(4, "").unwrap()).unwrap();
-    assert_eq!(sealed.etype, 18);
-    let plain = ticket()
-        .key
-        .decrypt(usage::AP_REQ_AUTHENTICATOR, &sealed.cipher)
-        .unwrap();
-    let mut reader = Reader::new(STRUCTURE, &plain);
-    let mut inner = reader.expect_nested(der::application(2), "").unwrap();
-    let fields = Fields::of(&mut inner, "").unwrap();
-    Seen {
-        options,
-        raw_ticket,
-        checksum: Checksum::read(&mut fields.required(3, "").unwrap()).unwrap(),
-        cusec: read_uint32(&mut fields.required(4, "").unwrap(), "").unwrap(),
-        ctime: KerberosTime::read(&mut fields.required(5, "").unwrap(), "").unwrap(),
-        subkey: EncryptionKey::read(&mut fields.required(6, "").unwrap()).unwrap(),
-        seq_number: read_uint32(&mut fields.required(7, "").unwrap(), "").unwrap(),
-        authorization: fields
-            .optional(8)
-            .map(|mut field| field.read_element().unwrap().to_vec()),
-    }
-}
-
-/// An AP-REP token as an acceptor makes one — [RFC 4120] §5.5.2.
-fn ap_rep(ctime: KerberosTime, cusec: u32, subkey: Option<EncryptionKey>, etype: i32) -> Vec<u8> {
-    let mut part = vec![
-        explicit(0, &ctime.encode()),
-        explicit(1, &int(i64::from(cusec))),
-    ];
-    if let Some(subkey) = subkey {
-        part.push(explicit(2, &subkey.encode()));
-    }
-    part.push(explicit(3, &int(7)));
-    let part = der::tlv(der::application(27), &sequence(&part));
-    let cipher = ticket()
-        .key
-        .encrypt(usage::AP_REP, &[9; 16], &part)
-        .unwrap();
-    let rep = der::tlv(
-        der::application(15),
-        &sequence(&[
-            explicit(0, &int(5)),
-            explicit(1, &int(15)),
-            explicit(
-                2,
-                &EncryptedData {
-                    etype,
-                    kvno: None,
-                    cipher,
-                }
-                .encode(),
-            ),
-        ]),
-    );
-    frame(tok_id::AP_REP, &rep)
-}
-
-fn acceptor_subkey() -> EncryptionKey {
-    EncryptionKey {
-        keytype: 18,
-        value: vec![0x77; 32],
-    }
-}
-
-/// A `KRB-ERROR` token as an acceptor makes one, with the server's clock and optional e-data.
-fn krb_error(error_code: i32, stime: u64, e_data: Option<Vec<u8>>) -> Vec<u8> {
-    let mut fields = vec![
-        explicit(0, &int(5)),
-        explicit(1, &int(30)),
-        explicit(4, &KerberosTime::from_unix(stime).encode()),
-        explicit(5, &int(0)),
-        explicit(6, &int(i64::from(error_code))),
-        explicit(9, &crate::kerberos::asn1::string("EXAMPLE.TEST")),
-        explicit(10, &ticket().ticket.sname.encode()),
-    ];
-    if let Some(data) = e_data {
-        fields.push(explicit(12, &octets(&data)));
-    }
-    frame(
-        tok_id::ERROR,
-        &der::tlv(der::application(30), &sequence(&fields)),
-    )
-}
-
-fn error_data(data_type: i64, value: Option<&[u8]>) -> Vec<u8> {
-    let mut fields = vec![explicit(1, &int(data_type))];
-    if let Some(value) = value {
-        fields.push(explicit(2, &octets(value)));
-    }
-    sequence(&fields)
-}
+use crate::kerberos::asn1::{Fields, PrincipalName, read_int32};
 
 /// [RFC 4121] §4.1 and §4.1.1, and [MS-KILE] §3.2.5.8: the framing, `mutual-required`, the ticket
 /// byte for byte, and an authenticator with the `0x8003` checksum, a subkey, a sequence number and
@@ -322,6 +173,19 @@ fn a_skew_error_is_retried_once_on_the_servers_clock() {
     assert_eq!(seen.subkey.value, vec![5; 32], "a fresh subkey");
     assert_eq!(
         initiator.read(&skew, &fresh(6)),
+        Err(Error::ServiceRefused {
+            code: 37,
+            status: None
+        })
+    );
+
+    // A skew error whose KERB-ERROR-DATA is of another type is not one to recover from either.
+    let (mut other, _) = Initiator::start(ticket(), bound(), 0, &fresh(3)).unwrap();
+    assert_eq!(
+        other.read(
+            &krb_error(37, NOW + 600, Some(error_data(3, None))),
+            &fresh(5)
+        ),
         Err(Error::ServiceRefused {
             code: 37,
             status: None

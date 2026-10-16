@@ -1,24 +1,20 @@
-//! SPNEGO: the wrapper that turns NTLM messages into `Negotiate` tokens.
+//! SPNEGO: the wrapper that turns Kerberos and NTLM tokens into `Negotiate` tokens.
 //!
 //! `Negotiate` is not a mechanism. It is a negotiation *about* mechanisms ([RFC 4178], extended by
-//! [MS-SPNG]), and what travels inside it here is the same three NTLM messages the [`ntlm`](crate)
-//! module builds. That is the whole reason this crate can offer both HTTP schemes: one mechanism,
-//! two envelopes.
+//! [MS-SPNG]), and what travels inside it here is one of two: a Kerberos AP-REQ from the
+//! `kerberos` module, or the three NTLM messages the [`ntlm`](crate) module builds.
 //!
-//! # Only one mechanism is offered, and it is not Kerberos
+//! # Which mechanisms are offered
 //!
-//! The `mechTypes` list this sends has exactly one entry, `1.3.6.1.4.1.311.2.2.10` ([MS-NLMP]
-//! §1.9). A server that would rather use Kerberos is told that Kerberos is not on offer and picks
-//! NTLM, which is precisely what SPNEGO is for.
+//! With a service ticket in hand, `mechTypes` is Kerberos then NTLM — the standard Kerberos OID
+//! `1.2.840.113554.1.2.2`, as [MS-SPNG] §3.1.5.2 says to use, then `1.3.6.1.4.1.311.2.2.10`
+//! ([MS-NLMP] §1.9) — and the AP-REQ goes along as the optimistic token, so that a server which
+//! picks Kerberos is done in one round trip. A server that picks NTLM instead is answered with
+//! NTLM inside SPNEGO, as [RFC 4178] §3.2 has it.
 //!
-//! Kerberos is absent because it is a different project, not a bigger version of this one: it needs
-//! a KDC round trip, a credential cache to read tickets out of, clock skew handling and a great
-//! deal of ASN.1 that has nothing to do with NTLM. Offering it badly would be worse than not
-//! offering it, because a client that advertises Kerberos and cannot complete it turns a working
-//! deployment into a failing one.
-//!
-//! What this *does* buy is a server with `Negotiate` enabled and `NTLM` switched off — the shape a
-//! hardened IIS is usually left in — which the raw `NTLM` scheme cannot talk to at all.
+//! Without a ticket, the list is NTLM alone. What that buys is a server with `Negotiate` enabled
+//! and `NTLM` switched off — the shape a hardened IIS is usually left in — which the raw `NTLM`
+//! scheme cannot talk to at all.
 //!
 //! # The `mechListMIC`
 //!
@@ -56,13 +52,9 @@ const STRUCTURE: &str = "SPNEGO token";
 const SPNEGO_OID: &[u8] = &[0x2B, 0x06, 0x01, 0x05, 0x05, 0x02];
 
 /// `1.3.6.1.4.1.311.2.2.10`, the NTLM mechanism — [MS-NLMP] §1.9
-const NTLM_OID: &[u8] = &[0x2B, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x02, 0x0A];
+pub(crate) const NTLM_OID: &[u8] = &[0x2B, 0x06, 0x01, 0x04, 0x01, 0x82, 0x37, 0x02, 0x02, 0x0A];
 
-/// `1.2.840.113554.1.2.2`, Kerberos V5 — [RFC 4121] §4.1
-const KERBEROS_OID: &[u8] = &[0x2A, 0x86, 0x48, 0x86, 0xF7, 0x12, 0x01, 0x02, 0x02];
-
-/// `1.2.840.48018.1.2.2`, the Kerberos OID Microsoft shipped by mistake and still accepts.
-const KERBEROS_LEGACY_OID: &[u8] = &[0x2A, 0x86, 0x48, 0x82, 0xF7, 0x12, 0x01, 0x02, 0x02];
+pub(crate) use crate::kerberos::gss::{LEGACY_OID as KERBEROS_LEGACY_OID, OID as KERBEROS_OID};
 
 /// `negState` — [RFC 4178] §4.2.2
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -100,20 +92,30 @@ pub(crate) struct ServerToken {
     pub(crate) state: Option<NegState>,
     /// The mechanism the server selected, by OID.
     pub(crate) supported_mech: Option<Vec<u8>>,
-    /// The inner mechanism token — an NTLM `CHALLENGE_MESSAGE`, when there is one.
+    /// The inner mechanism token: an NTLM `CHALLENGE_MESSAGE`, a Kerberos AP-REP or `KRB-ERROR`.
     pub(crate) response_token: Option<Vec<u8>>,
     /// The server's `mechListMIC`, which only a completing token carries.
     pub(crate) mech_list_mic: Option<Vec<u8>>,
 }
 
-/// The first token: a `NegTokenInit` inside a GSS-API `InitialContextToken`.
+/// `MechTypeList` — [RFC 4178] §4.1: a `SEQUENCE OF` mechanism OIDs, most preferred first. This
+/// encoding is also what a `mechListMIC` signs (§5), so it is built once and used for both.
+pub(crate) fn mech_type_list(mechanisms: &[&[u8]]) -> Vec<u8> {
+    let oids: Vec<u8> = mechanisms
+        .iter()
+        .flat_map(|oid| der::tlv(der::OID, oid))
+        .collect();
+    der::tlv(der::SEQUENCE, &oids)
+}
+
+/// The first token: a `NegTokenInit` inside a GSS-API `InitialContextToken`, offering
+/// `mechanisms` with an optimistic token for the first of them.
 ///
 /// [RFC 2743] §3.1 requires the outer `[APPLICATION 0]` wrapper naming SPNEGO on the *first* token
-/// of a context and forbids it on the rest, which is why the second token is built by
-/// [`response_token`] and looks nothing like this one.
-pub(crate) fn init_token(mech_token: &[u8]) -> Vec<u8> {
-    let mech_types = der::tlv(der::SEQUENCE, &der::tlv(der::OID, NTLM_OID));
-    let mut inner = der::tlv(der::context(0), &mech_types);
+/// of a context and forbids it on the rest, which is why the later tokens are built by
+/// [`response_token`] and look nothing like this one.
+pub(crate) fn init_token(mechanisms: &[&[u8]], mech_token: &[u8]) -> Vec<u8> {
+    let mut inner = der::tlv(der::context(0), &mech_type_list(mechanisms));
     inner.extend_from_slice(&der::tlv(
         der::context(2),
         &der::tlv(der::OCTET_STRING, mech_token),
@@ -126,19 +128,32 @@ pub(crate) fn init_token(mech_token: &[u8]) -> Vec<u8> {
     der::tlv(der::application(0), &body)
 }
 
-/// A continuation token: a bare `NegTokenResp` carrying one mechanism token and, when there is
-/// one, the `mechListMIC`.
+/// A continuation token: a bare `NegTokenResp` carrying a mechanism token, a `mechListMIC`, or
+/// both.
 ///
-/// `negState` is omitted. [RFC 4178] §4.2.2 makes every field optional, and the state of a
-/// negotiation with one mechanism in it is not something the initiator has anything to add to.
-pub(crate) fn response_token(mech_token: &[u8], mech_list_mic: Option<&[u8]>) -> Vec<u8> {
-    let mut response = der::tlv(der::context(2), &der::tlv(der::OCTET_STRING, mech_token));
+/// `negState` is omitted. [RFC 4178] §4.2.2 makes every field optional, and the state is the
+/// acceptor's to report: the initiator has nothing to add to it.
+pub(crate) fn response_token(mech_token: Option<&[u8]>, mech_list_mic: Option<&[u8]>) -> Vec<u8> {
+    let mut response = mech_token.map_or_else(Vec::new, |token| {
+        der::tlv(der::context(2), &der::tlv(der::OCTET_STRING, token))
+    });
     if let Some(mic) = mech_list_mic {
         response.extend_from_slice(&der::tlv(
             der::context(3),
             &der::tlv(der::OCTET_STRING, mic),
         ));
     }
+    der::tlv(der::context(1), &der::tlv(der::SEQUENCE, &response))
+}
+
+/// The initiator's last token when it answers an acceptor's `mechListMIC`: [RFC 4178] §5 (b) (I),
+/// "The output negotiation message contains a mechlistMIC token and an `accept_complete` state".
+pub(crate) fn completing_token(mech_list_mic: &[u8]) -> Vec<u8> {
+    let mut response = der::tlv(der::context(0), &der::tlv(der::ENUMERATED, &[0]));
+    response.extend_from_slice(&der::tlv(
+        der::context(3),
+        &der::tlv(der::OCTET_STRING, mech_list_mic),
+    ));
     der::tlv(der::context(1), &der::tlv(der::SEQUENCE, &response))
 }
 
@@ -152,7 +167,8 @@ pub(crate) fn response_token(mech_token: &[u8], mech_list_mic: Option<&[u8]>) ->
 /// # Errors
 ///
 /// [`Error::Malformed`] if the DER does not parse or is not a negotiation token, and
-/// [`Error::UnsupportedMechanism`] if the server selected something other than NTLM.
+/// [`Error::UnsupportedMechanism`] if it is wrapped for a mechanism other than SPNEGO. Which
+/// mechanism the server *selected* is the handshake's to judge, against what it offered.
 pub(crate) fn parse(bytes: &[u8]) -> Result<ServerToken> {
     let mut outer = Reader::new(STRUCTURE, bytes);
     let tag = outer
@@ -206,13 +222,6 @@ pub(crate) fn parse(bytes: &[u8]) -> Result<ServerToken> {
         }
     }
 
-    if let Some(mech) = &token.supported_mech
-        && mech.as_slice() != NTLM_OID
-    {
-        return Err(Error::UnsupportedMechanism {
-            mechanism: name_of(mech),
-        });
-    }
     Ok(token)
 }
 
@@ -233,7 +242,7 @@ fn negotiation_token<'a>(reader: &mut Reader<'a>) -> Result<Reader<'a>> {
 }
 
 /// Names an OID in an error, so that "the server picked Kerberos" reads as that.
-fn name_of(oid: &[u8]) -> String {
+pub(crate) fn name_of(oid: &[u8]) -> String {
     let known = match oid {
         KERBEROS_OID | KERBEROS_LEGACY_OID => Some("Kerberos"),
         NTLM_OID => Some("NTLM"),
@@ -277,7 +286,7 @@ mod tests {
 
     #[test]
     fn the_first_token_is_the_shape_rfc2743_requires() {
-        let token = init_token(b"NTLMSSP\0\x01\x00\x00\x00");
+        let token = init_token(&[NTLM_OID], b"NTLMSSP\0\x01\x00\x00\x00");
 
         // [APPLICATION 0], then the SPNEGO OID, then a negTokenInit.
         assert_eq!(token.first(), Some(&0x60));
@@ -295,7 +304,7 @@ mod tests {
 
     #[test]
     fn a_continuation_token_carries_no_wrapper_and_no_state() {
-        let token = response_token(b"NTLMSSP\0\x03\x00\x00\x00", None);
+        let token = response_token(Some(b"NTLMSSP\0\x03\x00\x00\x00"), None);
         assert_eq!(token.first(), Some(&0xA1));
         assert!(!token.windows(SPNEGO_OID.len()).any(|w| w == SPNEGO_OID));
 
@@ -312,7 +321,7 @@ mod tests {
     #[test]
     fn a_mech_list_mic_travels_in_field_three_and_reads_back() {
         let mic = [1u8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
-        let token = response_token(b"NTLMSSP\0\x03\x00\x00\x00", Some(&mic));
+        let token = response_token(Some(b"NTLMSSP\0\x03\x00\x00\x00"), Some(&mic));
 
         let tail = der::tlv(der::context(3), &der::tlv(der::OCTET_STRING, &mic));
         assert!(token.ends_with(&tail), "{token:02X?}");
@@ -361,24 +370,46 @@ mod tests {
         }
     }
 
+    /// The selected mechanism is reported, not judged: the handshake knows what it offered.
     #[test]
-    fn a_server_that_selects_kerberos_is_reported_by_name() {
-        for oid in [KERBEROS_OID, KERBEROS_LEGACY_OID] {
-            let token = server_response(1, oid, b"a ticket");
-            let error = parse(&token).unwrap_err();
-            assert!(
-                matches!(&error, Error::UnsupportedMechanism { mechanism } if mechanism.contains("Kerberos")),
-                "{error}"
-            );
+    fn whichever_mechanism_the_server_selects_is_reported() {
+        for oid in [KERBEROS_OID, KERBEROS_LEGACY_OID, NTLM_OID] {
+            let token = server_response(0, oid, b"a token");
+            assert_eq!(parse(&token).unwrap().supported_mech.as_deref(), Some(oid));
         }
-
-        // And so is one nobody has a name for.
-        let token = server_response(1, &[0x2B, 0x06, 0x01, 0x04, 0x01, 0x7F], b"?");
-        let error = parse(&token).unwrap_err();
-        assert!(
-            matches!(&error, Error::UnsupportedMechanism { mechanism } if mechanism == "1.3.6.1.4.1.127"),
-            "{error}"
+        assert_eq!(
+            name_of(KERBEROS_LEGACY_OID),
+            "Kerberos (1.2.840.48018.1.2.2)"
         );
+        assert_eq!(
+            name_of(&[0x2B, 0x06, 0x01, 0x04, 0x01, 0x7F]),
+            "1.3.6.1.4.1.127"
+        );
+    }
+
+    /// [RFC 4178] §4.1, most preferred first, and a `NegTokenResp` that carries only a MIC.
+    #[test]
+    fn two_mechanisms_are_offered_in_order_and_a_mic_can_travel_alone() {
+        let list = mech_type_list(&[KERBEROS_OID, NTLM_OID]);
+        let expected = [
+            der::tlv(der::OID, KERBEROS_OID),
+            der::tlv(der::OID, NTLM_OID),
+        ]
+        .concat();
+        assert_eq!(list, der::tlv(der::SEQUENCE, &expected));
+        let token = init_token(&[KERBEROS_OID, NTLM_OID], b"an AP-REQ");
+        assert!(token.windows(list.len()).any(|window| window == list));
+
+        let mic_only = response_token(None, Some(b"a MIC"));
+        let parsed = parse(&mic_only).unwrap();
+        assert_eq!(parsed.response_token, None);
+        assert_eq!(parsed.mech_list_mic.as_deref(), Some(&b"a MIC"[..]));
+        assert_eq!(parsed.state, None);
+
+        let completing = parse(&completing_token(b"a MIC")).unwrap();
+        assert_eq!(completing.state, Some(NegState::AcceptCompleted));
+        assert_eq!(completing.mech_list_mic.as_deref(), Some(&b"a MIC"[..]));
+        assert_eq!(completing.response_token, None);
     }
 
     /// [MS-SPNG] §3.2.5.2's server-initiated variation, which arrives in the application wrapper

@@ -91,7 +91,7 @@ impl Transport {
             return self.finish(request, reply);
         }
 
-        let (negotiation, answer) = negotiation.answer(
+        let (mut negotiation, answer) = negotiation.answer(
             &challenged.challenges,
             challenged.certificate.as_deref(),
             context,
