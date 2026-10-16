@@ -5,7 +5,7 @@
 use super::{
     Acquisition, AsSent, CANONICALIZE, Credential, ENC_PA_REP, Fresh, KdcRequest, MAXIMUM_ENDTIME,
     State, Step, credential, decrypt, krbtgt, refused, reply_error, same_name, same_text, sealed,
-    skew_offset, usage,
+    usage,
 };
 use crate::der::Reader;
 use crate::error::Result;
@@ -101,7 +101,7 @@ impl Acquisition {
                     self.send_as(next, None, false, fresh).map(Step::Send)
                 }
                 code::SKEW if !sent.skew_retried => {
-                    self.offset = skew_offset(&error, fresh);
+                    self.offset = fresh.offset_to(error.stime);
                     self.send_as(sent.realm, sent.key, true, fresh)
                         .map(Step::Send)
                 }
