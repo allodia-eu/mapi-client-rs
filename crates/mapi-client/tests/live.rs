@@ -80,18 +80,20 @@ fn builder() -> MapiClientBuilder {
     MapiClient::builder()
         .endpoint(required("MAPI_LIVE_ENDPOINT"))
         .user_dn(LegacyDn::new(required("MAPI_LIVE_USER_DN")).expect("a usable legacyExchangeDN"))
-        .credentials(configured_credentials())
+        .credentials(credentials_for(
+            required("MAPI_LIVE_USERNAME"),
+            required("MAPI_LIVE_PASSWORD"),
+        ))
         .timeout(LIVE_TIMEOUT)
 }
 
-/// The credentials `MAPI_LIVE_AUTH` asks for, defaulting to Basic.
+/// The credentials `MAPI_LIVE_AUTH` asks for, defaulting to Basic, for any lab account.
 ///
 /// Reading the scheme from the environment rather than hard-coding Basic is what lets the whole
 /// suite be run three times over — once per scheme — instead of one scheme being proved by one
-/// test while the other twenty-nine only ever exercise Basic.
-fn configured_credentials() -> Credentials {
-    let username = required("MAPI_LIVE_USERNAME");
-    let password = required("MAPI_LIVE_PASSWORD");
+/// test while every other one only ever exercises Basic. Any account, because the send test's
+/// second session was once quietly Basic in a run that had been asked to be NTLM.
+fn credentials_for(username: String, password: String) -> Credentials {
     match std::env::var("MAPI_LIVE_AUTH").unwrap_or_default().as_str() {
         #[cfg(feature = "ntlm")]
         "ntlm" => Credentials::ntlm(&username, password),
