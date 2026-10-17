@@ -15,7 +15,14 @@ Two conventions specific to this project:
 
 ## [Unreleased]
 
-Nothing yet.
+### Fixed
+
+- **`Write-FixtureManifest.ps1` named every scenario after its scratch directory** —
+  `18596/exchange-se/acts-en-us` — when `-Root` was an 8.3 short path, which `$env:TEMP` routinely
+  is and `Verify-Fixtures.ps1` always passes. It trimmed the root off by length; it now asks
+  `Resolve-Path -Relative`, as `Verify-Fixtures.ps1` already did for the same reason. Only the
+  scratch manifest was ever wrong: the comparison skips `MANIFEST.toml`, and the committed one is
+  built from a long path.
 
 ## [0.4.0] - 2026-10-17
 
