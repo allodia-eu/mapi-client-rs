@@ -6,8 +6,16 @@ use reqwest::{Response, StatusCode, Url};
 
 use super::Search;
 use crate::error::{Error, Result};
-use crate::handshake::{Context, Negotiation};
-use crate::transport::challenges;
+use crate::handshake::{Context, MAX_ATTEMPTS, Negotiation, moved};
+use crate::transport::{challenges, connection};
+
+/// What one handshake came to.
+enum Attempt {
+    /// The candidate's reply, or `None` when it did not answer.
+    Answered(Option<Response>),
+    /// A leg was refused on another connection than the one it answered: start again.
+    Moved,
+}
 
 impl Search<'_> {
     /// Sends the request, running a handshake first when the credentials need one.
@@ -26,7 +34,26 @@ impl Search<'_> {
         let Some((scheme, identity)) = self.credentials.handshake() else {
             return Ok(self.post(url, address, None).await);
         };
+        let mut attempt = 1;
+        loop {
+            let last = attempt >= MAX_ATTEMPTS;
+            let started = self.attempt(url, address, scheme, identity, last).await?;
+            if let Attempt::Answered(reply) = started {
+                return Ok(reply);
+            }
+            attempt = attempt.saturating_add(1);
+        }
+    }
 
+    /// One handshake, which a `last` attempt never reports as [`Attempt::Moved`].
+    async fn attempt(
+        &self,
+        url: &Url,
+        address: &EmailAddress,
+        scheme: mapi_auth::Scheme,
+        identity: &mapi_auth::Identity,
+        last: bool,
+    ) -> Result<Attempt> {
         let url_text = url.to_string();
         let context = Context {
             url: &url_text,
@@ -43,7 +70,7 @@ impl Search<'_> {
             Some(negotiation.opening(None)?)
         };
         let Some(mut challenged) = self.post(url, address, opening.as_deref()).await else {
-            return Ok(None);
+            return Ok(Attempt::Answered(None));
         };
 
         // The ticket is asked for once the candidate has asked for `Negotiate`, and not before: a
@@ -59,7 +86,7 @@ impl Search<'_> {
             let _ = challenged.bytes().await;
             let ntlm = negotiation.opening(None)?;
             let Some(next) = self.post(url, address, Some(&ntlm)).await else {
-                return Ok(None);
+                return Ok(Attempt::Answered(None));
             };
             challenged = next;
             opening = Some(ntlm);
@@ -70,11 +97,12 @@ impl Search<'_> {
         // no handshake to finish, so the reply is the reply; treating it as a refusal would turn a
         // candidate that answered into an error that ends the whole search.
         if challenged.status() != StatusCode::UNAUTHORIZED {
-            return Ok(Some(challenged));
+            return Ok(Attempt::Answered(Some(challenged)));
         }
 
         let certificate = crate::transport::peer_certificate(&challenged);
         let offered = challenges(&challenged);
+        let answered = connection(&challenged);
 
         // Reading the body is what returns the connection to the pool, and a handshake depends on
         // it: NTLM and Negotiate authenticate a connection, so the next leg has to travel on the
@@ -87,15 +115,16 @@ impl Search<'_> {
                 url,
                 address,
                 &mut negotiation,
-                &offered,
+                (&offered, answered),
                 certificate.as_deref(),
                 opening.is_some(),
                 context,
+                last,
             )
             .await;
         let refused = match &outcome {
-            Ok(Some(reply)) => reply.status() == StatusCode::UNAUTHORIZED,
-            Ok(None) => false,
+            Ok(Attempt::Answered(Some(reply))) => reply.status() == StatusCode::UNAUTHORIZED,
+            Ok(_) => false,
             Err(error) => matches!(error, Error::Unauthorized { .. }),
         };
         if refused {
@@ -104,8 +133,9 @@ impl Search<'_> {
         outcome
     }
 
-    /// The legs after the first 401, up to the reply that ends the handshake — checked with
-    /// [`Negotiation::finish`] when it is not a 401.
+    /// The legs after the first 401 — what it `offered`, on the connection it `answered` on — up
+    /// to the reply that ends the handshake, checked with [`Negotiation::finish`] when it is not a
+    /// 401.
     #[expect(
         clippy::too_many_arguments,
         reason = "each is one piece of the handshake in flight, and bundling them would only name \
@@ -116,32 +146,43 @@ impl Search<'_> {
         url: &Url,
         address: &EmailAddress,
         negotiation: &mut Negotiation,
-        offered: &[String],
+        (offered, mut answered): (&[String], Option<core::net::SocketAddr>),
         certificate: Option<&[u8]>,
         opened: bool,
         context: Context<'_>,
-    ) -> Result<Option<Response>> {
+        last: bool,
+    ) -> Result<Attempt> {
         let next = negotiation.respond(opened, offered, certificate, context)?;
         let mut reply = self.post(url, address, Some(&next)).await;
         for _ in 0..crate::handshake::MAX_LEGS {
             let Some(current) = reply else {
-                return Ok(None);
+                return Ok(Attempt::Answered(None));
             };
             if current.status() != StatusCode::UNAUTHORIZED || negotiation.is_complete() {
                 reply = Some(current);
                 break;
             }
+            if !last && moved(answered, connection(&current)) {
+                let _ = current.bytes().await;
+                return Ok(Attempt::Moved);
+            }
+            answered = connection(&current);
             let offered = challenges(&current);
             let _ = current.bytes().await;
             let next = negotiation.answer(&offered, certificate, context)?;
             reply = self.post(url, address, Some(&next)).await;
         }
 
-        if let Some(reply) = &reply
-            && reply.status() != StatusCode::UNAUTHORIZED
-        {
-            negotiation.finish(&challenges(reply), context)?;
+        match reply {
+            Some(reply) if reply.status() != StatusCode::UNAUTHORIZED => {
+                negotiation.finish(&challenges(&reply), context)?;
+                Ok(Attempt::Answered(Some(reply)))
+            }
+            Some(reply) if !last && moved(answered, connection(&reply)) => {
+                let _ = reply.bytes().await;
+                Ok(Attempt::Moved)
+            }
+            reply => Ok(Attempt::Answered(reply)),
         }
-        Ok(reply)
     }
 }

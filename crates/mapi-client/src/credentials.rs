@@ -7,11 +7,12 @@
 //! challenge/response handshakes that authenticate a **TCP connection** rather than a request.
 //!
 //! That difference is not an implementation detail, because it reaches the transport. A client
-//! using either of them pins its connection pool to one connection per host and serialises
-//! requests, since a handshake whose legs land on different connections cannot complete — see
-//! [`MapiClientBuilder::credentials`](crate::MapiClientBuilder::credentials). The cost is that a
-//! clone of such a client does not add concurrency; the benefit is that it works against a
-//! default-configured Exchange, which offers exactly those two schemes and nothing else.
+//! using either of them gives each connection an HTTP client of its own and lends it to one
+//! request at a time, since a handshake whose legs land on different connections cannot complete —
+//! see [`MapiClientBuilder::credentials`](crate::MapiClientBuilder::credentials). The cost is a
+//! handshake per connection, and a limit on how many there are; the benefit is that it works
+//! against a default-configured Exchange, which offers exactly those two schemes and nothing
+//! else.
 //!
 //! `Negotiate` offers **Kerberos** first, with the `kerberos` feature, and NTLM behind it — what a
 //! domain-joined Windows client does. Which one authenticated is
@@ -167,8 +168,8 @@ impl Credentials {
 
     /// Which handshake scheme these credentials need, if they need one at all.
     ///
-    /// This is the question the transport asks: a scheme here means the connection has to be
-    /// pinned and the requests serialised, and `None` means a header is enough.
+    /// This is the question the transport asks: a scheme here means each request needs a
+    /// connection of its own until it is answered, and `None` means a header is enough.
     #[cfg(feature = "ntlm")]
     pub(crate) const fn handshake(&self) -> Option<(mapi_auth::Scheme, &mapi_auth::Identity)> {
         match self {

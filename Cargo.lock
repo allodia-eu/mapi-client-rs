@@ -1041,6 +1041,7 @@ version = "0.3.0"
 dependencies = [
  "getrandom 0.4.3",
  "hickory-resolver",
+ "hyper-util",
  "mapi-auth",
  "mapi-autodiscover",
  "mapi-proto",

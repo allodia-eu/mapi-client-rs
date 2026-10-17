@@ -45,7 +45,7 @@ async fn a_wrong_password_is_reported_as_a_refusal_not_a_mystery() {
 ///
 /// This is the test that says NTLM and Negotiate work, rather than that they compile. Both are
 /// multi-leg handshakes bound to a connection, so what it proves is not one header but the whole
-/// arrangement: the pinned pool, the serialised requests, the channel binding computed from the
+/// arrangement: a connection lent to one request at a time, the channel binding computed from the
 /// server's own certificate, and the `Persistent-Auth` reuse that follows.
 ///
 /// Measured against Exchange Server SE `15.02.2562.045`, whose MAPI virtual directory reports
@@ -114,4 +114,32 @@ async fn ntlm_and_negotiate_reach_the_same_mailbox_as_basic() {
             "{scheme}: {error:?}"
         );
     }
+}
+
+/// Sessions opened at once each get a connection of their own, under whichever scheme
+/// `MAPI_LIVE_AUTH` names — and Exchange keeps them apart: every one reaches the mailbox, logs on
+/// and disconnects, while the others are doing the same. Under NTLM and `Negotiate` that is four
+/// handshakes on four connections, which is what this asks of the server: [MS-OXCMAPIHTTP]
+/// §3.2.5.1 has it validate each request's authentication context against its Session Context's,
+/// and fail one that differs with `X-ResponseCode` 10.
+#[tokio::test]
+#[ignore = "needs a live Exchange Server; run scripts\\Test-Live.ps1"]
+async fn sessions_opened_at_once_each_reach_the_mailbox() {
+    let client = super::client();
+    let sessions = (0..4).map(|_| {
+        let client = client.clone();
+        tokio::spawn(async move {
+            let logon = client.connect().await?.logon().await?;
+            let owner = logon.mailbox().mailbox_guid().to_string();
+            logon.disconnect().await?;
+            Ok::<_, mapi_client::Error>(owner)
+        })
+    });
+    let mut owners = Vec::new();
+    for session in sessions.collect::<Vec<_>>() {
+        owners.push(session.await.expect("the task").expect("a session"));
+    }
+    println!("{} sessions at once: {owners:?}", owners.len());
+    owners.dedup();
+    assert_eq!(owners.len(), 1, "every session reached the same mailbox");
 }

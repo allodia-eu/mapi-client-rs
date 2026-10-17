@@ -52,8 +52,8 @@ fn guid() -> String {
 
 /// A client for one mailbox's MAPI/HTTP endpoint.
 ///
-/// Cheap to clone — clones share one HTTP connection pool and one client identity — and every
-/// clone can open its own Session Context.
+/// Cheap to clone — clones share their connections and one client identity — and every clone can
+/// open its own Session Context, and use it while the others use theirs.
 ///
 /// ```no_run
 /// use mapi_client::{Credentials, LegacyDn, MapiClient, WellKnownFolder};
@@ -106,10 +106,10 @@ impl MapiClient {
         &self.user_dn
     }
 
-    /// How the last NTLM or `Negotiate` handshake on this client's connection authenticated, or
+    /// How the last NTLM or `Negotiate` handshake on this client's connections authenticated, or
     /// `None` before the first one — and always for Basic, a bearer token or no credentials.
     ///
-    /// Clones share it, as they share the connection it describes.
+    /// Clones share it, as they share the connections it describes.
     #[cfg(feature = "ntlm")]
     #[must_use]
     pub fn authentication(&self) -> Option<crate::Authentication> {

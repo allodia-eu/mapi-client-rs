@@ -7,16 +7,10 @@
 //! request afterwards has to travel on it too, because that connection — and no other — is the one
 //! the server has associated with an authenticated identity.
 //!
-//! `reqwest` offers no way to pin a request to a connection. What it does offer is a pool, and the
-//! pool is deterministic under one condition, measured rather than assumed: **with no other request
-//! in flight, a sequential request reuses the idle connection**, and with four concurrent requests
-//! it opens up to four. So the guarantee is bought with a mutex — one request at a time while these
-//! credentials are in use — and with `pool_max_idle_per_host(1)` in the builder, which keeps the
-//! idle set to the one connection there is.
-//!
-//! That costs concurrency, and the trade is unavoidable rather than merely accepted: two concurrent
-//! requests would need two authenticated connections, and nothing here could say which handshake
-//! had gone to which.
+//! `reqwest` offers no way to pin a request to a connection, so each connection is an HTTP client
+//! of its own, lent to one request at a time: see [`pool`](super::pool) for why that is enough, the
+//! one case where it is not, and what it costs. A request here borrows one, authenticates it if it
+//! has to, and gives it back.
 //!
 //! # Kerberos
 //!
@@ -36,27 +30,17 @@
 //! a completed handshake with `Persistent-Auth: true` and leaves the connection authenticated —
 //! measured against Exchange Server SE `15.02.2562.045` — so later requests carry no
 //! `Authorization` header at all. If the pool ever hands over a different connection, that request
-//! comes back 401 and the handshake runs again, which is why the state below is a hint rather than
-//! a fact.
+//! comes back 401 and the handshake runs again, which is why a lane's authentication is a belief
+//! rather than a fact.
 
 use mapi_auth::{Identity, Scheme};
 use mapi_proto::{Headers, Request};
 use reqwest::StatusCode;
 
 use crate::error::{Error, Result};
-use crate::handshake::{Context, MAX_LEGS, Negotiation};
+use crate::handshake::{Context, MAX_ATTEMPTS, MAX_LEGS, Negotiation, moved};
 use crate::transport::Transport;
-
-/// What is known about the connection this transport's pool is holding.
-///
-/// Guarded by a mutex that is held for the whole of a request, which is what makes the pool's reuse
-/// of one connection deterministic. The flag is only ever a hint: nothing can prove the pool handed
-/// back the same connection, so a 401 is always treated as "authenticate again" rather than as an
-/// error.
-#[derive(Clone, Copy, Debug, Default)]
-pub(crate) struct ConnectionAuth {
-    authenticated: bool,
-}
+use crate::transport::pool::Lease;
 
 impl Transport {
     /// Sends a request under NTLM or Negotiate, authenticating first if it has to.
@@ -66,18 +50,83 @@ impl Transport {
         scheme: Scheme,
         identity: &Identity,
     ) -> Result<(Headers, Vec<u8>)> {
-        let mut state = self.connection.lock().await;
-
-        // The connection is probably still authenticated, in which case this is an ordinary
-        // request and the handshake below never runs.
-        if state.authenticated {
-            let reply = self.post(Some(request), None).await?;
-            if reply.status != StatusCode::UNAUTHORIZED {
-                return self.finish(request, reply);
-            }
-            state.authenticated = false;
+        let mut lane = self
+            .pool
+            .lease(self.endpoint.origin().ascii_serialization())
+            .await?;
+        if let Some(reply) = self.reuse(&mut lane, request).await? {
+            return self.finish(request, reply);
         }
 
+        let turn = self.pool.turn(&lane, self.endpoint.as_str()).await?;
+        // The turn before this one may have authenticated a connection that is idle by now.
+        lane.trade_for_warm();
+        if let Some(reply) = self.reuse(&mut lane, request).await? {
+            drop(lane);
+            turn.settle(true, &Ok(()));
+            return self.finish(request, reply);
+        }
+        let outcome = self
+            .authenticate(&mut lane, request, scheme, identity)
+            .await;
+        // The lane goes back before the turn is given up, so that the request woken by it finds
+        // the connection this one authenticated, and trades for it.
+        let authenticated = lane.is_authenticated();
+        drop(lane);
+        turn.settle(authenticated, &outcome);
+        outcome
+    }
+
+    /// Sends the request as an ordinary one on a lane believed authenticated: the reply, or `None`
+    /// when there is a handshake to run first.
+    ///
+    /// The lane is believed unauthenticated until the answer says otherwise: a request that fails
+    /// or is cancelled in flight costs its client the connection, and the next one on this lane
+    /// would otherwise send its body to a connection the server has never seen. A 401 makes the
+    /// handshakes that follow take turns — see [`Lease::doubt`].
+    async fn reuse(&self, lane: &mut Lease<'_>, request: &Request) -> Result<Option<super::Reply>> {
+        if !lane.is_authenticated() {
+            return Ok(None);
+        }
+        lane.set_authenticated(false);
+        let reply = self.post(lane.http(), Some(request), None).await?;
+        if reply.status == StatusCode::UNAUTHORIZED {
+            lane.doubt();
+            return Ok(None);
+        }
+        lane.set_authenticated(true);
+        Ok(Some(reply))
+    }
+
+    /// Runs the handshake on `lane`, with the request riding its last leg — again, when the pool
+    /// moved it to another connection part way through.
+    async fn authenticate(
+        &self,
+        lane: &mut Lease<'_>,
+        request: &Request,
+        scheme: Scheme,
+        identity: &Identity,
+    ) -> Result<(Headers, Vec<u8>)> {
+        let mut attempt = 1;
+        loop {
+            let last = attempt >= MAX_ATTEMPTS;
+            if let Some(answer) = self.attempt(lane, request, scheme, identity, last).await? {
+                return Ok(answer);
+            }
+            attempt = attempt.saturating_add(1);
+        }
+    }
+
+    /// One handshake: the answer, or `None` when a leg was refused on a connection other than the
+    /// one it answered — unless this is the `last` attempt, whose refusal is believed.
+    async fn attempt(
+        &self,
+        lane: &mut Lease<'_>,
+        request: &Request,
+        scheme: Scheme,
+        identity: &Identity,
+        last: bool,
+    ) -> Result<Option<(Headers, Vec<u8>)>> {
         let url = self.endpoint.to_string();
         let context = Context {
             url: &url,
@@ -101,7 +150,7 @@ impl Transport {
         } else {
             Some(negotiation.opening(None)?)
         };
-        let mut challenged = self.post(None, opening.as_deref()).await?;
+        let mut challenged = self.post(lane.http(), None, opening.as_deref()).await?;
 
         // The ticket is asked for once the server has asked for `Negotiate`, and not before: a
         // server that is down, or wants something else, costs no trip to a KDC. With no ticket to
@@ -113,7 +162,7 @@ impl Transport {
                 .await?
         {
             let ntlm = negotiation.opening(None)?;
-            challenged = self.post(None, Some(&ntlm)).await?;
+            challenged = self.post(lane.http(), None, Some(&ntlm)).await?;
             opening = Some(ntlm);
         }
 
@@ -123,59 +172,79 @@ impl Transport {
         // speak: a server that does not want authentication answers it, and one that is failing
         // fails it with the error this crate would report for any other request.
         if challenged.status != StatusCode::UNAUTHORIZED {
-            let reply = self.post(Some(request), None).await?;
-            state.authenticated = reply.status != StatusCode::UNAUTHORIZED;
-            return self.finish(request, reply);
+            let reply = self.post(lane.http(), Some(request), None).await?;
+            lane.set_authenticated(reply.status != StatusCode::UNAUTHORIZED);
+            return self.finish(request, reply).map(Some);
         }
 
         let outcome = self
             .legs(
+                lane,
                 request,
                 &mut negotiation,
                 &challenged,
                 opening.is_some(),
                 context,
+                last,
             )
             .await;
         let refused = match &outcome {
-            Ok(reply) => reply.status == StatusCode::UNAUTHORIZED,
+            Ok(Some(reply)) => reply.status == StatusCode::UNAUTHORIZED,
+            Ok(None) => false,
             Err(error) => matches!(error, Error::Unauthorized { .. }),
         };
         if refused {
             negotiation.refused(self.kerberos.as_deref());
         }
-        let reply = outcome?;
+        let Some(reply) = outcome? else {
+            return Ok(None);
+        };
 
         // Marked authenticated only once `finish` has checked the server's last token: a
         // connection whose AP-REP or `mechListMIC` did not verify carries nothing more.
-        state.authenticated = reply.status != StatusCode::UNAUTHORIZED;
-        self.finish(request, reply)
+        lane.set_authenticated(reply.status != StatusCode::UNAUTHORIZED);
+        self.finish(request, reply).map(Some)
     }
 
     /// The legs after the first 401, up to the reply that ends the handshake — checked with
-    /// [`Negotiation::finish`] when it is not a 401.
+    /// [`Negotiation::finish`] when it is not a 401. `None` when one was refused on another
+    /// connection than the one it answered, and this is not the `last` attempt.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "each is one piece of the handshake in flight, and bundling them would only name \
+                  the bundle"
+    )]
     async fn legs(
         &self,
+        lane: &Lease<'_>,
         request: &Request,
         negotiation: &mut Negotiation,
         challenged: &super::Reply,
         opened: bool,
         context: Context<'_>,
-    ) -> Result<super::Reply> {
+        last: bool,
+    ) -> Result<Option<super::Reply>> {
         let certificate = challenged.certificate.as_deref();
         let next = negotiation.respond(opened, &challenged.challenges, certificate, context)?;
-        let mut reply = self.post(Some(request), Some(&next)).await?;
+        let mut answered = challenged.connection;
+        let mut reply = self.post(lane.http(), Some(request), Some(&next)).await?;
         for _ in 0..MAX_LEGS {
             if reply.status != StatusCode::UNAUTHORIZED || negotiation.is_complete() {
                 break;
             }
+            if !last && moved(answered, reply.connection) {
+                return Ok(None);
+            }
+            answered = reply.connection;
             let next = negotiation.answer(&reply.challenges, certificate, context)?;
-            reply = self.post(Some(request), Some(&next)).await?;
+            reply = self.post(lane.http(), Some(request), Some(&next)).await?;
         }
         if reply.status != StatusCode::UNAUTHORIZED {
             self.record(negotiation.finish(&reply.challenges, context)?);
+        } else if !last && moved(answered, reply.connection) {
+            return Ok(None);
         }
-        Ok(reply)
+        Ok(Some(reply))
     }
 
     /// Keeps how the last handshake authenticated, for
@@ -184,15 +253,5 @@ impl Transport {
         if let Ok(mut last) = self.authentication.lock() {
             *last = Some(authentication);
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn a_fresh_connection_is_not_yet_authenticated() {
-        assert!(!ConnectionAuth::default().authenticated);
     }
 }

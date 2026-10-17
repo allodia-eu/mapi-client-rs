@@ -101,9 +101,9 @@
 //! NTLM and Negotiate authenticate a **TCP connection**, not a request. Every leg of a handshake,
 //! and every request that relies on it afterwards, has to travel on the same connection — which is
 //! a property of whatever HTTP client is underneath, and therefore not something a sans-io crate
-//! can promise. `mapi-client` meets it by pinning its connection pool to one connection per host
-//! and serialising requests while a handshake is in flight; a caller wiring this up themselves has
-//! to do the equivalent, or the third message arrives on a connection that never saw the second.
+//! can promise. `mapi-client` meets it by giving each connection an HTTP client of its own and
+//! lending it to one request at a time; a caller wiring this up themselves has to do the
+//! equivalent, or the third message arrives on a connection that never saw the second.
 //!
 //! # Specification authority
 //!
