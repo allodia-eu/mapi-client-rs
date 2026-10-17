@@ -139,7 +139,12 @@ impl Server {
                     close = *closing > 0;
                     *closing = closing.saturating_sub(1);
                     drop(closing);
-                    unauthorized(Some(CHALLENGE))
+                    let mut response = unauthorized(Some(CHALLENGE));
+                    if close {
+                        let at = response.len().saturating_sub(2);
+                        response.splice(at..at, *b"Connection: close\r\n");
+                    }
+                    response
                 }
                 (Some(_), _) if !challenged => {
                     self.seen.lock().unwrap().unchallenged += 1;
@@ -172,6 +177,11 @@ impl Server {
             };
             stream.get_mut().write_all(&response).await.unwrap();
             if close {
+                // The client hangs up, not the server. A connection the server closes first leaves
+                // the client's port free at once, and Windows hands it to the very next connection
+                // — whose 401 then reads as the same connection's, which is the one case `moved`
+                // cannot see. The side that closes first keeps its port in TIME_WAIT, so it closes.
+                let _ = stream.read_to_end(&mut Vec::new()).await;
                 return;
             }
         }
@@ -210,8 +220,8 @@ impl Server {
             .store(true, core::sync::atomic::Ordering::SeqCst);
     }
 
-    /// Closes the connection after each of the next `count` challenges, as though the pool had
-    /// handed the next leg another one.
+    /// Closes the connection after each of the next `count` challenges — `Connection: close`, so
+    /// the client does the closing — as though the pool had handed the next leg another one.
     fn close_after_challenges(&self, count: usize) {
         *self.closing.lock().unwrap() = count;
     }
