@@ -113,7 +113,7 @@ impl PropertyTag {
     ///
     /// Listed as read/write and deletable, and refused in practice: [MS-OXCSTOR]'s own product
     /// note 14 says Exchange 2013 SP1 and later answer `ecAccessDenied` when a client sets it.
-    /// Confirmed on Exchange Server SE `15.02.2562.045`, where both `RopSetProperties` **and**
+    /// Confirmed on Exchange Server SE `15.02.2562.056`, where both `RopSetProperties` **and**
     /// `RopDeleteProperties` come back with a successful `ReturnValue` and an `ecAccessDenied`
     /// `PropertyProblem` — the delete is the crate's own observation, which the note does not
     /// cover.
@@ -239,14 +239,14 @@ impl PropertyTag {
     /// `PidTagLocaleId`, `0x66A10003` — the locale system-generated messages are written in.
     ///
     /// Documented as a read-only property of every private mailbox logon; observed answering
-    /// `ecNotFound` on Exchange Server SE `15.02.2562.045`, for both an en-US and an nl-NL mailbox.
+    /// `ecNotFound` on Exchange Server SE `15.02.2562.056`, for both an en-US and an nl-NL mailbox.
     ///
     /// [MS-OXCSTOR] §2.2.2.1.1.12
     pub const LOCALE_ID: Self = Self(0x66A1_0003);
     /// `PidTagMailboxOwnerEntryId`, `0x661B0102` — the owner's `EntryID` in the GAL.
     ///
     /// **Not returned by `RopGetPropertiesAll`.** Measured on Exchange Server SE
-    /// `15.02.2562.045`: absent from all 113 properties that ROP answered with, and 151 bytes long
+    /// `15.02.2562.056`: absent from all 113 properties that ROP answered with, and 151 bytes long
     /// when asked for by name. [MS-OXCPRPT] §3.2.5.2 has the server return the values for all
     /// properties *on the object*, while §3.2.5.1 has an explicit fetch return computed properties
     /// as well — so a computed property is not "on the object", and only the second ROP finds it.
@@ -364,7 +364,7 @@ impl PropertyTag {
     /// `PidTagStoreState`, `0x340E0003` — `0x01000000` if the mailbox has active search folders.
     ///
     /// Documented as a read-only property of every private mailbox logon; observed answering
-    /// `ecNotFound` on Exchange Server SE `15.02.2562.045`, for both lab mailboxes.
+    /// `ecNotFound` on Exchange Server SE `15.02.2562.056`, for both lab mailboxes.
     ///
     /// [MS-OXCSTOR] §2.2.2.1.1.5
     pub const STORE_STATE: Self = Self(0x340E_0003);

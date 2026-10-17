@@ -24,7 +24,7 @@ const TABLE_STRING_LIMIT: usize = 255;
 /// into a caller's search index, so the two cases are different variants and the caller has to
 /// look at which one it got.
 ///
-/// Observed on Exchange Server SE `15.02.2562.045`: a 300-character subject came back as exactly
+/// Observed on Exchange Server SE `15.02.2562.056`: a 300-character subject came back as exactly
 /// 255 characters, the last three a literal `...` the server appended — the sent subject was
 /// digits alone, so the ellipsis is the server's and not the sender's. The specification documents
 /// the length rule but not the ellipsis, so detection here uses the length.

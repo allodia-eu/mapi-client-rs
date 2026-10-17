@@ -15,7 +15,7 @@
 //! refusal is worth having on its own terms: error paths are exactly what an offline corpus usually
 //! lacks.
 //!
-//! The refusal is a message with no recipients, which Exchange Server SE `15.02.2562.045` answers
+//! The refusal is a message with no recipients, which Exchange Server SE `15.02.2562.056` answers
 //! with `ecInvalidRecips` — a name that does not lead a reader to expect it, and which
 //! [MS-OXOMSG] §3.3.5.1.1 does not list. Nothing is delivered, and the message is left exactly as
 //! it was: still `mfUnsent`, still deletable.

@@ -68,7 +68,7 @@ impl LongTermId {
     /// Little-endian because [MS-OXCDATA] §2 depicts every field in that order, and because a
     /// short-term id's own counter is read the same way — which is what makes the two comparable.
     /// The documents depict the field and never name its order, so this is a measurement: on
-    /// Exchange Server SE `15.02.2562.045`, converting the Inbox's own folder id with
+    /// Exchange Server SE `15.02.2562.056`, converting the Inbox's own folder id with
     /// `RopLongTermIdFromId` produced a long-term id whose counter read this way equals
     /// [`FolderId::global_counter`](crate::FolderId::global_counter) of the id it came from, for
     /// both lab mailboxes.
@@ -221,7 +221,7 @@ impl FolderEntryId {
     /// Whether this entry id was issued by the mailbox a logon reported.
     ///
     /// **This is the only thing that tells two mailboxes' folders apart.** Measured on Exchange
-    /// Server SE `15.02.2562.045`: the two lab mailboxes, provisioned in different languages,
+    /// Server SE `15.02.2562.056`: the two lab mailboxes, provisioned in different languages,
     /// report *identical* folder ids for six of their seven special folders — Calendar is
     /// `0x0D01000000000001` in both, Contacts `0x0E01000000000001`, and so on. A short-term id is
     /// only meaningful inside the logon that produced it, and here the numbers are literally the

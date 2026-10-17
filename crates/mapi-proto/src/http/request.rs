@@ -3,7 +3,7 @@
 //! The auxiliary buffer is sent **empty** throughout. [MS-OXCRPC] §3.1.4.1 fails a request only
 //! when the auxiliary length is between 1 and 7 — "you claimed a buffer too short to hold an
 //! `RPC_HEADER_EXT`". Zero is outside that band, which defers the whole auxiliary-block layer.
-//! Measured against Exchange Server SE `15.02.2562.045`: accepted on `Connect`, `Execute` and
+//! Measured against Exchange Server SE `15.02.2562.056`: accepted on `Connect`, `Execute` and
 //! `Disconnect` alike, `X-ResponseCode: 0` from all three.
 //!
 //! [MS-OXCMAPIHTTP] §2.2.2.1 — common request format
@@ -38,7 +38,7 @@ const CONNECT_CODE_PAGE: u32 = 1252;
 /// property of the Logon object — `PidTagLocaleId` for system-generated messages,
 /// `PidTagSortLocaleId` for table sorting — and is read after logon rather than set here.
 /// Connecting to an en-US mailbox under nl-NL was measured against Exchange Server SE
-/// `15.02.2562.045`: the hierarchy came back with its fifteen folder names byte-for-byte identical
+/// `15.02.2562.056`: the hierarchy came back with its fifteen folder names byte-for-byte identical
 /// to the en-US session's, `Inbox` still `Inbox`. The locale sent here asks for the session's
 /// treatment of data; it does not translate what the mailbox already holds.
 ///
@@ -63,7 +63,7 @@ impl Lcid {
     ///
     /// No validation happens here — [MS-LCID] assigns hundreds of values and which of them a
     /// deployment supports is not a question a client can answer offline — and, measured, none
-    /// happens at the far end either: Exchange Server SE `15.02.2562.045` accepted `Connect` with
+    /// happens at the far end either: Exchange Server SE `15.02.2562.056` accepted `Connect` with
     /// `0xDEADBEEF` and with `0` exactly as readily as with en-US, `X-ResponseCode: 0` every time.
     ///
     /// So a wrong identifier is not reported at connect time, and no ROP in [MS-OXCROPS] revisits

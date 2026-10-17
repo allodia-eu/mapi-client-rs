@@ -6,15 +6,15 @@
 //! difference that mattered would be lost in the noise. So "any difference at all is a finding"
 //! is the rule, and this module is what earns it.
 //!
-//! Four things qualify, each **measured** against Exchange Server SE `15.02.2562.045` rather than
+//! Four things qualify, each **measured** against Exchange Server SE `15.02.2562.056` rather than
 //! assumed:
 //!
 //! * `X-ElapsedTime` and `X-StartTime` in the response preamble — how long the server took, and
 //!   when it started. Rewritten to a single `0`, which is also the only normalisation here that
 //!   changes a length: two captures whose elapsed times were `5` and `12` would otherwise still
 //!   differ after being zeroed, in the width of the zeros.
-//! * `Connect`'s `RetryDelay`, observed as 13314, 13687 and 13835 ms on three consecutive connects
-//!   to the same server. It is per-connection advice, not a server constant.
+//! * `Connect`'s `RetryDelay`, observed anywhere from 11690 to 17560 ms across eight connects to
+//!   the same server. It is per-connection advice, not a server constant.
 //! * `RopLogon`'s `LogonTime` and `GwartTime` — the moment of the logon.
 //! * The **response auxiliary buffer**, which is removed entirely.
 //!
@@ -23,7 +23,7 @@
 //! Every request this workspace sends carries `AuxiliaryBufferSize = 0`, which Exchange accepts.
 //! The *response* is a different matter and is worth stating plainly, because the request-side
 //! finding is easy to over-read: a `Connect` response carries a substantial auxiliary buffer —
-//! 269 bytes on success and 1438 on a refusal, measured on `15.02.2562.045` — while an `Execute`
+//! 273 bytes on success and 1404 on a refusal, measured on `15.02.2562.056` — while an `Execute`
 //! response carries none.
 //!
 //! Its contents are `AUX_*` blocks holding the server's fully qualified name and per-connection

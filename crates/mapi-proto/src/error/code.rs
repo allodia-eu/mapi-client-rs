@@ -30,7 +30,7 @@ impl ErrorCode {
     /// The message could not be delivered to a recipient. `0x00000467`, `ecInvalidRecips`.
     ///
     /// **What Exchange answers a `RopSubmitMessage` on a message with no recipients at all**,
-    /// measured on Exchange Server SE `15.02.2562.045` — which the name does not lead a reader to
+    /// measured on Exchange Server SE `15.02.2562.056` — which the name does not lead a reader to
     /// expect, and which [MS-OXOMSG] §3.3.5.1.1 does not list among the refusals. The message is
     /// left exactly as it was: `mfUnsent` still set, `mfSubmitted` clear, and still deletable.
     ///
@@ -57,7 +57,7 @@ impl ErrorCode {
     /// Routine rather than exceptional, and the reason the stream ROPs exist: [MS-OXCDATA] §2.4.2
     /// says of it "on get, indicates that the property or column value is too large to be retrieved
     /// by the request, and the property value needs to be accessed with the `RopOpenStream` ROP".
-    /// Observed on Exchange Server SE `15.02.2562.045` for a 116,996-byte `PidTagBody` asked for
+    /// Observed on Exchange Server SE `15.02.2562.056` for a 116,996-byte `PidTagBody` asked for
     /// through `RopGetPropertiesSpecific`.
     ///
     /// [MS-OXCDATA] §2.4 lists the same numeric value under `OutOfMemory`, which is the general

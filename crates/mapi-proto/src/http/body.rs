@@ -114,9 +114,12 @@ mod tests {
     /// Easy to get the wrong way round: every *request* this crate sends declares
     /// `AuxiliaryBufferSize = 0`, which Exchange accepts, and that finding is what let the
     /// [MS-OXCRPC] auxiliary layer be deferred. The *response* is a separate question, and
-    /// measured against Exchange Server SE `15.02.2562.045` the answer is 269 bytes on a
-    /// successful `Connect` and 1438 on one refused with `ecUnknownUser` — `AUX_*` blocks holding
-    /// the server's fully qualified name and the connection's timings.
+    /// measured against Exchange Server SE `15.02.2562.056` the answer is 273 bytes on a
+    /// successful `Connect` and 1404 on one refused with `ecUnknownUser` — `AUX_*` blocks holding
+    /// the server's fully qualified name and the connection's timings. Neither size is a constant:
+    /// one block is text carrying the connect time and a connection number, and a refusal adds the
+    /// error text, which names the distinguished name sent. The first measurement, on
+    /// `15.02.2562.045`, was 269 and 1438.
     ///
     /// Nothing here reads them, and this is the test that says so on purpose rather than by
     /// accident: everything before the auxiliary buffer parses identically whether it is there or

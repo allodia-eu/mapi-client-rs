@@ -333,7 +333,7 @@ async fn the_session_cookies_are_echoed_on_every_later_request() {
 }
 
 /// `PING` needs no Session Context. The specification describes it as validating an existing one;
-/// Exchange Server SE `15.02.2562.045` answers `X-ResponseCode: 0` without one, which is what
+/// Exchange Server SE `15.02.2562.056` answers `X-ResponseCode: 0` without one, which is what
 /// makes it useful as a reachability check.
 ///
 /// [MS-OXCMAPIHTTP] §2.2.6 — `PING`

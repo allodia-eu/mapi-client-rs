@@ -55,7 +55,7 @@ impl ValueContext {
     /// of entries". Both are v20250520.
     ///
     /// **§2.11.1.1 is the one a real server follows**, measured on Exchange Server SE
-    /// `15.02.2562.045` against both lab mailboxes: `PidTagAdditionalRenEntryIds` read as a
+    /// `15.02.2562.056` against both lab mailboxes: `PidTagAdditionalRenEntryIds` read as a
     /// hierarchy-table column arrives as six binary values totalling 50 bytes, and two further
     /// columns placed *after* it still decode to the folder ids and names a read without it
     /// produced. At 16 bits those two columns would have started four bytes early. The test is

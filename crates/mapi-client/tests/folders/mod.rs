@@ -28,7 +28,7 @@ use super::client;
 /// folder. That is asserted below, by reading each one's properties.
 ///
 /// **Not every special folder is inside the IPM subtree.** Measured on Exchange Server SE
-/// `15.02.2562.045`: Reminders resolves to a folder that a recursive walk of the IPM subtree does
+/// `15.02.2562.056`: Reminders resolves to a folder that a recursive walk of the IPM subtree does
 /// not contain, which is not a bug — [MS-OXOSFLD] §3.1.1.1 puts Reminders directly under the Root
 /// folder, a sibling of Top of Personal Folders rather than a child of it. A client that located
 /// special folders by walking the user-visible tree would not find it at all.

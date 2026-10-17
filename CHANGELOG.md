@@ -15,6 +15,27 @@ Two conventions specific to this project:
 
 ## [Unreleased]
 
+Re-verified against Exchange Server SE `15.02.2562.056`, after security update KB5128895. The corpus re-captures with every request and response body byte for byte identical;
+only the `X-ServerApplication` each `.meta.txt` records has moved. The live suite passes 35 of 35
+for both lab mailboxes over each of Basic, NTLM and `Negotiate` — Kerberos, the child-realm user
+included — and the shared mailbox.
+
+Each version-tied claim in the source was re-measured before it was renumbered, by the corpus, the
+live suite, or a probe against the lab: 47 now name `15.02.2562.056`. The rest still name
+`15.02.2562.045`, where they were measured, because nothing has re-run them: the handshake details
+only a hand-built probe reaches (a forged `mechListMIC`, an all-zero `Bnd`, a missing channel
+binding), the `DeleteAfterSubmit` and `NoCopy` matrix, the stream ceiling, and observations of a
+mailbox as it was first provisioned.
+
+### Measured, and worth knowing
+
+- **The `Connect` response's auxiliary buffer has no fixed size.** 273 bytes on success and 1404 on
+  an `ecUnknownUser` refusal, where `15.02.2562.045` measured 269 and 1438. Not the update: one
+  `AUX_*` block is text carrying the connect time and a connection number, and a refusal adds error
+  text naming the distinguished name sent. Nothing reads it, and capture already removes it.
+- **`RetryDelay` ranged from 11690 to 17560 ms** across eight connects in half an hour, which is
+  what it means for it to be per-connection advice.
+
 ### Fixed
 
 - **`Write-FixtureManifest.ps1` named every scenario after its scratch directory** —

@@ -4,7 +4,7 @@
 //! which answers end the search; this one asks what happens *after* a search ends — how many more
 //! searches it starts, and what a mailbox has to carry before a session can be opened on it.
 //!
-//! The shape being tested is the one measured against Exchange Server SE `15.02.2562.045`:
+//! The shape being tested is the one measured against Exchange Server SE `15.02.2562.056`:
 //! Exchange names an alternative mailbox by SMTP address, never by distinguished name, so listing
 //! *n* mailboxes costs *n + 1* Autodiscover round trips and each alternative arrives with its own
 //! endpoint.

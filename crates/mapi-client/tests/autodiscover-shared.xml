@@ -6,7 +6,7 @@
   rather than one she owns.
 
   The two things that make this file worth having, both measured against Exchange Server SE
-  15.02.2562.045 before being written down here:
+  15.02.2562.056 before being written down here:
 
     * The MailboxId in the MailStore URL is the *shared* mailbox's, not alice's. The endpoint and
       the LegacyDN are a matched pair, and pairing alice's endpoint with this LegacyDN is refused

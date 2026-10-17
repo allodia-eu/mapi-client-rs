@@ -43,7 +43,7 @@ repository existed. Two findings make it tractable:
 > and open one on that account's own credentials. It authenticates with **`NTLM`** and
 > **`Negotiate`** as well as Basic, which is what a default-configured Exchange offers — and
 > `Negotiate` with **Kerberos**, across realms, NTLM behind it. All verified against Exchange Server
-> SE `15.02.2562.045`, in two mailboxes, in two languages, with mail actually sent between them, a
+> SE `15.02.2562.056`, in two mailboxes, in two languages, with mail actually sent between them, a
 > shared mailbox read by a delegate, and the whole suite run over each authentication scheme. The
 > gaps are stated below and in the changelog rather than left to be discovered.
 

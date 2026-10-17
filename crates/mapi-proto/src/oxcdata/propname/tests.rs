@@ -80,7 +80,7 @@ fn every_kind_round_trips_through_its_own_encoding() {
 /// [MS-OXCDATA] §2.6.1's diagram marks `LID`, `NameSize` and `Name` optional and `GUID` not, so a
 /// reading confined to that section has a `Kind` of `0xFF` still carrying sixteen bytes of property
 /// set. [MS-OXCPRPT] §3.2.5.9 step 3 governs this ROP and says there is no other return data for
-/// the entry; Exchange Server SE `15.02.2562.045` agrees with it, framing a 30-byte ROP whose last
+/// the entry; Exchange Server SE `15.02.2562.056` agrees with it, framing a 30-byte ROP whose last
 /// byte is the `0xFF`. Reading §2.6.1's sixteen bytes eats whatever comes next.
 #[test]
 fn an_id_with_no_name_is_the_kind_byte_and_nothing_else() {

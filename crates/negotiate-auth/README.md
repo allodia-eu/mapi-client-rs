@@ -159,7 +159,7 @@ types, SPNEGO carrying either, the message integrity codes and `tls-server-end-p
 are implemented, and checked against [MS-NLMP]'s published values and the RFC 3961, 3962 and 8009
 vectors. The whole of `mapi-client`'s live suite runs over NTLM, and over `Negotiate` authenticated
 with Kerberos — a user of a second realm included, reached by referral — against Exchange Server SE
-`15.02.2562.045`. No RC4 or DES, no FAST, no NTLM v1 or LM, no signing or sealing — each for a reason
+`15.02.2562.056`. No RC4 or DES, no FAST, no NTLM v1 or LM, no signing or sealing — each for a reason
 given above rather than as an omission to be discovered.
 
 ## Licence

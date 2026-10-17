@@ -270,7 +270,7 @@ async fn reading_store_properties_works_against_a_real_server() {
     );
 
     // **"All" does not mean every readable property.** Measured on Exchange Server SE
-    // `15.02.2562.045`: `PidTagMailboxOwnerEntryId` is absent from `RopGetPropertiesAll` and 151
+    // `15.02.2562.056`: `PidTagMailboxOwnerEntryId` is absent from `RopGetPropertiesAll` and 151
     // bytes long when asked for by name. [MS-OXCPRPT] §3.2.5.2 says the server returns the values
     // for all properties *on the object*, and §3.2.5.1 says an explicit fetch returns computed
     // properties too — so a computed property is not "on the object" and only the second ROP finds
