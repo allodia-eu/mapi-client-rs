@@ -74,7 +74,16 @@ $scenarios = @(Get-ChildItem -Path $Root -Directory -Recurse |
 $total = 0
 
 foreach ($scenario in $scenarios) {
-    $name = $scenario.FullName.Substring($Root.Length).TrimStart('\', '/').Replace('\', '/')
+    # Resolve-Path -Relative, not FullName.Substring($Root.Length) - the trap Get-FixtureFiles in
+    # Verify-Fixtures.ps1 describes. That script hands this one a -Root under $env:TEMP, which is
+    # the 8.3 short form (`ADMINI~1`) while an enumerated FullName is the long one, so trimming by
+    # length named every scenario `18596/exchange-se/...` after the scratch directory's own number.
+    Push-Location -LiteralPath $Root
+    try {
+        $name = (Resolve-Path -LiteralPath $scenario.FullName -Relative).TrimStart('.', '\', '/').Replace('\', '/')
+    } finally {
+        Pop-Location
+    }
 
     $lines.Add('')
     $lines.Add('[scenarios."' + $name + '"]')
