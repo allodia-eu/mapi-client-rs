@@ -70,6 +70,20 @@ behavioural change is not visible to `cargo-semver-checks` at all. Both are list
   the domain does not have; and no Kerberos for `DOMAIN\user`, because a NetBIOS domain is not a
   realm — give `user@realm`, or a realm with `Identity::realm`.
 
+- **Concurrent requests under NTLM and `Negotiate`.** A client using either authenticates up to four
+  connections — **`MapiClientBuilder::max_authenticated_connections`** says how many — and its
+  clones, and the clients `for_mailbox` makes, run their requests side by side on them, as they
+  always could under Basic. Each connection costs one handshake, the first time it is used.
+
+  Until one handshake to a server has worked the rest wait for it, and one that is refused refuses
+  the requests that were waiting rather than sending the same password once per connection: a
+  domain controller counts every refused handshake towards locking the account. The same holds
+  once a connection believed authenticated is refused, since the password may have changed, and
+  a request that waited is lent the connection the one before it authenticated, when that one is
+  idle by then. Handshakes that want a Kerberos ticket at once ask the KDC once, and no two
+  Kerberos messages carry the same time, which a server's replay cache would refuse ([RFC 4120]
+  §3.2.3).
+
 - **`NTLM` and `Negotiate` authentication**, in a new crate: **`mapi-auth`**. The gap the changelog
   has listed since `0.1.0` is closed, and with it the requirement that Basic be enabled on the MAPI
   virtual directory — a default-configured Exchange offers only these two schemes.
@@ -239,7 +253,14 @@ Open Specification feedback.
   Measured against a listener that stamps each response with its connection id: eight sequential
   requests all landed on one connection, four concurrent ones opened three. Since nothing in
   `reqwest` pins a request to a connection, that measurement *is* the guarantee a connection-bound
-  handshake rests on — hence the mutex and the pinned pool described under *Changed*.
+  handshake rests on — hence the client per connection described under *Changed*.
+- **…nearly always.** Four sessions opened at once over NTLM, each on a connection of its own, held
+  *five* connections rather than four while open. `hyper-util`'s pool, asked for a connection
+  before the last one is back, opens a second alongside and keeps whichever is ready first; the
+  fifth was a loser of that race. Had it won in the middle of a handshake, the next leg would have
+  reached a connection the server never challenged, and been refused as a wrong password is. So a
+  handshake checks which connection each reply came on, and starts again when a refusal arrived on
+  a different one from the challenge it answered.
 - **A refused credential and a restarted handshake are the same 401.** IIS reports a rejected
   password by offering the schemes again with no token attached. Read as a protocol error it sends
   the reader to the message encoding; this crate reports it as a refused credential.
@@ -343,16 +364,16 @@ Open Specification feedback.
   would only fail it less clearly.
 
 - **Choosing a connection-oriented scheme reconfigures the HTTP client.** `Credentials::Ntlm` and
-  `Credentials::Negotiate` make `MapiClientBuilder::build` pin the connection pool to one connection
-  per host, force HTTP/1.1, and retain the server certificate; the transport then serialises
-  requests through a mutex while such credentials are in use.
+  `Credentials::Negotiate` make `MapiClientBuilder::build` force HTTP/1.1, retain the server
+  certificate, and give **each connection an HTTP client of its own**, holding one idle connection
+  per host and lent to one request at a time.
 
   This is not a tuning choice. NTLM authenticates a TCP connection, `reqwest` offers no way to pin a
   request to one, and a handshake whose three legs land on different connections cannot complete —
-  so serialising is what makes the pool's behaviour deterministic. The cost is that **cloning such a
-  client no longer buys concurrency**, and that cost is unavoidable rather than merely accepted: two
-  concurrent requests would need two authenticated connections, and nothing could say which
-  handshake had gone to which. `Credentials::Basic` and `Credentials::Bearer` are unaffected.
+  so a client with one request in flight is what makes `reqwest`'s reuse of its connection
+  deterministic, and a client per connection is what says which handshake went to which. The cost
+  is a handshake per connection rather than per client. `Credentials::Basic` and
+  `Credentials::Bearer` are unaffected.
 - **The handshake legs are not reported to an `Observer`.** A leg is not a MAPI exchange — it has no
   `X-RequestType` and an empty body — so feeding one to the fixture recorder would write a file that
   is not a request/response pair. The exchange that carried the real request is observed as before,
@@ -396,7 +417,6 @@ Open Specification feedback.
   `rfGenerateReceiptOnly` is modelled and reachable from the library; the command line does not offer
   it, because sending a receipt without changing the read state is a thing a mail client does on the
   user's behalf rather than a thing a diagnostic tool should make easy.
-- **A client using a connection-oriented scheme does not run requests concurrently.** See *Changed*.
 - **Everything `0.3.0` listed that this release does not name above is still a gap**: an
   attachment's content is held in memory, an embedded message cannot be created, a recurrence is
   read rather than expanded, a meeting is not a meeting, and there is still no notification or

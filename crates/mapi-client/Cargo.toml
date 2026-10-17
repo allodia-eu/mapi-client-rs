@@ -22,7 +22,7 @@ autodiscover = ["dep:mapi-autodiscover"]
 # it adds two `Credentials` variants and nothing anywhere else changes. Turning it off drops four
 # hash crates and a mutex from the tree, and leaves a client that needs Basic or OAuth on the MAPI
 # virtual directory.
-ntlm = ["dep:mapi-auth", "dep:tokio", "dep:getrandom"]
+ntlm = ["dep:mapi-auth", "dep:tokio", "dep:getrandom", "dep:hyper-util"]
 # Kerberos inside `Negotiate`, tried first, with NTLM behind it — what a domain-joined Windows
 # client does. Additive: it adds `KdcLocator`, the `SrvResolver` trait and the builder step that
 # takes them, and makes `Credentials::Negotiate` offer Kerberos when a ticket can be had. It asks
@@ -63,6 +63,15 @@ reqwest = { version = "0.13", default-features = false, features = [
     "http2",
     "system-proxy",
 ] }
+
+# Named for one type: the `HttpInfo` reqwest's connections record in every response, whose local
+# address says which connection a handshake leg came back on — the only way to tell a refused
+# credential from a leg the pool moved to another connection. reqwest already enables both
+# features, so this adds nothing to the tree; the version is reqwest's own.
+hyper-util = { version = "0.1.20", default-features = false, features = [
+    "client-legacy",
+    "tokio",
+], optional = true }
 
 # `X-RequestId` and `X-ClientInfo` carry a GUID that [MS-OXCMAPIHTTP] §2.2.3.3.2 requires to be
 # unique per client instance. A sans-io crate cannot obtain randomness; this one can.

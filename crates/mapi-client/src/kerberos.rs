@@ -27,6 +27,7 @@ mod hickory;
 
 use core::future::Future;
 use core::pin::Pin;
+use core::sync::atomic::{AtomicU64, Ordering};
 use core::time::Duration;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -136,6 +137,9 @@ pub(crate) struct Kerberos {
     /// account, so a client that authenticates as someone else keeps it.
     realms: Arc<kdc::Realms>,
     cache: Mutex<Cache>,
+    /// Held while the KDCs are asked, so that connections authenticating at once ask once: the
+    /// rest wait, and find the ticket — or the reason there is none — in the cache.
+    asking: tokio::sync::Mutex<()>,
 }
 
 /// Tickets kept for reuse, all for the one account a client authenticates as.
@@ -171,6 +175,7 @@ impl Kerberos {
             locator,
             realms: Arc::default(),
             cache: Mutex::default(),
+            asking: tokio::sync::Mutex::default(),
         }
     }
 
@@ -225,6 +230,17 @@ impl Kerberos {
         service: &str,
         timeout: Duration,
     ) -> Result<Acquired> {
+        // A ticket already held needs no turn: the lock is for asking the KDCs, and a connection
+        // with a ticket to hand would otherwise wait out another service's KDC exchange for it.
+        if let Some(ticket) = self.cached(service, now()) {
+            return Ok(Acquired::Ticket(ticket));
+        }
+        let _asking = self.asking.lock().await;
+        // Another connection may have asked while this one waited, and come to nothing: a KDC
+        // that did not answer it would not answer this one either.
+        if let Some(reason) = self.unavailable(identity, service) {
+            return Ok(Acquired::Unavailable(reason));
+        }
         let acquired = self.acquire(identity, service, timeout).await?;
         if let Acquired::Unavailable(reason) = &acquired {
             let now = Instant::now();
@@ -247,19 +263,14 @@ impl Kerberos {
         timeout: Duration,
     ) -> Result<Acquired> {
         let now = now();
-        let (cached, mut tgt) = {
-            let cache = self.lock();
-            let cached = cache
-                .services
-                .iter()
-                .find(|(name, ticket)| name == service && fresh(ticket.expires(), now))
-                .map(|(_, ticket)| ticket.clone());
-            let tgt = cache.tgt.clone().filter(|tgt| fresh(tgt.expires(), now));
-            (cached, tgt)
-        };
-        if let Some(ticket) = cached {
+        if let Some(ticket) = self.cached(service, now) {
             return Ok(Acquired::Ticket(ticket));
         }
+        let mut tgt = self
+            .lock()
+            .tgt
+            .clone()
+            .filter(|tgt| fresh(tgt.expires(), now));
 
         let tickets = loop {
             let started = match &tgt {
@@ -296,6 +307,15 @@ impl Kerberos {
         Ok(Acquired::Ticket(ticket))
     }
 
+    /// The cached ticket for `service`, if it is still fresh at `now`.
+    fn cached(&self, service: &str, now: Duration) -> Option<ServiceTicket> {
+        self.lock()
+            .services
+            .iter()
+            .find(|(name, ticket)| name == service && fresh(ticket.expires(), now))
+            .map(|(_, ticket)| ticket.clone())
+    }
+
     /// Drops the cached ticket for `service`, which the server refused: a ticket under a key the
     /// service no longer has would otherwise be offered, and refused, until its end time.
     pub(crate) fn forget(&self, service: &str) {
@@ -309,6 +329,7 @@ impl Kerberos {
             locator: self.locator.clone(),
             realms: Arc::clone(&self.realms),
             cache: Mutex::default(),
+            asking: tokio::sync::Mutex::default(),
         }
     }
 
@@ -402,7 +423,26 @@ pub(crate) fn entropy() -> Result<KerberosEntropy> {
     getrandom::fill(&mut random).map_err(|error| Error::Setup {
         source: Box::new(error),
     })?;
-    Ok(KerberosEntropy::new(random, now()))
+    Ok(KerberosEntropy::new(random, stamp()))
+}
+
+/// The time for one Kerberos message: the clock's, but never the same twice in this process.
+///
+/// A server keeps the authenticators it has seen and rejects a second with the same time as a
+/// replay, so "Client implementations SHOULD ensure that the timestamps are not reused, possibly by
+/// incrementing the microseconds field in the time stamp when the clock returns the same time for
+/// multiple requests" ([RFC 4120] §3.2.3). Connections authenticating at once can build their
+/// AP-REQs within one tick of the clock; one after another, they could not.
+fn stamp() -> Duration {
+    static LAST: AtomicU64 = AtomicU64::new(0);
+    let clock = u64::try_from(now().as_micros()).unwrap_or(u64::MAX);
+    let next = |last: u64| clock.max(last.saturating_add(1));
+    let last = LAST
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |last| {
+            Some(next(last))
+        })
+        .unwrap_or_else(|last| last);
+    Duration::from_micros(next(last))
 }
 
 #[cfg(test)]

@@ -10,7 +10,7 @@ use crate::client::{Identity, MapiClient};
 use crate::credentials::Credentials;
 use crate::error::{Error, Result};
 use crate::observer::Observer;
-use crate::transport::Transport;
+use crate::transport::{HttpSettings, Transport};
 
 /// How long to wait for a whole request/response exchange.
 ///
@@ -77,6 +77,8 @@ pub struct MapiClientBuilder {
     /// it.
     #[cfg(feature = "kerberos")]
     pub(crate) kerberos: Arc<crate::kerberos::Kerberos>,
+    #[cfg(feature = "ntlm")]
+    pub(crate) connections: core::num::NonZeroUsize,
 }
 
 impl Default for MapiClientBuilder {
@@ -103,6 +105,8 @@ impl MapiClientBuilder {
             observer: None,
             #[cfg(feature = "kerberos")]
             kerberos: Arc::default(),
+            #[cfg(feature = "ntlm")]
+            connections: crate::transport::pool::DEFAULT_CONNECTIONS,
         }
     }
 
@@ -138,11 +142,15 @@ impl MapiClientBuilder {
     /// * **HTTP/1.1 only.** The lab's Exchange negotiates HTTP/2 by ALPN for an anonymous request,
     ///   and a multiplexed connection is not one a Windows-authentication handshake can be bound
     ///   to.
-    /// * **One connection per host, and one request at a time.** A handshake whose three legs land
-    ///   on different connections cannot complete, and nothing in `reqwest` pins a request to a
-    ///   connection — so the pool is pinned and the requests are serialised instead. Cloning the
-    ///   client does not get the concurrency back, and could not: two concurrent requests would
-    ///   need two authenticated connections.
+    /// * **One HTTP client per connection, lent to one request at a time.** A handshake whose three
+    ///   legs land on different connections cannot complete, and nothing in `reqwest` pins a
+    ///   request to a connection — so each connection is a client of its own, holding one idle
+    ///   connection per host. Concurrent requests authenticate a connection each, up to
+    #[cfg_attr(
+        feature = "ntlm",
+        doc = "   [`max_authenticated_connections`](Self::max_authenticated_connections)."
+    )]
+    #[cfg_attr(not(feature = "ntlm"), doc = "   `max_authenticated_connections`.")]
     /// * **The server certificate is retained**, because the channel binding that satisfies
     ///   Extended Protection is computed over it.
     ///
@@ -283,13 +291,21 @@ impl MapiClientBuilder {
     /// [`Error::Setup`] if a certificate will not parse or the TLS backend will not start.
     #[cfg(feature = "autodiscover")]
     pub(crate) fn http(&self) -> Result<reqwest::Client> {
-        crate::transport::http_client(
-            self.timeout,
-            self.connect_timeout,
-            &self.root_certificates,
-            self.accept_invalid_certificates,
-            self.credentials.is_connection_oriented(),
-        )
+        self.settings()?.client()
+    }
+
+    /// What every HTTP client these settings describe is built from: [`Error::Setup`] if a
+    /// certificate will not parse.
+    fn settings(&self) -> Result<HttpSettings> {
+        Ok(HttpSettings {
+            timeout: self.timeout,
+            connect_timeout: self.connect_timeout,
+            root_certificates: crate::transport::parse_certificates(&self.root_certificates)?,
+            accept_invalid_certificates: self.accept_invalid_certificates,
+            connection_oriented: self.credentials.is_connection_oriented(),
+            #[cfg(feature = "ntlm")]
+            connections: self.connections,
+        })
     }
 
     /// Whether a plaintext URL may be posted to. See
@@ -308,6 +324,7 @@ impl MapiClientBuilder {
     /// will POST to, and [`Error::Setup`] if the HTTP client itself cannot be built — a
     /// certificate that will not parse, or a TLS backend that will not start.
     pub fn build(self) -> Result<MapiClient> {
+        let settings = self.settings(); // Reported after the missing settings below are.
         let endpoint = self.endpoint.ok_or(Error::MissingSetting {
             name: "endpoint",
             how: "MapiClientBuilder::endpoint",
@@ -318,13 +335,8 @@ impl MapiClientBuilder {
         })?;
         let endpoint = parse_endpoint(&endpoint, self.allow_plaintext_http)?;
 
-        let http = crate::transport::http_client(
-            self.timeout,
-            self.connect_timeout,
-            &self.root_certificates,
-            self.accept_invalid_certificates,
-            self.credentials.is_connection_oriented(),
-        )?;
+        let settings = settings?;
+        let http = settings.client()?;
 
         #[cfg(feature = "kerberos")]
         let kerberos = Some(self.kerberos);
@@ -335,8 +347,7 @@ impl MapiClientBuilder {
                 http,
                 endpoint,
                 self.credentials,
-                self.timeout,
-                self.connect_timeout,
+                &settings,
                 self.observer,
                 kerberos,
             ),

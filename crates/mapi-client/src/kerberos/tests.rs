@@ -324,6 +324,82 @@ async fn a_refused_tgt_is_replaced_from_the_password() {
     );
 }
 
+/// Connections authenticating at once ask the KDCs once: the rest wait for that answer, and find
+/// the ticket in the cache.
+#[tokio::test]
+async fn connections_that_want_a_ticket_at_once_ask_for_it_once() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
+    let kdc = Arc::new(
+        mapi_auth::testing::TestKdc::new(
+            "EXAMPLE.TEST",
+            "alice@example.test",
+            "hunter2",
+            "HTTP/mail.example.test",
+            now,
+        )
+        .unwrap(),
+    );
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let answered = Arc::new(AtomicUsize::new(0));
+    let (count, server) = (Arc::clone(&answered), Arc::clone(&kdc));
+    tokio::spawn(async move {
+        while let Ok((mut stream, _)) = listener.accept().await {
+            let (count, server) = (Arc::clone(&count), Arc::clone(&server));
+            tokio::spawn(async move {
+                let mut prefix = [0u8; 4];
+                stream.read_exact(&mut prefix).await.unwrap();
+                let mut request = vec![0u8; usize::try_from(u32::from_be_bytes(prefix)).unwrap()];
+                stream.read_exact(&mut request).await.unwrap();
+                count.fetch_add(1, Ordering::SeqCst);
+                let reply = server.answer(&request);
+                let mut framed = u32::try_from(reply.len()).unwrap().to_be_bytes().to_vec();
+                framed.extend_from_slice(&reply);
+                stream.write_all(&framed).await.unwrap();
+            });
+        }
+    });
+
+    let kerberos = Kerberos::new(KdcLocator::new().kdc("EXAMPLE.TEST", address));
+    let alice = alice();
+    let ask = || kerberos.ticket(&alice, "HTTP/mail.example.test", Duration::new(5, 0));
+    let (first, second, third) = tokio::join!(ask(), ask(), ask());
+    for acquired in [first, second, third] {
+        assert!(matches!(acquired, Ok(Acquired::Ticket(_))), "{acquired:?}");
+    }
+    assert_eq!(answered.load(Ordering::SeqCst), 3, "AS, AS, TGS: once");
+}
+
+/// No two messages carry the same time, however close together they are built — on one thread or
+/// on several.
+#[test]
+fn no_two_messages_carry_the_same_time() {
+    let mut stamps: Vec<Duration> = std::thread::scope(|scope| {
+        let threads: Vec<_> = (0..4)
+            .map(|_| scope.spawn(|| (0..1000).map(|_| stamp()).collect::<Vec<_>>()))
+            .collect();
+        threads
+            .into_iter()
+            .flat_map(|thread| {
+                let stamps = thread.join().unwrap();
+                assert!(stamps.windows(2).all(|pair| pair[0] < pair[1]));
+                stamps
+            })
+            .collect()
+    });
+    stamps.sort_unstable();
+    stamps.dedup();
+    assert_eq!(stamps.len(), 4000);
+    let drift = stamps.last().unwrap().saturating_sub(now());
+    assert!(
+        drift < Duration::from_secs(1),
+        "ahead of the clock by {drift:?}"
+    );
+}
+
 /// A refusal of the TGT itself is told apart from one of the credential, and from the rest: it is
 /// the one the password may yet get past.
 #[test]

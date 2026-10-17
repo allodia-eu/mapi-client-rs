@@ -8,6 +8,8 @@
 
 #[cfg(feature = "ntlm")]
 mod negotiated;
+#[cfg(feature = "ntlm")]
+pub(crate) mod pool;
 
 use core::time::Duration;
 use std::sync::Arc;
@@ -34,12 +36,12 @@ pub(crate) struct Transport {
     #[cfg(feature = "ntlm")]
     pub(crate) kdc_timeout: Duration,
     pub(crate) observer: Option<Arc<dyn Observer>>,
-    /// Whether this transport's connection has already been authenticated, and the lock that keeps
-    /// only one request at a time near it.
+    /// The connections NTLM and `Negotiate` authenticate, each lent to one request at a time.
     ///
-    /// Shared across clones, because clones share the connection pool that the state is about.
+    /// Shared across clones, and with every client [`for_mailbox`](crate::MapiClient::for_mailbox)
+    /// makes, so that the limit on them is one limit.
     #[cfg(feature = "ntlm")]
-    pub(crate) connection: Arc<tokio::sync::Mutex<negotiated::ConnectionAuth>>,
+    pub(crate) pool: Arc<pool::Pool>,
     /// The KDCs and the tickets got from them, shared with the builder this came from, with its
     /// clones and with every client [`for_mailbox`](crate::MapiClient::for_mailbox) makes.
     #[cfg(feature = "ntlm")]
@@ -62,54 +64,81 @@ pub(crate) struct Reply {
     /// The server's certificate, in DER, for computing a channel binding.
     #[cfg(feature = "ntlm")]
     certificate: Option<Vec<u8>>,
+    /// The connection it came on. See [`connection`].
+    #[cfg(feature = "ntlm")]
+    connection: Option<core::net::SocketAddr>,
 }
 
-/// Builds the underlying HTTP client.
-///
-/// Redirects are **not** followed. A MAPI endpoint has no reason to redirect, and following one
-/// would mean deciding whether to carry the `Authorization` header to wherever it points. A 3xx is
-/// reported as [`Error::Http`] instead, which says where the server tried to send us.
-///
-/// `connection_oriented` says whether the credentials authenticate a connection rather than a
-/// request, which changes three settings. See
-/// [`MapiClientBuilder::credentials`](crate::MapiClientBuilder::credentials) for what and why.
-pub(crate) fn http_client(
-    timeout: Duration,
-    connect_timeout: Duration,
-    root_certificates: &[Vec<u8>],
-    accept_invalid_certificates: bool,
-    connection_oriented: bool,
-) -> Result<Client> {
-    let mut builder = Client::builder()
-        .user_agent(concat!(
-            env!("CARGO_PKG_NAME"),
-            "/",
-            env!("CARGO_PKG_VERSION")
-        ))
-        .redirect(reqwest::redirect::Policy::none())
-        .timeout(timeout)
-        .connect_timeout(connect_timeout)
-        .danger_accept_invalid_certs(accept_invalid_certificates);
+/// What every HTTP client a builder makes is built from — kept after the first, because the pool
+/// of authenticated connections builds a client per connection, as it needs one.
+#[derive(Clone, Debug)]
+pub(crate) struct HttpSettings {
+    pub(crate) timeout: Duration,
+    pub(crate) connect_timeout: Duration,
+    /// Parsed once, by [`parse_certificates`], rather than by every client built from these.
+    pub(crate) root_certificates: Arc<[reqwest::Certificate]>,
+    pub(crate) accept_invalid_certificates: bool,
+    /// Whether the credentials authenticate a connection rather than a request, which changes
+    /// three settings. See
+    /// [`MapiClientBuilder::credentials`](crate::MapiClientBuilder::credentials) for what and
+    /// why.
+    pub(crate) connection_oriented: bool,
+    /// How many connections NTLM and `Negotiate` may authenticate at once.
+    #[cfg(feature = "ntlm")]
+    pub(crate) connections: core::num::NonZeroUsize,
+}
 
-    if connection_oriented {
-        builder = builder
-            .http1_only()
-            .pool_max_idle_per_host(1)
-            .tls_info(true);
+impl HttpSettings {
+    /// Builds an HTTP client.
+    ///
+    /// Redirects are **not** followed. A MAPI endpoint has no reason to redirect, and following
+    /// one would mean deciding whether to carry the `Authorization` header to wherever it points.
+    /// A 3xx is reported as [`Error::Http`] instead, which says where the server tried to send us.
+    pub(crate) fn client(&self) -> Result<Client> {
+        let mut builder = Client::builder()
+            .user_agent(concat!(
+                env!("CARGO_PKG_NAME"),
+                "/",
+                env!("CARGO_PKG_VERSION")
+            ))
+            .redirect(reqwest::redirect::Policy::none())
+            .timeout(self.timeout)
+            .connect_timeout(self.connect_timeout)
+            .danger_accept_invalid_certs(self.accept_invalid_certificates);
+
+        if self.connection_oriented {
+            builder = builder
+                .http1_only()
+                .pool_max_idle_per_host(1)
+                .tls_info(true);
+        }
+
+        for certificate in self.root_certificates.iter() {
+            builder = builder.add_root_certificate(certificate.clone());
+        }
+
+        builder.build().map_err(|error| Error::Setup {
+            source: Box::new(error),
+        })
     }
+}
 
-    for certificate in root_certificates {
-        let certificate = reqwest::Certificate::from_pem(certificate)
-            .or_else(|_| reqwest::Certificate::from_der(certificate))
-            .map_err(|error| Error::Setup {
-                source: Box::new(error),
-            })?;
-        builder = builder.add_root_certificate(certificate);
-    }
-
-    builder.build().map_err(|error| Error::Setup {
-        source: Box::new(error),
-    })
+/// Parses each certificate as PEM, or failing that as DER.
+///
+/// # Errors
+///
+/// [`Error::Setup`] for the first that is neither.
+pub(crate) fn parse_certificates(pem_or_der: &[Vec<u8>]) -> Result<Arc<[reqwest::Certificate]>> {
+    pem_or_der
+        .iter()
+        .map(|certificate| {
+            reqwest::Certificate::from_pem(certificate)
+                .or_else(|_| reqwest::Certificate::from_der(certificate))
+                .map_err(|error| Error::Setup {
+                    source: Box::new(error),
+                })
+        })
+        .collect()
 }
 
 /// The Kerberos side a transport is built with: the builder's, shared — or, without the
@@ -121,28 +150,28 @@ pub(crate) type KerberosSide = Option<Arc<crate::handshake::Kdcs>>;
 pub(crate) type KerberosSide = Option<core::convert::Infallible>;
 
 impl Transport {
-    /// A transport over `http` to `endpoint`, with a connection of its own not yet authenticated.
+    /// A transport over `http`, built from `settings`, to `endpoint` — with no connection yet
+    /// authenticated.
     pub(crate) fn new(
         http: Client,
         endpoint: Url,
         credentials: Credentials,
-        timeout: Duration,
-        connect_timeout: Duration,
+        settings: &HttpSettings,
         observer: Option<Arc<dyn Observer>>,
         kerberos: KerberosSide,
     ) -> Self {
         #[cfg(not(feature = "ntlm"))]
-        let _ = (kerberos, connect_timeout);
+        let _ = kerberos;
         Self {
+            #[cfg(feature = "ntlm")]
+            pool: Arc::new(pool::Pool::new(http.clone(), settings.clone())),
             http,
             endpoint,
             credentials,
-            timeout,
+            timeout: settings.timeout,
             #[cfg(feature = "ntlm")]
-            kdc_timeout: connect_timeout,
+            kdc_timeout: settings.connect_timeout,
             observer,
-            #[cfg(feature = "ntlm")]
-            connection: Arc::default(),
             #[cfg(feature = "ntlm")]
             kerberos,
             #[cfg(feature = "ntlm")]
@@ -161,17 +190,22 @@ impl Transport {
             return self.send_negotiated(request, scheme, identity).await;
         }
 
-        let reply = self.post(Some(request), None).await?;
+        let reply = self.post(&self.http, Some(request), None).await?;
         self.finish(request, reply)
     }
 
-    /// POSTs once, with an optional MAPI request and an optional `Authorization` value.
+    /// POSTs once over `http`, with an optional MAPI request and an optional `Authorization` value.
     ///
     /// Both are optional because a handshake leg is neither: it carries no MAPI request — the
     /// server will answer 401 before anything reaches the protocol — and it carries an
     /// `Authorization` header this crate computed rather than one derived from the credentials.
-    async fn post(&self, request: Option<&Request>, authorization: Option<&str>) -> Result<Reply> {
-        let mut builder = self.http.post(self.endpoint.clone());
+    async fn post(
+        &self,
+        http: &Client,
+        request: Option<&Request>,
+        authorization: Option<&str>,
+    ) -> Result<Reply> {
+        let mut builder = http.post(self.endpoint.clone());
         if let Some(request) = request {
             for (name, value) in request.headers() {
                 builder = builder.header(name, value);
@@ -212,7 +246,7 @@ impl Transport {
         let status = response.status();
         let challenges = challenges(&response);
         #[cfg(feature = "ntlm")]
-        let certificate = peer_certificate(&response);
+        let (certificate, connection) = (peer_certificate(&response), connection(&response));
         let headers = read_headers(&response);
 
         // Read whatever the status, so that an observer sees the refusals too — a 401 body and a
@@ -233,6 +267,8 @@ impl Transport {
             challenges,
             #[cfg(feature = "ntlm")]
             certificate,
+            #[cfg(feature = "ntlm")]
+            connection,
         })
     }
 
@@ -336,6 +372,18 @@ pub(crate) fn peer_certificate(response: &Response) -> Option<Vec<u8>> {
         .extensions()
         .get::<reqwest::tls::TlsInfo>()
         .and_then(|info| info.peer_certificate().map(<[u8]>::to_vec))
+}
+
+/// The connection a response came on, by its local address — which tells a handshake whether its
+/// legs stayed on one, since nothing can make them. See [`moved`](crate::handshake::moved).
+///
+/// `None` when the HTTP client did not record it, which every connection `reqwest` opens does.
+#[cfg(feature = "ntlm")]
+pub(crate) fn connection(response: &Response) -> Option<core::net::SocketAddr> {
+    response
+        .extensions()
+        .get::<hyper_util::client::legacy::connect::HttpInfo>()
+        .map(hyper_util::client::legacy::connect::HttpInfo::local_addr)
 }
 
 /// Copies the response headers into the codec's neutral header type.

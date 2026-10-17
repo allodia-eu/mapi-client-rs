@@ -9,6 +9,7 @@
 //! The module is feature-gated on `ntlm`, and with the `kerberos` module it is the only place in
 //! this crate that names [`mapi_auth`] types other than in the [`Credentials`] variants themselves.
 
+use core::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use mapi_auth::{ChannelBinding, Entropy, Handshake, Identity, Mechanism, Scheme, State};
@@ -52,6 +53,29 @@ pub struct Authentication {
 /// choice of NTLM over the ticket — which costs that mechanism's three messages — and a
 /// `request-mic`, at most, before a 401 is taken as the answer.
 pub(crate) const MAX_LEGS: usize = 4;
+
+/// How many times a handshake is started when the pool keeps moving it to another connection, the
+/// last of them taken as the answer. See [`moved`].
+pub(crate) const MAX_ATTEMPTS: usize = 3;
+
+/// Whether a 401 came back on a different connection from the one whose challenge it answered —
+/// which says nothing about the credential, and everything about the pool.
+///
+/// `reqwest` cannot be told which connection to use. The pool underneath it, asked for one before
+/// the last has been handed back, opens another at the same time and takes whichever is ready
+/// first, keeping the other (`hyper-util` 0.1.20, `client/legacy/client.rs`). The new one nearly
+/// always loses — measured against Exchange Server SE `15.02.2562.045`, four sessions opened at
+/// once over NTLM held five connections rather than four, the fifth the loser — but when it wins,
+/// the next leg of a handshake reaches a connection the server never challenged, and its 401 there
+/// is the one a wrong password earns. Which connection a reply came on is what tells the two apart.
+///
+/// The local address is the only name `reqwest` gives a connection, and it names one only while
+/// that connection is open: one closed and replaced on the same port within a handshake reads as
+/// unmoved. That takes the operating system handing out the port it has just released, and costs
+/// what this check's absence would — the refusal reported as it stands.
+pub(crate) fn moved(answered: Option<SocketAddr>, refused_on: Option<SocketAddr>) -> bool {
+    matches!((answered, refused_on), (Some(answered), Some(refused_on)) if answered != refused_on)
+}
 
 /// A handshake in flight, between its first message and its last.
 #[derive(Debug)]

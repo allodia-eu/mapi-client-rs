@@ -175,10 +175,12 @@ let client = MapiClient::builder()
 ```
 
 Both are multi-leg handshakes that authenticate a **TCP connection** rather than a request, so
-choosing one pins the connection pool and serialises requests — a clone of such a client does not
-add concurrency, and could not. The handshakes themselves live in [`mapi-auth`](crates/mapi-auth),
-which is sans-io for the same reason `mapi-proto` is: [MS-NLMP]'s published test vectors are only
-reproducible when the client challenge and the timestamp are inputs rather than ambient.
+choosing one gives each connection an HTTP client of its own, lent to one request at a time.
+Clones run their requests side by side, each connection authenticated once, on four connections
+unless `max_authenticated_connections` says otherwise. The handshakes themselves live in
+[`mapi-auth`](crates/mapi-auth), which is sans-io for the same reason `mapi-proto` is: [MS-NLMP]'s
+published test vectors are only reproducible when the client challenge and the timestamp are inputs
+rather than ambient.
 
 **`Negotiate` offers Kerberos first**, as a domain-joined Windows client does, when the account is
 named `user@realm` and a ticket can be had — KDCs found through DNS SRV records, by a resolver your
