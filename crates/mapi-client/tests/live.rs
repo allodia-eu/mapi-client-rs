@@ -50,8 +50,15 @@ mod writes;
 mod acts;
 
 /// A mailbox the authenticated account does not own: listing it, opening it, and the pairing
-/// mistake that opening one invites. The only suite whose subject is not a ROP.
+/// mistake that opening one invites. The only suite whose subject is not a ROP, and the only one
+/// that needs `autodiscover`: Autodiscover is the only place a shared mailbox is ever named.
+#[cfg(feature = "autodiscover")]
 mod shared;
+
+/// A wrong password under each authentication scheme, and the fact that all of them reach the same
+/// mailbox. The only suite that builds its own clients rather than using `builder()` — which it has
+/// to, since the whole question is what happens when the credentials differ.
+mod schemes;
 
 /// Reads one of the variables that describe the lab, failing with the name of the missing one.
 ///
@@ -73,11 +80,28 @@ fn builder() -> MapiClientBuilder {
     MapiClient::builder()
         .endpoint(required("MAPI_LIVE_ENDPOINT"))
         .user_dn(LegacyDn::new(required("MAPI_LIVE_USER_DN")).expect("a usable legacyExchangeDN"))
-        .credentials(Credentials::basic(
+        .credentials(credentials_for(
             required("MAPI_LIVE_USERNAME"),
             required("MAPI_LIVE_PASSWORD"),
         ))
         .timeout(LIVE_TIMEOUT)
+}
+
+/// The credentials `MAPI_LIVE_AUTH` asks for, defaulting to Basic, for any lab account.
+///
+/// Reading the scheme from the environment rather than hard-coding Basic is what lets the whole
+/// suite be run three times over — once per scheme — instead of one scheme being proved by one
+/// test while every other one only ever exercises Basic. Any account, because the send test's
+/// second session was once quietly Basic in a run that had been asked to be NTLM.
+fn credentials_for(username: String, password: String) -> Credentials {
+    match std::env::var("MAPI_LIVE_AUTH").unwrap_or_default().as_str() {
+        #[cfg(feature = "ntlm")]
+        "ntlm" => Credentials::ntlm(&username, password),
+        #[cfg(feature = "ntlm")]
+        "negotiate" => Credentials::negotiate(&username, password),
+        "" | "basic" => Credentials::basic(username, password),
+        other => panic!("MAPI_LIVE_AUTH={other} is not basic, ntlm or negotiate"),
+    }
 }
 
 fn client() -> MapiClient {
@@ -524,31 +548,4 @@ async fn a_multivalued_column_decodes_at_the_documented_count_width() {
     );
 
     logon.disconnect().await.expect("Disconnect");
-}
-
-/// Credentials the server will not accept must be reported as a refusal naming the schemes it
-/// does accept — the diagnosis that distinguishes a wrong password from an unsupported scheme.
-#[tokio::test]
-#[ignore = "needs a live Exchange Server; run scripts\\Test-Live.ps1"]
-async fn a_wrong_password_is_reported_as_a_refusal_not_a_mystery() {
-    let client = MapiClient::builder()
-        .endpoint(required("MAPI_LIVE_ENDPOINT"))
-        .user_dn(LegacyDn::new(required("MAPI_LIVE_USER_DN")).expect("a usable legacyExchangeDN"))
-        .credentials(Credentials::basic(
-            required("MAPI_LIVE_USERNAME"),
-            "definitely-not-the-password",
-        ))
-        .timeout(LIVE_TIMEOUT)
-        .build()
-        .expect("a client");
-
-    let error = client
-        .ping()
-        .await
-        .expect_err("a wrong password is refused");
-    println!("{error}");
-    assert!(
-        matches!(error, mapi_client::Error::Unauthorized { .. }),
-        "{error:?}"
-    );
 }

@@ -5,7 +5,7 @@ use crate::mailbox::MailboxAddress;
 const EXCHANGE_SE: &str = include_str!("../../tests/exchange-se-mapihttp.xml");
 
 /// The query parameter Exchange puts on both MAPI URLs.
-const MAILBOX_ID: &str = "?MailboxId=00000000-0000-0000-0000-000000000000@dev.local";
+const MAILBOX_ID: &str = "?MailboxId=00000000-0000-0000-0000-000000000000@lab.local";
 
 /// Wraps a fragment in the two elements every response has, so the fragments stay readable.
 fn response(inner: &str) -> String {
@@ -47,7 +47,7 @@ fn the_user_element_is_read_whole() {
     let user = settings.user();
 
     assert_eq!(user.display_name(), Some("Lab Test User"));
-    assert_eq!(user.smtp_address(), Some("developer@dev.local"));
+    assert_eq!(user.smtp_address(), Some("developer@lab.local"));
     assert_eq!(
         user.deployment_id(),
         Some("00000000-0000-0000-0000-000000000000")
@@ -96,8 +96,8 @@ fn the_shared_mailbox_in_the_capture_is_read_whole() {
 
     assert_eq!(*shared.kind(), MailboxKind::Delegate);
     assert_eq!(shared.display_name(), Some("Shared Mailbox"));
-    assert_eq!(shared.smtp_address(), Some("shared@dev.local"));
-    assert_eq!(shared.owner_smtp_address(), Some("shared@dev.local"));
+    assert_eq!(shared.smtp_address(), Some("shared@lab.local"));
+    assert_eq!(shared.owner_smtp_address(), Some("shared@lab.local"));
 }
 
 /// **Measured against Exchange Server SE `15.02.2562.045`, and the reason opening one costs a
@@ -115,7 +115,7 @@ fn exchange_names_a_shared_mailbox_by_address_rather_than_by_distinguished_name(
     assert_eq!(shared.server(), None);
     assert_eq!(
         shared.address(),
-        Some(MailboxAddress::Smtp("shared@dev.local"))
+        Some(MailboxAddress::Smtp("shared@lab.local"))
     );
 }
 

@@ -11,10 +11,16 @@ without "the spec says Y" is unverifiable.
 
 ## Pinned documents
 
-Fifteen of the seventeen share one release; [MS-OXDSCLI] and [MS-OXOCAL] were revised three months
-later, which is exactly the drift the version pin exists to make visible. This table is the single
-source of truth: `scripts/Get-Specs.ps1` parses it to download, and `scripts/Check-SpecVersion.ps1`
-parses it to verify.
+Fifteen of the nineteen share one release; [MS-OXDSCLI] and [MS-OXOCAL] were revised three months
+later, and the two authentication documents are on their own schedule entirely — which is exactly
+the drift the version pin exists to make visible. This table is the single source of truth:
+`scripts/Get-Specs.ps1` parses it to download, and `scripts/Check-SpecVersion.ps1` parses it to
+verify.
+
+Note the **two hosts**. The Exchange documents are published under `officeprotocoldoc`; [MS-NLMP]
+and [MS-SPNG] are Windows protocols and live under `winprotocoldoc`. The URL is read from this
+table rather than composed from the document name, so the split costs nothing — but a row added by
+copying the one above it will 404.
 
 <!-- SPEC-TABLE-START -->
 
@@ -37,10 +43,18 @@ parses it to verify.
 | MS-OXCICAL | v20250520 | 247 | iCalendar to Appointment Object conversion algorithm | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCICAL/%5bMS-OXCICAL%5d.pdf |
 | MS-OXDISCO | v20250520 | 26 | Autodiscover HTTP Service — where to look for the service | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXDISCO/%5bMS-OXDISCO%5d.pdf |
 | MS-OXDSCLI | v20250819 | 53 | Autodiscover Publishing and Lookup — the XML, and the mapiHttp block | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXDSCLI/%5bMS-OXDSCLI%5d.pdf |
+| MS-NLMP | v20260330 | 99 | NTLM authentication — the three messages, NTLM v2 and the MIC | https://winprotocoldoc.z19.web.core.windows.net/MS-NLMP/%5bMS-NLMP%5d.pdf |
+| MS-SPNG | v20260714 | 33 | SPNEGO, which is what the `Negotiate` scheme negotiates with | https://winprotocoldoc.z19.web.core.windows.net/MS-SPNG/%5bMS-SPNG%5d.pdf |
 
 <!-- SPEC-TABLE-END -->
 
-Fifteen released **20 May 2025**; [MS-OXDSCLI] and [MS-OXOCAL] on **19 August 2025**.
+Fifteen released **20 May 2025**; [MS-OXDSCLI] and [MS-OXOCAL] on **19 August 2025**; [MS-NLMP] on
+**30 March 2026** and [MS-SPNG] on **14 July 2026**.
+
+The two authentication documents were added when the client learned to speak `NTLM` and
+`Negotiate`. They earn their place for the same reason the rest do — [MS-NLMP] §4.2 publishes
+worked cryptographic values, and reproducing them is the difference between an implementation that
+is right and one that has only ever been tried against one server.
 
 [MS-OXOCAL]'s later date was read off the PDF when it was pinned, not inherited from the documents
 it arrived with. That is the rule generally: a version in this table asserts that somebody extracted
@@ -48,7 +62,7 @@ that stamp from that file, so a row is added by measuring, never by copying the 
 
 ## URLs in the repository, PDFs never
 
-`scripts/Get-Specs.ps1` reads the table above, downloads all seventeen documents into a **gitignored
+`scripts/Get-Specs.ps1` reads the table above, downloads all nineteen documents into a **gitignored
 `spec/`** directory, and extracts each to text alongside it. A fresh clone is therefore one command
 away from having the authoritative sources, and the repository carries no Microsoft PDFs.
 
@@ -59,7 +73,7 @@ powershell.exe -File scripts\Get-Specs.ps1
 The Microsoft IP notice permits local copies "in order to develop implementations", but committing
 58 MB of Microsoft PDFs to a public repository is both unnecessary and muddies the licensing story.
 
-The `spec/*.txt` extracts are the useful artefact day to day: 1,969 pages of PDF are painful to
+The `spec/*.txt` extracts are the useful artefact day to day: 2,101 pages of PDF are painful to
 search, but `Select-String` over the text extracts is instant.
 
 ```powershell
@@ -82,7 +96,7 @@ log before touching any code.
 ## Citation rule
 
 **Every protocol item cites its source in a doc comment** — `[MS-OXCROPS] §2.2.4.1.1`, not just
-"the spec". With 1,969 pages across seventeen documents, an uncited constant is unverifiable in
+"the spec". With 2,101 pages across nineteen documents, an uncited constant is unverifiable in
 practice, which in a binary protocol means it is indistinguishable from a transcription error.
 
 [MS-OXPROPS] is the one to reach for first when a property constant needs a citation. It is a

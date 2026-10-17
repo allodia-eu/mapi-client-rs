@@ -18,8 +18,8 @@ use super::{LIVE_TIMEOUT, builder, client, required};
 /// The lab's Autodiscover service, taken from the host already in `MAPI_LIVE_ENDPOINT`.
 ///
 /// **Why `mailboxes_at` rather than `mailboxes` here**, which is a fact about lab certificates and
-/// not about this client: [MS-OXDISCO] §3.1.5.2's candidate sequence asks `dev.local` and
-/// `autodiscover.dev.local`, and a lab certificate issued for the machine name alone matches
+/// not about this client: [MS-OXDISCO] §3.1.5.2's candidate sequence asks the mail domain and
+/// `autodiscover.` in front of it, and a lab certificate issued for the machine name alone matches
 /// neither — so every candidate fails its TLS handshake, is skipped as "did not answer", and the
 /// documented sequence finds nothing on a deployment that works perfectly well. Naming the service
 /// directly is exactly what that method is for. A deployment with a certificate covering its own

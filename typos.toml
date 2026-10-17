@@ -12,6 +12,12 @@ extend-exclude = [
 extend-ignore-identifiers-re = [
     "\\b[0-9a-f]{7,40}\\b",
 ]
+# The last token IIS sends to complete a Negotiate handshake, in base64: `A1 07 30 05 A0 03 0A 01
+# 00`, a NegTokenResp that is accept-completed and nothing else. Quoted where it is measured and
+# where it is replayed; the `Ba` inside it reads as a misspelling of "by".
+extend-ignore-re = [
+    "oQcwBaADCgEA",
+]
 
 [default.extend-words]
 # MAPI/Exchange vocabulary that reads as a typo to a spell checker.

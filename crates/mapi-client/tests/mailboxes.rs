@@ -9,6 +9,7 @@
 //! *n* mailboxes costs *n + 1* Autodiscover round trips and each alternative arrives with its own
 //! endpoint.
 
+#![cfg(feature = "autodiscover")]
 #![allow(
     clippy::unwrap_used,
     clippy::expect_used,
@@ -260,5 +261,30 @@ async fn an_account_with_no_alternatives_costs_one_lookup() {
 
     assert_eq!(mailboxes.len(), 1);
     assert!(mailboxes[0].is_own());
+    assert_eq!(server.received_requests().await.unwrap().len(), 1);
+}
+
+/// An account whose own settings carry no `mapiHttp` block is refused, not listed without its own
+/// mailbox. Listing only the alternatives would put a delegate's mailbox at `[0]`, where every
+/// caller is promised the account's own — and nothing is spent looking those alternatives up.
+#[tokio::test]
+async fn an_account_without_a_mapi_endpoint_is_refused_even_with_alternatives() {
+    let server = MockServer::start().await;
+    let without = SETTINGS.replace(r#"Type="mapiHttp""#, r#"Type="EXCH""#);
+    Mock::given(method("POST"))
+        .respond_with(ResponseTemplate::new(200).set_body_string(without))
+        .mount(&server)
+        .await;
+
+    let error = builder()
+        .mailboxes_at(url(&server), &address())
+        .await
+        .unwrap_err();
+
+    let Error::NoEndpoint { address, tried } = &error else {
+        panic!("expected NoEndpoint, got {error:?}");
+    };
+    assert_eq!(address, "alice@example.test");
+    assert_eq!(tried, &[url(&server)]);
     assert_eq!(server.received_requests().await.unwrap().len(), 1);
 }

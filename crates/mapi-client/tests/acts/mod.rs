@@ -26,7 +26,7 @@ use mapi_client::{
 };
 
 use crate::writes::{MARKER, string};
-use crate::{LIVE_TIMEOUT, client, required};
+use crate::{LIVE_TIMEOUT, client, credentials_for, required};
 
 /// The second lab mailbox, for the one test that needs to read what the first one sent.
 ///
@@ -57,9 +57,9 @@ fn client_for(mailbox: &SecondMailbox) -> mapi_client::MapiClient {
     mapi_client::MapiClient::builder()
         .endpoint(&mailbox.endpoint)
         .user_dn(mapi_client::LegacyDn::new(&mailbox.user_dn).expect("a usable legacyExchangeDN"))
-        .credentials(mapi_client::Credentials::basic(
-            &mailbox.address,
-            &mailbox.password,
+        .credentials(credentials_for(
+            mailbox.address.clone(),
+            mailbox.password.clone(),
         ))
         .timeout(LIVE_TIMEOUT)
         .build()
@@ -69,6 +69,47 @@ fn client_for(mailbox: &SecondMailbox) -> mapi_client::MapiClient {
 /// The subject the sent message carries, so anything a failed run leaves in the *other* mailbox is
 /// identifiable by eye rather than by date.
 const SENT_MARKER: &str = "mapi-client-rs send test";
+
+/// A subject no earlier run can have used: the marker, then a fresh UUID.
+///
+/// A fixed subject found what a *crashed* run had left behind. A stale Sent Items copy answered the
+/// poll at once, before this run's message had left Drafts, and the test failed asserting Drafts
+/// was empty — a wrong statement about the server, caused by the lab's history. The marker stays
+/// in front so a leftover is still identifiable by eye, and [`sweep`] still finds it.
+fn this_run(marker: &str) -> String {
+    format!("{marker} {}", uuid::Uuid::new_v4())
+}
+
+/// Deletes every message in a folder whose subject starts with `marker`.
+///
+/// The debris of a run that panicked between creating a message and deleting it. Cleanup after a
+/// failed assertion can be arranged, and the tests here arrange it; cleanup after a panic in an
+/// `async` test cannot be without unwinding machinery this suite has no other use for. So each test
+/// that searches by subject starts by taking earlier runs' leftovers away, which keeps the mailbox
+/// from drifting one message per crash — something the `items` suite's exact counts notice first.
+async fn sweep(logon: &mut Logon, folder: FolderId, marker: &str) {
+    let stale: Vec<MessageId> = logon
+        .folder(folder)
+        .contents()
+        .collect()
+        .await
+        .expect("reading a contents table")
+        .iter()
+        .filter(|row| {
+            row.string(PropertyTag::SUBJECT)
+                .is_some_and(|found| found.as_str().starts_with(marker))
+        })
+        .filter_map(PropertyRow::message_id)
+        .collect();
+    if !stale.is_empty() {
+        logon
+            .folder(folder)
+            .delete_messages(&stale)
+            .await
+            .expect("sweeping an earlier run's leftovers");
+        println!("swept {} leftover(s) of an earlier run", stale.len());
+    }
+}
 
 /// How long to keep asking the recipient's Inbox for the message before giving up.
 ///
@@ -97,7 +138,11 @@ async fn mail_sent_to_the_other_mailbox_arrives_in_it() {
         );
     };
 
+    // Both sessions before anything is sent. The recipient's logon is the step most likely to fail
+    // — a wrong scheme, an expired password — and failing it *after* the submit left mail in both
+    // mailboxes with nothing to take it away.
     let mut sender = logged_on(client()).await;
+    let mut received = logged_on(client_for(&recipient)).await;
     let drafts = sender
         .special_folder(SpecialFolder::Drafts)
         .await
@@ -105,12 +150,20 @@ async fn mail_sent_to_the_other_mailbox_arrives_in_it() {
     let sent_items = sender
         .folder_id(WellKnownFolder::SentItems)
         .expect("a Sent Items folder");
+    let inbox = received
+        .folder_id(WellKnownFolder::Inbox)
+        .expect("an Inbox");
 
+    sweep(&mut sender, drafts, SENT_MARKER).await;
+    sweep(&mut sender, sent_items, SENT_MARKER).await;
+    sweep(&mut received, inbox, SENT_MARKER).await;
+
+    let subject = this_run(SENT_MARKER);
     let saved = sender
         .folder(drafts)
         .create_message(MessageClass::Note)
         .set([
-            TaggedValue::new(PropertyTag::SUBJECT, string(SENT_MARKER)).expect("a string tag"),
+            TaggedValue::new(PropertyTag::SUBJECT, string(&subject)).expect("a string tag"),
             TaggedValue::new(PropertyTag::BODY, string("Sent by the live suite.\n"))
                 .expect("a string tag"),
         ])
@@ -124,14 +177,9 @@ async fn mail_sent_to_the_other_mailbox_arrives_in_it() {
     // The id the save reported is not the id the message has once the server has filed it, so the
     // Sent Items copy is found by subject. That is not laziness: nothing in any response carries
     // the new one.
-    let filed = wait_for(&mut sender, sent_items, SENT_MARKER).await;
+    let filed = wait_for(&mut sender, sent_items, &subject).await;
     let left_in_drafts = contains(&mut sender, drafts, saved.id()).await;
-
-    let mut received = logged_on(client_for(&recipient)).await;
-    let inbox = received
-        .folder_id(WellKnownFolder::Inbox)
-        .expect("an Inbox");
-    let delivered = wait_for(&mut received, inbox, SENT_MARKER).await;
+    let delivered = wait_for(&mut received, inbox, &subject).await;
 
     // Both mailboxes are cleaned before anything is asserted, so a failure does not leave mail in
     // somebody else's Inbox — and everything below has to be readable from values taken first.
@@ -187,11 +235,13 @@ async fn a_moved_message_leaves_one_folder_and_arrives_in_the_other_renamed() {
     let deleted = logon
         .folder_id(WellKnownFolder::DeletedItems)
         .expect("a Deleted Items folder");
+    sweep(&mut logon, deleted, MARKER).await;
 
+    let subject = this_run(MARKER);
     let saved = logon
         .folder(drafts)
         .create_message(MessageClass::Note)
-        .set([TaggedValue::new(PropertyTag::SUBJECT, string(MARKER)).expect("a string tag")])
+        .set([TaggedValue::new(PropertyTag::SUBJECT, string(&subject)).expect("a string tag")])
         .save()
         .await
         .expect("RopSaveChangesMessage");
@@ -202,7 +252,7 @@ async fn a_moved_message_leaves_one_folder_and_arrives_in_the_other_renamed() {
         .await
         .expect("RopMoveCopyMessages");
 
-    let moved = find_by_subject(&mut logon, deleted, MARKER).await;
+    let moved = find_by_subject(&mut logon, deleted, &subject).await;
     if let Some(id) = moved {
         logon
             .folder(deleted)

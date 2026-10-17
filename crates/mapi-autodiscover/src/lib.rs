@@ -12,7 +12,7 @@
 //! ```
 //! use mapi_autodiscover::{AutodiscoverRequest, EmailAddress, candidate_urls};
 //!
-//! let address = EmailAddress::new("developer@dev.local")?;
+//! let address = EmailAddress::new("developer@example.test")?;
 //! let request = AutodiscoverRequest::new(&address);
 //!
 //! for url in candidate_urls(&address) {

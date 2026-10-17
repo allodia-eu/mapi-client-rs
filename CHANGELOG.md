@@ -24,6 +24,12 @@ mailboxes**, which is the one operation on the list that is not a ROP at all.
 That completes all eighteen operations the plan was written against. Every gap listed below is now a
 deliberate omission rather than an operation still to come.
 
+**And the authentication gap is closed.** `Negotiate` and `NTLM` have been listed as missing since
+`0.1.0`, and they are the two schemes a default-configured Exchange offers — so until now this
+client required somebody to enable Basic on the MAPI virtual directory before it would talk to an
+otherwise untouched deployment. A new crate, `mapi-auth`, implements both; the whole live suite
+passes over each of them, against both lab mailboxes.
+
 Verified against Exchange Server SE `15.02.2562.045` and both lab mailboxes, with mail actually sent
 between them in both directions and a shared mailbox opened on a delegate's own credentials. The
 corpus grows by three scenarios and the whole of it re-captures byte for byte — 546 files identical
@@ -34,6 +40,40 @@ behavioural change is not visible to `cargo-semver-checks` at all. Both are list
 
 ### Added
 
+- **`NTLM` and `Negotiate` authentication**, in a new crate: **`mapi-auth`**. The gap the changelog
+  has listed since `0.1.0` is closed, and with it the requirement that Basic be enabled on the MAPI
+  virtual directory — a default-configured Exchange offers only these two schemes.
+
+  `mapi-auth` is sans-io in the same sense `mapi-proto` is: it says what to put in `Authorization`
+  and reads what came back in `WWW-Authenticate`, with **no network, no clock and no randomness of
+  its own**. That is not tidiness. [MS-NLMP] §4.2.4 publishes worked NTLM v2 values, and they are
+  only reproducible if the client challenge and the timestamp are inputs — so the boundary is what
+  makes the implementation checkable against the specification rather than only against one server.
+  `mapi-client` supplies the entropy from the operating system and the channel binding from the TLS
+  connection it already has.
+
+  What is inside: **NTLM v2** ([MS-NLMP] §3.3.2) with the message integrity code of §3.1.5.1.2,
+  **SPNEGO** offering NTLM as its only mechanism ([RFC 4178], [MS-SPNG]) with the `mechListMIC`
+  that [MS-SPNG] §3.1.5.1 note `<8>` makes mandatory, and **channel binding**
+  (`tls-server-end-point`, [RFC 5929] §4.1).
+
+  Two things it will not do, by rule rather than by omission. **NTLM v1, LM, signing and
+  sealing**: [MS-NLMP] §3.3.2 has the NTLM version configured at both ends rather than negotiated,
+  so a client that speaks only v2 cannot be talked down to v1, and signing and sealing are NTLM's
+  own message protection, which HTTP does not carry and TLS already provides — between them, DES
+  and RC4 stay out of the workspace. **Windows' own credential store**: the password is always
+  passed in, because the logged-on user's credentials are reached through SSPI, SSPI is `unsafe`
+  FFI, and the workspace forbids `unsafe` at the manifest level.
+- **`Credentials::Ntlm` and `Credentials::Negotiate`**, behind a new default-on `ntlm` feature on
+  `mapi-client`. Choosing either reconfigures the transport underneath — see *Changed* — because
+  both authenticate a TCP connection rather than a request.
+- **Autodiscover authenticates too.** The handshake runs on the discovery path as well as on the
+  MAPI endpoint, which is not optional: Autodiscover is the *first* request a caller makes, so NTLM
+  that worked only on the endpoint would fail one step earlier.
+- **`mapi-cli --auth basic|ntlm|negotiate`** (`MAPI_LIVE_AUTH`), and `mapi-cli discover --at <URL>`
+  for a deployment whose Autodiscover service is not where the candidate sequence looks.
+- **`MAPI_LIVE_AUTH` drives the whole live suite**, so every live test can be run over each scheme
+  rather than one scheme being proved by one test.
 - **`RopSubmitMessage`**, with `NewMessage::send()` for a message being created and
   `Message::send()` for a draft already in the store. Both put the submit in the same ROP buffer as
   the save that precedes it, which is the only order that works: a submit acts on what is in the
@@ -108,10 +148,58 @@ behavioural change is not visible to `cargo-semver-checks` at all. Both are list
   §3.1.4.2.3 sets nine properties back to named values and *deletes* the rest; the first version did
   only the first half, which `mapi-cli state` printed as "not flagged, red".
 
+### Security
+
+- **`rustls` moved from `0.23.43` to `0.23.46` in the lockfile**, for four advisories published
+  against it: RUSTSEC-2026-0285 (TLS 1.3 handshake messages accepted across a key change),
+  RUSTSEC-2026-0346 (`Debug` on client session values prints the master secret or resumption PSK),
+  RUSTSEC-2026-0348 (Brotli certificate decompression allocating up to 1 GiB before authentication)
+  and RUSTSEC-2026-0349 (an unauthenticated `ServerHello` downgrading later connections to classical
+  key exchange). Nothing in the workspace names `rustls` — it arrives under `reqwest` — and neither
+  a custom session store nor the `brotli` feature is used here. What the bump is for is
+  `cargo deny`, which is a gate rather than advice, and `mapi-cli` built `--locked`.
+  `aws-lc-rs`, `aws-lc-sys` and `rustls-webpki` move with it.
+
 ### Measured, and worth knowing
 
 Each of these is recorded in the doc comment of whatever it bears on, and four are drafted as
 Open Specification feedback.
+
+- **Extended Protection is on by default, and it is not optional.** The lab's MAPI virtual
+  directory reports `ExtendedProtectionTokenChecking: Require`, and an `AUTHENTICATE_MESSAGE`
+  without an `MsvAvChannelBindings` pair is answered with a 401 that restarts the handshake — which
+  is byte for byte what a *wrong password* looks like. Both were measured, one against the other,
+  on Exchange Server SE `15.02.2562.045`: identical credentials succeed with the binding and are
+  refused without it. This is the single thing most likely to make an otherwise correct NTLM
+  implementation look like a credentials problem.
+- **A POST with no `Content-Length` is refused with 411 *before* authentication.** `reqwest` sends
+  no such header for an empty body, so the handshake leg that carries no MAPI request never reached
+  the challenge it was sent for: `http.sys` answered 411 with no `WWW-Authenticate` at all. The leg
+  now sets the header explicitly.
+- **The server itself refuses HTTP/2 for Windows authentication.** The lab negotiates HTTP/2 by ALPN
+  for an anonymous request, then resets the stream with `HTTP_1_1_REQUIRED` once the request needs
+  `Negotiate` or `NTLM`. So `http1_only()` is not a precaution against multiplexing — it is what the
+  server asks for, and it was measured rather than assumed.
+- **IIS keeps a connection authenticated, and says so.** A completed handshake is answered with
+  `Persistent-Auth: true`, and every later request on that connection needs no `Authorization`
+  header at all. That is what makes the cost one extra round trip per connection rather than per
+  request.
+- **`reqwest` reuses one connection for sequential requests and fans out for concurrent ones.**
+  Measured against a listener that stamps each response with its connection id: eight sequential
+  requests all landed on one connection, four concurrent ones opened three. Since nothing in
+  `reqwest` pins a request to a connection, that measurement *is* the guarantee a connection-bound
+  handshake rests on — hence the mutex and the pinned pool described under *Changed*.
+- **A refused credential and a restarted handshake are the same 401.** IIS reports a rejected
+  password by offering the schemes again with no token attached. Read as a protocol error it sends
+  the reader to the message encoding; this crate reports it as a refused credential.
+- **The lab cannot vouch for a `mechListMIC`, so Windows SSPI does.** Exchange's `Negotiate` prefers
+  Kerberos, which puts it outside [MS-SPNG] note `<8>`: it accepts the handshake without the field,
+  with it, and with a *forged* one, and its final `200` carries `accept-completed` and no
+  `mechListMIC` of its own. So the signature — [MS-NLMP] §3.4.4.3's `Version` 1 and twelve zero
+  bytes, for a session with `ALWAYS_SIGN` and no `SIGN` — was checked against Windows Server 2025
+  (`10.0.26100`) SSPI running as an in-process NTLM server under .NET's `NegotiateAuthentication`.
+  Fed this crate's own messages it authenticated them, verified the signature, rejected it with one
+  byte changed, and computed the same sixteen bytes for its own direction.
 
 - **`PidTagSentMailSvrEID` and `PidTagDeleteAfterSubmit` are not independent**, though
   [MS-OXOMSG] §3.3.5.1.3 lists them as separate bullets. Measured across all four combinations: the
@@ -194,6 +282,22 @@ Open Specification feedback.
 
 ### Changed
 
+- **Choosing a connection-oriented scheme reconfigures the HTTP client.** `Credentials::Ntlm` and
+  `Credentials::Negotiate` make `MapiClientBuilder::build` pin the connection pool to one connection
+  per host, force HTTP/1.1, and retain the server certificate; the transport then serialises
+  requests through a mutex while such credentials are in use.
+
+  This is not a tuning choice. NTLM authenticates a TCP connection, `reqwest` offers no way to pin a
+  request to one, and a handshake whose three legs land on different connections cannot complete —
+  so serialising is what makes the pool's behaviour deterministic. The cost is that **cloning such a
+  client no longer buys concurrency**, and that cost is unavoidable rather than merely accepted: two
+  concurrent requests would need two authenticated connections, and nothing could say which
+  handshake had gone to which. `Credentials::Basic` and `Credentials::Bearer` are unaffected.
+- **The handshake legs are not reported to an `Observer`.** A leg is not a MAPI exchange — it has no
+  `X-RequestType` and an empty body — so feeding one to the fixture recorder would write a file that
+  is not a request/response pair. The exchange that carried the real request is observed as before,
+  and the fixture corpus is captured with Basic.
+
 - **`NamedProperty::ALL` grows from sixteen entries to twenty-four**, which changes its type. The
   same is true of `PropertyType`, `PropertyValue` and `RopResponse`, which gain variants — all three
   are `#[non_exhaustive]`, so that is not breaking, but a caller matching exhaustively on the raw
@@ -232,10 +336,17 @@ Open Specification feedback.
   `rfGenerateReceiptOnly` is modelled and reachable from the library; the command line does not offer
   it, because sending a receipt without changing the read state is a thing a mail client does on the
   user's behalf rather than a thing a diagnostic tool should make easy.
+- **Kerberos is not implemented.** `Negotiate` here is SPNEGO offering NTLM as its only mechanism,
+  which is what every non-Windows client does and what a server with `Negotiate` enabled and `NTLM`
+  disabled accepts. Kerberos needs a KDC round trip, a credential cache to read tickets from, clock
+  skew handling and a great deal of unrelated ASN.1 — and advertising it without completing it would
+  break deployments that work today. A server that selects it is reported by name rather than
+  guessed at.
+- **A client using a connection-oriented scheme does not run requests concurrently.** See *Changed*.
 - **Everything `0.3.0` listed that this release does not name above is still a gap**: an
   attachment's content is held in memory, an embedded message cannot be created, a recurrence is
-  read rather than expanded, a meeting is not a meeting, `Negotiate` and `NTLM` are still not
-  implemented, and there is still no notification or incremental sync.
+  read rather than expanded, a meeting is not a meeting, and there is still no notification or
+  incremental sync.
 
 ## [0.3.0] - 2026-08-26
 

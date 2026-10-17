@@ -51,6 +51,18 @@ if ($PSVersionTable.PSVersion.Major -ne 5 -or $PSVersionTable.PSEdition -ne 'Des
            "Run 'powershell.exe', not 'pwsh'.")
 }
 
+# Launched from inside PowerShell 7 — or from anything that was, such as a terminal or an agent
+# whose shell is pwsh — 5.1 inherits 7's PSModulePath, with 7's own module directories first. It
+# then fails to autoload its own Microsoft.PowerShell.Utility, and a cmdlet as ordinary as
+# Get-FileHash "is not recognized". Verify-Fixtures.ps1 died that way after capturing everything,
+# in the manifest step, before comparing a single file. Dropping 7's directories lets autoload find
+# 5.1's own. Wildcards rather than a regex: every entry is a path full of backslashes.
+$env:PSModulePath = @(
+    $env:PSModulePath -split ';' | Where-Object {
+        $_ -and $_ -notlike '*\PowerShell\*' -and $_ -notlike '*\microsoft.powershell_*'
+    }
+) -join ';'
+
 # PS 5.1 negotiates SSL3/TLS 1.0 by default on some hosts, which every modern site rejects.
 # Without this, Get-Specs.ps1 fails with an opaque "connection was closed" error.
 [System.Net.ServicePointManager]::SecurityProtocol = `

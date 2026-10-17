@@ -36,7 +36,9 @@
     The host to reach EWS on. Defaults to this machine, which is where the lab Exchange runs.
 
 .PARAMETER Domain
-    The SMTP domain the mailboxes live in.
+    The SMTP domain the mailboxes live in. Defaults to this machine's AD domain, which is what the
+    lab's mailboxes use: the same "this machine" -Server defaults to, and read at run time so that
+    no domain name is written into the repository.
 
 .PARAMETER Include
     Which kinds of item to create. All three by default; naming one is for re-running after a
@@ -51,7 +53,7 @@ param(
     [Parameter(Mandatory = $true)]
     [string]   $Password,
     [string]   $Server,
-    [string]   $Domain = 'dev.local',
+    [string]   $Domain,
     [ValidateSet('Appointments', 'Contacts', 'Message')]
     [string[]] $Include = @('Appointments', 'Contacts', 'Message')
 )
@@ -65,6 +67,12 @@ $Mailbox = @($Mailbox | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.T
 $Include = @($Include | ForEach-Object { $_ -split ',' } | ForEach-Object { $_.Trim() } |
     Where-Object { $_ })
 if (-not $Server) { $Server = $env:COMPUTERNAME }
+if (-not $Domain) {
+    if (-not $env:USERDNSDOMAIN) {
+        throw 'No -Domain given and this machine has no AD domain to default to. Pass -Domain.'
+    }
+    $Domain = $env:USERDNSDOMAIN.ToLowerInvariant()
+}
 
 # A lab certificate is self-signed and not in the machine's trust store. This is the same "I know
 # this is a lab" decision that --insecure is for mapi-cli, and it is why this script is not for

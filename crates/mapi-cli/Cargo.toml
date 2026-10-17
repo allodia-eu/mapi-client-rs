@@ -19,6 +19,12 @@ categories.workspace = true
 name = "mapi-cli"
 path = "src/main.rs"
 
+[features]
+default = ["ntlm"]
+# Mirrors `mapi-client`'s feature of the same name, so that `--auth ntlm` exists exactly when the
+# client can act on it.
+ntlm = ["mapi-client/ntlm"]
+
 [dependencies]
 mapi-client.workspace = true
 mapi-proto.workspace = true

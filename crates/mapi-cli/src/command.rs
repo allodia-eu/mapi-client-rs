@@ -378,9 +378,17 @@ pub(crate) async fn properties(connection: &Connection, tags: &[String]) -> Resu
 }
 
 /// Ask Autodiscover where a mailbox lives.
-pub(crate) async fn discover(connection: &Connection, address: &str) -> Result<(), Failure> {
+pub(crate) async fn discover(
+    connection: &Connection,
+    address: &str,
+    at: Option<&str>,
+) -> Result<(), Failure> {
     let address = EmailAddress::new(address)?;
-    let endpoint = connection.base()?.lookup(&address).await?;
+    let builder = connection.base()?;
+    let endpoint = match at {
+        Some(url) => builder.lookup_at(url, &address).await?,
+        None => builder.lookup(&address).await?,
+    };
 
     println!("Autodiscover found {address}");
     println!(

@@ -124,7 +124,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          for pkg in mapi-proto mapi-autodiscover mapi-client; do
+          for pkg in mapi-proto mapi-auth mapi-autodiscover mapi-client; do
             # `cargo semver-checks` needs a baseline from the registry. Asking crates.io whether one
             # exists is the difference between "no breaking changes" and "never checked".
             status=$(curl -sS -o /dev/null -w '%{http_code}' \

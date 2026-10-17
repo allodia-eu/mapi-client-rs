@@ -1,0 +1,39 @@
+[package]
+name = "mapi-auth"
+description = "Sans-io NTLM and SPNEGO handshakes for MAPI over HTTP: what to put in Authorization, with no network, no clock and no entropy of its own."
+readme = "README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+
+# The four hashes NTLM v2 needs, and nothing else. Each is named by the
+# specification rather than chosen: MD4 for the NT hash ([MS-NLMP] 3.3.2), MD5
+# and HMAC-MD5 for every key derivation in the same section and for the channel
+# binding hash ([MS-NLMP] 3.1.5.1.2), SHA-2 for the certificate hash a
+# `tls-server-end-point` binding is computed over ([RFC5929] 4.1).
+#
+# They are dependencies rather than hand-written because a workspace that denies
+# `arithmetic_side_effects` would force every wrapping add in a hash core to say
+# so, and because each of these crates ships the published test vectors for its
+# own primitive. What this crate tests is NTLM, not MD4.
+md4 = "0.10"
+md-5 = "0.10"
+sha2 = "0.10"
+hmac = "0.12"
+
+# The `Authorization` and `WWW-Authenticate` values are base64, and producing a
+# whole header value rather than a byte string is what lets this crate be used
+# with an HTTP client it knows nothing about.
+base64 = "0.22"
+
+[lints]
+workspace = true

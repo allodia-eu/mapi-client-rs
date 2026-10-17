@@ -36,7 +36,7 @@ doc comments was made.
 ```powershell
 powershell.exe -File scripts\Invoke-Cli.ps1 -Mailbox developer -Password '<password>' messages --folder inbox
 powershell.exe -File scripts\Invoke-Cli.ps1 -Mailbox developer2 -Password '<password>' state --folder drafts --id 0x...
-powershell.exe -File scripts\Invoke-Cli.ps1 -Mailbox developer -Password '<password>' mailboxes developer@dev.local --open
+powershell.exe -File scripts\Invoke-Cli.ps1 -Mailbox developer -Password '<password>' mailboxes developer@<domain> --open
 ```
 
 Everything after `-Password` goes to `mapi-cli` unchanged, `--dump` included. The five
