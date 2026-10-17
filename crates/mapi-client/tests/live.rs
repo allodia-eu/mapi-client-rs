@@ -29,8 +29,7 @@ use mapi_client::{
 // Each suite below is its own file for two reasons that apply to all of them: each asks its own
 // question, and this file is at the workspace's 500-line limit.
 
-/// The entry-id chain, the `Depth` flag and the identifier conversions — the folders `RopLogon`
-/// never names.
+/// The entry-id chain, the `Depth` flag and the id conversions: folders `RopLogon` never names.
 mod folders;
 
 /// Calendar events, contacts, a body larger than a response buffer, and both kinds of attachment.
@@ -40,10 +39,12 @@ mod items;
 /// The ids a store allocates for named properties, and what carrying one across mailboxes costs.
 mod named;
 
-/// Items this crate creates itself: a draft with an attachment, a contact, an appointment, and the
-/// delete that takes each of them out again. Every test in it is self-cleaning, because the counts
-/// the `items` suite asserts are exact.
+/// Items this crate creates itself — a draft with an attachment, a contact, an appointment — and
+/// deletes again; every test self-cleaning, because the counts the `items` suite asserts are exact.
 mod writes;
+
+/// A request given up on part way, and the disconnect that has to work afterwards.
+mod cancellation;
 
 /// Acting on an item once it exists: sending mail to the other lab mailbox, archiving a message,
 /// and marking one read. Self-cleaning like `writes`, and the only suite needing two mailboxes.

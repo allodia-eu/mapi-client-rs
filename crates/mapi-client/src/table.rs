@@ -19,8 +19,8 @@ use std::vec;
 
 use mapi_proto::{
     ATTACHMENT_COLUMNS, Bookmark, CONTENTS_COLUMNS, Execution, FolderDepth, HIERARCHY_COLUMNS,
-    ObjectHandle, PropertyRow, PropertyTag, Restriction, RopBatch, RopResponse, SortOrderSet,
-    TableStatus,
+    HandleSlot, ObjectHandle, PropertyRow, PropertyTag, Restriction, RopBatch, RopResponse,
+    SortOrderSet, TableStatus,
 };
 
 use crate::connection::Connection;
@@ -65,11 +65,7 @@ impl TableKind {
     }
 
     /// Opens the table on an object already placed in the batch.
-    fn open_on(
-        self,
-        batch: &mut RopBatch,
-        object: mapi_proto::HandleSlot,
-    ) -> mapi_proto::HandleSlot {
+    fn open_on(self, batch: &mut RopBatch, object: HandleSlot) -> HandleSlot {
         match self {
             Self::Contents => batch.contents_table(object),
             Self::Hierarchy(depth) => batch.hierarchy_table(object, depth),
@@ -369,17 +365,17 @@ impl Rows<'_> {
 
     /// Fetches one page, opening the table first if this is the first one.
     ///
-    /// A failed open is put back rather than swallowed. Without that, the next `try_next` would
-    /// find nothing left to do and report the end of the table — turning a server that refused to
-    /// open the folder into an empty inbox, which is the worst kind of wrong answer because it
-    /// looks exactly like a right one.
+    /// The open is forgotten only once it has succeeded. Otherwise the next `try_next` would find
+    /// nothing left to do and report the end of the table — turning a server that refused to open
+    /// the folder into an empty inbox, which is the worst kind of wrong answer because it looks
+    /// exactly like a right one. Taking the open out and putting it back on failure is not enough:
+    /// a future dropped mid-open never reaches the putting back.
     async fn fetch(&mut self) -> Result<()> {
-        if let Some(start) = self.start.take() {
-            let result = self.open(&start).await;
-            if result.is_err() {
-                self.start = Some(start);
-            }
-            return result;
+        if let Some(start) = &self.start {
+            let (execution, table) = Self::open(self.connection, start, self.page_size).await?;
+            self.start = None;
+            self.opened(&execution, table);
+            return Ok(());
         }
 
         let Some(table) = self.table else {
@@ -412,7 +408,14 @@ impl Rows<'_> {
     /// nobody asked for.
     ///
     /// [MS-OXCROPS] §3.1.4.1 — one ROP consumes the handle an earlier ROP produced
-    async fn open(&mut self, start: &Start) -> Result<()> {
+    ///
+    /// An associated function rather than a method, so that [`fetch`](Self::fetch) can lend it the
+    /// unopened table while the open is still in flight.
+    async fn open(
+        connection: &mut Connection,
+        start: &Start,
+        page_size: u16,
+    ) -> Result<(Execution, HandleSlot)> {
         let mut batch = RopBatch::new();
         let opened: Opened = start.object.open(&mut batch);
         let table = start.kind.open_on(&mut batch, opened.slot);
@@ -423,18 +426,22 @@ impl Rows<'_> {
         if let Some(filter) = &start.filter {
             batch.restrict(table, filter);
         }
-        batch.query_rows(table, self.page_size);
+        batch.query_rows(table, page_size);
         opened.release(&mut batch);
 
-        let execution = self.connection.execute(batch, "opening the table").await?;
+        let execution = connection.execute(batch, "opening the table").await?;
+        Ok((execution, table))
+    }
+
+    /// Takes the table handle and the first page out of the opening round trip.
+    fn opened(&mut self, execution: &Execution, table: HandleSlot) {
         self.table = execution.handle(table).filter(|handle| !handle.is_none());
         self.table_status = execution
             .responses()
             .iter()
             .find_map(RopResponse::as_table_status)
             .map(mapi_proto::TableStatusResponse::status);
-        self.absorb(&execution);
-        Ok(())
+        self.absorb(execution);
     }
 
     /// Takes the rows and the row count out of an executed batch.
