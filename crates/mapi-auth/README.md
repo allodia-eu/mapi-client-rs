@@ -39,6 +39,30 @@ Most callers do not use this crate directly:
 operating system and takes the channel binding off the TLS connection it already has. It is separate
 because the same handshake is needed by anyone using `mapi-proto` with an HTTP client of their own.
 
+## What else it is for
+
+Nothing in the handshake is MAPI's. It answers any server that sends `WWW-Authenticate: Negotiate`
+or `NTLM` — which is what Windows Authentication is, wherever IIS or a Kerberos-aware web server
+does it — given a password and an HTTP client to carry the headers:
+
+- **The rest of an on-premises Exchange**: EWS, Autodiscover, the offline address book, Outlook
+  Anywhere.
+- **Anything behind IIS Windows Authentication**: SharePoint Server, SQL Server Reporting Services,
+  Azure DevOps Server, Dynamics on-premises, AD FS's Windows Integrated Authentication, and the
+  intranet services an organisation writes for itself.
+- **WinRM over HTTPS**, port 5986. Over plain HTTP WinRM encrypts each message with the session
+  key, which is the session security this crate leaves out.
+- **An authenticating proxy**: `Proxy-Authenticate: Negotiate` on a 407 is the same exchange as a
+  401's.
+- **Kerberos-protected HTTP away from Windows** — Hadoop's web interfaces, Apache's
+  `mod_auth_gssapi`, the FreeIPA web UI — wherever the KDC offers AES and is found by DNS SRV. Only
+  Windows Server 2025 KDCs have been measured.
+
+What it does not reach, as the API stands, is Negotiate outside HTTP. The values in and out are
+header values rather than raw tokens, so LDAP's `GSS-SPNEGO` bind and SQL Server's integrated
+login are an additive API away; SMB, LDAP signing on port 389, DCE/RPC, CredSSP and SASL `GSSAPI`
+also need the session key and message protection, which are outside this crate by the rules below.
+
 ## What is implemented
 
 - **Kerberos V5** ([RFC4120], profiled by [MS-KILE]): `TicketRequest` gets a service ticket one KDC
