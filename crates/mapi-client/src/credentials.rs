@@ -84,7 +84,7 @@ pub enum Credentials {
     #[cfg(feature = "ntlm")]
     Ntlm {
         /// The account, its password, and optionally the workstation name to report.
-        identity: mapi_auth::Identity,
+        identity: negotiate_auth::Identity,
     },
 
     /// SPNEGO, as `Authorization: Negotiate …`, carrying the same NTLM messages.
@@ -92,12 +92,11 @@ pub enum Credentials {
     /// [RFC 4559] §4 — the HTTP binding for SPNEGO
     ///
     /// With the `kerberos` feature, this offers **Kerberos first**: when the account is named
-    /// `user@realm` — or given a realm with [`mapi_auth::Identity::realm`] — the realm's KDCs are
-    /// asked for a ticket to the server once its first 401 offers `Negotiate`, through the
-    /// `KdcLocator` given to the builder. The handshake then costs what NTLM's
-    /// does: one extra round trip per connection. When no ticket comes of it, NTLM's opening
-    /// follows on a leg of its own — once: the next connection remembers, for a minute, and
-    /// opens with NTLM.
+    /// `user@realm` — or given a realm with [`negotiate_auth::Identity::realm`] — the realm's
+    /// KDCs are asked for a ticket to the server once its first 401 offers `Negotiate`, through the
+    /// `KdcLocator` given to the builder. The handshake then costs what NTLM's does: one extra
+    /// round trip per connection. When no ticket comes of it, NTLM's opening follows on a leg of
+    /// its own — once: the next connection remembers, for a minute, and opens with NTLM.
     ///
     /// When no ticket can be had it offers NTLM alone, as it does without the feature, and
     /// [`MapiClient::authentication`](crate::MapiClient::authentication) says why. A KDC that
@@ -108,7 +107,7 @@ pub enum Credentials {
     #[cfg(feature = "ntlm")]
     Negotiate {
         /// The account, its password, and optionally the workstation name to report.
-        identity: mapi_auth::Identity,
+        identity: negotiate_auth::Identity,
     },
 }
 
@@ -133,13 +132,13 @@ impl Credentials {
     /// NTLM v2 credentials.
     ///
     /// The user name may be `DOMAIN\user`, `user@domain` or a bare `user`; see
-    /// [`mapi_auth::Identity`] for how each is split, which matters because both halves are inputs
-    /// to the response key.
+    /// [`negotiate_auth::Identity`] for how each is split, which matters because both halves are
+    /// inputs to the response key.
     #[cfg(feature = "ntlm")]
     #[must_use]
     pub fn ntlm(username: &str, password: impl Into<String>) -> Self {
         Self::Ntlm {
-            identity: mapi_auth::Identity::new(username, password),
+            identity: negotiate_auth::Identity::new(username, password),
         }
     }
 
@@ -148,7 +147,7 @@ impl Credentials {
     #[must_use]
     pub fn negotiate(username: &str, password: impl Into<String>) -> Self {
         Self::Negotiate {
-            identity: mapi_auth::Identity::new(username, password),
+            identity: negotiate_auth::Identity::new(username, password),
         }
     }
 
@@ -171,10 +170,12 @@ impl Credentials {
     /// This is the question the transport asks: a scheme here means each request needs a
     /// connection of its own until it is answered, and `None` means a header is enough.
     #[cfg(feature = "ntlm")]
-    pub(crate) const fn handshake(&self) -> Option<(mapi_auth::Scheme, &mapi_auth::Identity)> {
+    pub(crate) const fn handshake(
+        &self,
+    ) -> Option<(negotiate_auth::Scheme, &negotiate_auth::Identity)> {
         match self {
-            Self::Ntlm { identity } => Some((mapi_auth::Scheme::Ntlm, identity)),
-            Self::Negotiate { identity } => Some((mapi_auth::Scheme::Negotiate, identity)),
+            Self::Ntlm { identity } => Some((negotiate_auth::Scheme::Ntlm, identity)),
+            Self::Negotiate { identity } => Some((negotiate_auth::Scheme::Negotiate, identity)),
             _ => None,
         }
     }
@@ -321,13 +322,13 @@ mod tests {
 
             let ntlm = Credentials::ntlm("EXAMPLE\\alice", "hunter2");
             let (scheme, identity) = ntlm.handshake().expect("NTLM needs a handshake");
-            assert_eq!(scheme, mapi_auth::Scheme::Ntlm);
+            assert_eq!(scheme, negotiate_auth::Scheme::Ntlm);
             assert_eq!(identity.domain(), "EXAMPLE");
             assert_eq!(identity.username(), "alice");
 
             let negotiate = Credentials::negotiate("u", "p");
             let (scheme, _) = negotiate.handshake().expect("Negotiate needs a handshake");
-            assert_eq!(scheme, mapi_auth::Scheme::Negotiate);
+            assert_eq!(scheme, negotiate_auth::Scheme::Negotiate);
         }
     }
 }

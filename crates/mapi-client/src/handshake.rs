@@ -1,4 +1,4 @@
-//! Driving a `mapi-auth` handshake, for the two places in this crate that have to.
+//! Driving a `negotiate-auth` handshake, for the two places in this crate that have to.
 //!
 //! Autodiscover and the MAPI session both POST to an Exchange server with the same credentials, so
 //! both meet the same 401 and both have to answer it. What they do not share is the request: one
@@ -7,12 +7,13 @@
 //! crate's error — and each caller does its own POSTs.
 //!
 //! The module is feature-gated on `ntlm`, and with the `kerberos` module it is the only place in
-//! this crate that names [`mapi_auth`] types other than in the [`Credentials`] variants themselves.
+//! this crate that names [`negotiate_auth`] types other than in the [`Credentials`] variants
+//! themselves.
 
 use core::net::SocketAddr;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use mapi_auth::{ChannelBinding, Entropy, Handshake, Identity, Mechanism, Scheme, State};
+use negotiate_auth::{ChannelBinding, Entropy, Handshake, Identity, Mechanism, Scheme, State};
 
 use crate::credentials::Credentials;
 use crate::error::{Error, Result};

@@ -4,7 +4,7 @@ use core::time::Duration;
 use std::sync::Mutex;
 use std::time::Instant;
 
-use mapi_auth::KdcMessage;
+use negotiate_auth::KdcMessage;
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpStream;
 

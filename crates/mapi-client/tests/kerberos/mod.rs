@@ -9,11 +9,11 @@ use core::time::Duration;
 use std::io::{Read as _, Write as _};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use mapi_auth::{
+use mapi_client::{Credentials, LegacyDn, MapiClient};
+use negotiate_auth::{
     ChannelBinding, Entropy, Handshake, Identity, KerberosEntropy, Mechanism, TicketRequest,
     TicketStep,
 };
-use mapi_client::{Credentials, LegacyDn, MapiClient};
 
 use super::{LIVE_TIMEOUT, required};
 
@@ -96,8 +96,8 @@ async fn a_child_realm_user_reaches_exchange_through_a_referral() {
 /// per request could not show, because SPNEGO's continuation token only means something to the
 /// server context that saw the first one.
 ///
-/// Driven through `mapi-auth` directly, because a client's clock cannot be moved from outside it:
-/// the first AP-REQ is built an hour slow, the server's `KRB_AP_ERR_SKEW` comes back, and the
+/// Driven through `negotiate-auth` directly, because a client's clock cannot be moved from outside
+/// it: the first AP-REQ is built an hour slow, the server's `KRB_AP_ERR_SKEW` comes back, and the
 /// retry it makes possible goes on the same connection.
 #[tokio::test]
 #[ignore = "needs a live Exchange Server in a Kerberos realm; run scripts\\Test-Live.ps1"]
@@ -165,7 +165,7 @@ async fn a_skewed_clock_is_recovered_on_one_connection() {
         .expect("the retry, on the server's clock");
     let mut answered = post(Some(answer)).await.expect("the retry");
     let mut legs = 2;
-    while answered.status() == 401 && handshake.state() != mapi_auth::State::Complete {
+    while answered.status() == 401 && handshake.state() != negotiate_auth::State::Complete {
         let challenge = negotiate_header(&answered);
         let _ = answered.bytes().await;
         answer = handshake.advance(&challenge).expect("the next leg");
@@ -193,7 +193,7 @@ async fn a_skewed_clock_is_recovered_on_one_connection() {
 
 /// A service ticket, asked for over TCP from the KDC `MAPI_LIVE_KDC` names, for every realm the
 /// request passes through — which, for this account, is its own.
-fn service_ticket(identity: &Identity, service: &str) -> mapi_auth::ServiceTicket {
+fn service_ticket(identity: &Identity, service: &str) -> negotiate_auth::ServiceTicket {
     let kdc = required("MAPI_LIVE_KDC");
     let (mut request, mut message) =
         TicketRequest::new(identity, service, &entropy(0)).expect("a ticket request");

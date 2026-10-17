@@ -22,7 +22,7 @@ autodiscover = ["dep:mapi-autodiscover"]
 # it adds two `Credentials` variants and nothing anywhere else changes. Turning it off drops four
 # hash crates and a mutex from the tree, and leaves a client that needs Basic or OAuth on the MAPI
 # virtual directory.
-ntlm = ["dep:mapi-auth", "dep:tokio", "dep:getrandom", "dep:hyper-util"]
+ntlm = ["dep:negotiate-auth", "dep:tokio", "dep:getrandom", "dep:hyper-util"]
 # Kerberos inside `Negotiate`, tried first, with NTLM behind it — what a domain-joined Windows
 # client does. Additive: it adds `KdcLocator`, the `SrvResolver` trait and the builder step that
 # takes them, and makes `Credentials::Negotiate` offer Kerberos when a ticket can be had. It asks
@@ -35,7 +35,7 @@ hickory-dns = ["kerberos", "dep:hickory-resolver"]
 
 [dependencies]
 mapi-proto.workspace = true
-mapi-auth = { workspace = true, optional = true }
+negotiate-auth = { workspace = true, optional = true }
 mapi-autodiscover = { workspace = true, optional = true }
 thiserror.workspace = true
 
@@ -79,7 +79,7 @@ uuid = { version = "1", features = ["v4"] }
 
 # The eight-byte client challenge an NTLM handshake needs. Taken from the operating system rather
 # than from a `Uuid`, whose version and variant nibbles are fixed and would therefore hand four
-# known bits to anybody watching. `mapi-auth` cannot do this for itself and says so: a sans-io
+# known bits to anybody watching. `negotiate-auth` cannot do this for itself and says so: a sans-io
 # crate has no source of randomness.
 getrandom = { version = "0.4", optional = true }
 
@@ -92,9 +92,9 @@ hickory-resolver = { version = "0.26", default-features = false, features = [
 ], optional = true }
 
 [dev-dependencies]
-# `mapi-auth`'s test KDC, so that the Kerberos path runs end to end in CI, where no domain
+# `negotiate-auth`'s test KDC, so that the Kerberos path runs end to end in CI, where no domain
 # controller is. Only the tests see the feature.
-mapi-auth = { workspace = true, features = ["testing"] }
+negotiate-auth = { workspace = true, features = ["testing"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
 wiremock = "0.6"
 

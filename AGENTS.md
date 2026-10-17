@@ -1,9 +1,10 @@
 # Working in `mapi-client-rs`
 
 A pure-Rust client for **MAPI over HTTP**, the protocol Outlook speaks to Exchange. Five crates:
-`mapi-proto` (sans-io codec), `mapi-autodiscover` (finding the endpoint), `mapi-auth` (sans-io NTLM
-and SPNEGO handshakes), `mapi-client` (the async client that does the I/O) and `mapi-cli`
-(diagnostics, and the fixture capture tool).
+`mapi-proto` (sans-io codec), `mapi-autodiscover` (finding the endpoint), `negotiate-auth` (sans-io
+Kerberos, NTLM and SPNEGO handshakes), `mapi-client` (the async client that does the I/O) and
+`mapi-cli` (diagnostics, and the fixture capture tool). `negotiate-auth` is the one without the
+`mapi-` prefix because nothing in it is MAPI's: it answers any HTTP `Negotiate` or `NTLM` challenge.
 
 This file is the standing brief. `CLAUDE.md` is a symlink to it, so there is one copy rather than
 two that drift. What follows is not style preference — every rule here is either mechanically

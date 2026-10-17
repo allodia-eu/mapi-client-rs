@@ -1,6 +1,6 @@
 //! Kerberos for `Negotiate`: where a realm's KDCs are, talking to them, and keeping the tickets.
 //!
-//! `mapi-auth` writes and reads every Kerberos message; this module carries them. It finds a
+//! `negotiate-auth` writes and reads every Kerberos message; this module carries them. It finds a
 //! realm's KDCs — an address the caller gave, or DNS SRV `_kerberos._tcp.<realm>` ([RFC 4120]
 //! §7.2.3.2, [MS-KILE] §3.2.3) answered by a resolver the host supplies — sends each message over
 //! TCP, and keeps the tickets it gets so that a second connection costs an AP-REQ and not another
@@ -32,7 +32,7 @@ use core::time::Duration;
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use mapi_auth::{
+use negotiate_auth::{
     Identity, KerberosEntropy, ServiceTicket, TicketGrantingTicket, TicketRequest, TicketStep,
 };
 
@@ -122,7 +122,7 @@ pub(crate) enum Acquired {
     Unavailable(String),
     /// A KDC refused the credential itself — a wrong password, a disabled, locked or expired
     /// account — which NTLM would only report less clearly, so it is reported instead.
-    Refused(mapi_auth::Error),
+    Refused(negotiate_auth::Error),
 }
 
 /// The Kerberos side of one client: its locator, what is known of the realms it found, and the
@@ -343,9 +343,9 @@ impl Kerberos {
     async fn run(
         &self,
         mut request: TicketRequest,
-        mut message: mapi_auth::KdcMessage,
+        mut message: negotiate_auth::KdcMessage,
         timeout: Duration,
-    ) -> Result<core::result::Result<mapi_auth::Tickets, Failure>> {
+    ) -> Result<core::result::Result<negotiate_auth::Tickets, Failure>> {
         let unavailable =
             |reason: String| Ok(Err(Failure::Acquired(Acquired::Unavailable(reason))));
         loop {
@@ -379,10 +379,10 @@ enum Failure {
 
 /// Whether a KDC's refusal is about the ticket-granting ticket presented — [RFC 4120] §7.5.9's
 /// `KDC_ERR_TGT_REVOKED` (20), `KRB_AP_ERR_TKT_EXPIRED` (32) and `KRB_AP_ERR_MODIFIED` (41).
-fn about_the_tgt(error: &mapi_auth::Error) -> bool {
+fn about_the_tgt(error: &negotiate_auth::Error) -> bool {
     matches!(
         error,
-        mapi_auth::Error::KdcRefused {
+        negotiate_auth::Error::KdcRefused {
             code: 20 | 32 | 41,
             ..
         }
@@ -392,10 +392,10 @@ fn about_the_tgt(error: &mapi_auth::Error) -> bool {
 /// Whether a KDC's refusal is about the password or the account — [RFC 4120] §7.5.9's
 /// `KDC_ERR_CLIENT_REVOKED` (18), `KDC_ERR_KEY_EXPIRED` (23) and `KDC_ERR_PREAUTH_FAILED` (24) —
 /// which no other mechanism would fare better with.
-fn about_the_credential(error: &mapi_auth::Error) -> bool {
+fn about_the_credential(error: &negotiate_auth::Error) -> bool {
     matches!(
         error,
-        mapi_auth::Error::KdcRefused {
+        negotiate_auth::Error::KdcRefused {
             code: 18 | 23 | 24,
             ..
         }

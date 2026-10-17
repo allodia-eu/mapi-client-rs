@@ -77,7 +77,7 @@ pub enum TicketStep {
 ///
 /// ```no_run
 /// use core::time::Duration;
-/// use mapi_auth::{Identity, KerberosEntropy, TicketRequest, TicketStep};
+/// use negotiate_auth::{Identity, KerberosEntropy, TicketRequest, TicketStep};
 ///
 /// # fn kdc(realm: &str, message: &[u8]) -> Vec<u8> { unimplemented!() }
 /// # fn entropy() -> KerberosEntropy { KerberosEntropy::new([0; 64], Duration::ZERO) }
@@ -93,7 +93,7 @@ pub enum TicketStep {
 ///     }
 /// };
 /// # let _ = tickets;
-/// # Ok::<(), mapi_auth::Error>(())
+/// # Ok::<(), negotiate_auth::Error>(())
 /// ```
 pub struct TicketRequest {
     acquisition: Acquisition,

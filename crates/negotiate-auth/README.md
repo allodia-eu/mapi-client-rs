@@ -1,4 +1,4 @@
-# `mapi-auth`
+# `negotiate-auth`
 
 **Kerberos**, **NTLM** and **Negotiate** (SPNEGO) authentication, as state machines that do no I/O.
 
@@ -17,7 +17,7 @@ test that pins `NTProofStr` to the published bytes is possible.
 
 ```rust
 use core::time::Duration;
-use mapi_auth::{ChannelBinding, Entropy, Handshake, Identity, Scheme};
+use negotiate_auth::{ChannelBinding, Entropy, Handshake, Identity, Scheme};
 
 let mut handshake = Handshake::new(
     Scheme::Ntlm,

@@ -145,11 +145,6 @@ mod mailbox;
 
 pub mod error;
 
-/// The sans-io NTLM and SPNEGO handshakes this crate drives, for
-/// [`Identity`](mapi_auth::Identity) and for anyone wiring one up to an HTTP client of their
-/// own.
-#[cfg(feature = "ntlm")]
-pub use mapi_auth;
 #[cfg(feature = "autodiscover")]
 /// The Autodiscover client this crate drives, for the types it does not re-export.
 pub use mapi_autodiscover;
@@ -178,6 +173,11 @@ pub use mapi_proto::{
     SortDirection, SortOrder, SortOrderSet, SpecialFolder, StoreObjectType, SubmitFlags,
     TableStatus, TableString, TaggedValue, WellKnownFolder, one_off_provider,
 };
+/// The sans-io NTLM and SPNEGO handshakes this crate drives, for
+/// [`Identity`](negotiate_auth::Identity) and for anyone wiring one up to an HTTP client of
+/// their own.
+#[cfg(feature = "ntlm")]
+pub use negotiate_auth;
 
 pub use crate::builder::MapiClientBuilder;
 pub use crate::client::MapiClient;

@@ -602,8 +602,8 @@ Per the changelog's convention that gaps are listed as plainly as features:
 - **`Negotiate`/`NTLM`.** Deferred by this plan and then done anyway, because it was the last thing
   standing between the workspace and an unmodified deployment: a default-configured Exchange offers
   only those two schemes, so "production-ready" was not sayable while Basic had to be switched on
-  first. `mapi-auth` implements both. **Kerberos** is what remains — `Negotiate` here is SPNEGO
-  offering NTLM as its only mechanism, which is what every non-Windows client does.
+  first. `negotiate-auth` implements both. **Kerberos** is what remains — `Negotiate` here is
+  SPNEGO offering NTLM as its only mechanism, which is what every non-Windows client does.
 
 ## Effect on the gates
 

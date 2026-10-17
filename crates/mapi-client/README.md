@@ -194,8 +194,8 @@ default-configured Exchange offers, and `Negotiate` offers **Kerberos** first, w
 Those two authenticate a connection rather than a request, so choosing one gives each connection an
 HTTP client of its own — up to four, or `MapiClientBuilder::max_authenticated_connections` — and a
 client's clones run their requests side by side on them. See
-[`mapi-auth`](https://crates.io/crates/mapi-auth) for the handshakes, and `Credentials`' own
-documentation for what a connection-oriented scheme costs.
+[`negotiate-auth`](https://crates.io/crates/negotiate-auth) for the handshakes, and `Credentials`'
+own documentation for what a connection-oriented scheme costs.
 
 Opening a second mailbox re-aims one client rather than building another, and the reason is
 [MS-OXCMAPIHTTP] §2.2.3.3.4: `X-ClientInfo` is a GUID per client *instance* with a counter per

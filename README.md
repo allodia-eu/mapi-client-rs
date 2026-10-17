@@ -54,10 +54,10 @@ repository existed. Two findings make it tractable:
 mapi-client = "0.4"
 ```
 
-`mapi-proto`, `mapi-autodiscover` and `mapi-auth` are published separately and are useful on their
-own — the first if you want the codec with your own transport, the second if you only need to find
-an endpoint, the third if you need NTLM or Negotiate with an HTTP client of your own. `mapi-cli` is
-not published; build it from this repository with `cargo build -p mapi-cli`.
+`mapi-proto`, `mapi-autodiscover` and `negotiate-auth` are published separately and are useful on
+their own — the first if you want the codec with your own transport, the second if you only need to
+find an endpoint, the third if you need NTLM or Negotiate with an HTTP client of your own.
+`mapi-cli` is not published; build it from this repository with `cargo build -p mapi-cli`.
 
 ## What CI does and does not prove
 
@@ -94,7 +94,7 @@ folders are addressed by the id a logon reports and the corpus proves it in both
 |---|---|---|
 | [`mapi-proto`](crates/mapi-proto) | The sans-io core: wire envelope, ROPs, OXCDATA structures. No network, no async, no I/O at all. | [docs](https://docs.rs/mapi-proto) |
 | [`mapi-autodiscover`](crates/mapi-autodiscover) | Autodiscover — a genuinely different protocol (XML over HTTPS), separately useful for locating an endpoint. | [docs](https://docs.rs/mapi-autodiscover) |
-| [`mapi-auth`](crates/mapi-auth) | NTLM and SPNEGO handshakes, sans-io: what to put in `Authorization`, with no network, clock or entropy of its own. | [docs](https://docs.rs/mapi-auth) |
+| [`negotiate-auth`](crates/negotiate-auth) | Kerberos, NTLM and SPNEGO handshakes, sans-io: what to send a KDC and put in `Authorization`, with no network, clock or entropy of its own. | [docs](https://docs.rs/negotiate-auth) |
 | [`mapi-client`](crates/mapi-client) | The async client: HTTP, TLS, auth, retry. Depends on `mapi-proto`; nothing depends on it. | [docs](https://docs.rs/mapi-client) |
 | [`mapi-cli`](crates/mapi-cli) | Diagnostic binary, and the fixture capture tool. Not published. | |
 
@@ -178,9 +178,9 @@ Both are multi-leg handshakes that authenticate a **TCP connection** rather than
 choosing one gives each connection an HTTP client of its own, lent to one request at a time.
 Clones run their requests side by side, each connection authenticated once, on four connections
 unless `max_authenticated_connections` says otherwise. The handshakes themselves live in
-[`mapi-auth`](crates/mapi-auth), which is sans-io for the same reason `mapi-proto` is: [MS-NLMP]'s
-published test vectors are only reproducible when the client challenge and the timestamp are inputs
-rather than ambient.
+[`negotiate-auth`](crates/negotiate-auth), which is sans-io for the same reason `mapi-proto` is:
+[MS-NLMP]'s published test vectors are only reproducible when the client challenge and the timestamp
+are inputs rather than ambient.
 
 **`Negotiate` offers Kerberos first**, as a domain-joined Windows client does, when the account is
 named `user@realm` and a ticket can be had — KDCs found through DNS SRV records, by a resolver your

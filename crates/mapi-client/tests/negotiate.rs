@@ -1,11 +1,11 @@
 //! `Negotiate` with Kerberos, end to end, with nothing real in it: a KDC listening on a loopback
-//! socket and a service behind a fake HTTP server, both `mapi-auth`'s test KDC.
+//! socket and a service behind a fake HTTP server, both `negotiate-auth`'s test KDC.
 //!
 //! What this checks is the client's side of the arrangement, in CI where no domain controller is:
 //! that it finds the KDC, carries the messages, keeps the tickets, presents one, checks the AP-REP,
 //! falls back to NTLM when it should and reports a refusal when it should — and says which
-//! mechanism authenticated. The messages are `mapi-auth`'s and are tested there; a real KDC's and a
-//! real Exchange's agreement with all of it is `tests/live.rs`.
+//! mechanism authenticated. The messages are `negotiate-auth`'s and are tested there; a real KDC's
+//! and a real Exchange's agreement with all of it is `tests/live.rs`.
 
 #![cfg(feature = "kerberos")]
 #![allow(
@@ -21,9 +21,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use mapi_auth::Mechanism;
-use mapi_auth::testing::TestKdc;
 use mapi_client::{Credentials, Error, KdcLocator, SrvLookup, SrvRecord, SrvResolver};
+use negotiate_auth::Mechanism;
+use negotiate_auth::testing::TestKdc;
 use support::{MapiServer, connect_ok};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 use tokio::net::TcpListener;

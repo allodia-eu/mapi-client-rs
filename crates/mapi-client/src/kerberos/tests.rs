@@ -95,7 +95,7 @@ async fn a_refusal_of_the_credential_is_reported_rather_than_fallen_back_from() 
     for code in [24, 18, 23] {
         let locator = KdcLocator::new().kdc("EXAMPLE.TEST", kdc(krb_error(code)).await);
         match ask(&alice(), locator).await {
-            Acquired::Refused(mapi_auth::Error::KdcRefused { code: refused, .. }) => {
+            Acquired::Refused(negotiate_auth::Error::KdcRefused { code: refused, .. }) => {
                 assert_eq!(refused, i32::from(code));
             }
             other => panic!("{code}: {other:?}"),
@@ -168,7 +168,7 @@ async fn a_cached_tgt_buys_the_next_ticket_without_the_password() {
 
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
     let kdc = Arc::new(
-        mapi_auth::testing::TestKdc::new(
+        negotiate_auth::testing::TestKdc::new(
             "EXAMPLE.TEST",
             "alice@example.test",
             "hunter2",
@@ -276,7 +276,7 @@ async fn a_refused_tgt_is_replaced_from_the_password() {
 
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
     let kdc = Arc::new(
-        mapi_auth::testing::TestKdc::new(
+        negotiate_auth::testing::TestKdc::new(
             "EXAMPLE.TEST",
             "alice@example.test",
             "hunter2",
@@ -333,7 +333,7 @@ async fn connections_that_want_a_ticket_at_once_ask_for_it_once() {
 
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap();
     let kdc = Arc::new(
-        mapi_auth::testing::TestKdc::new(
+        negotiate_auth::testing::TestKdc::new(
             "EXAMPLE.TEST",
             "alice@example.test",
             "hunter2",
@@ -404,7 +404,7 @@ fn no_two_messages_carry_the_same_time() {
 /// the one the password may yet get past.
 #[test]
 fn a_refused_tgt_is_told_apart() {
-    let refused = |code| mapi_auth::Error::KdcRefused {
+    let refused = |code| negotiate_auth::Error::KdcRefused {
         realm: "EXAMPLE.TEST".to_owned(),
         code,
         status: None,
