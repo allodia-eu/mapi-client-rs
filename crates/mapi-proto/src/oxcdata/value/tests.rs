@@ -285,9 +285,9 @@ fn a_ptypobject_says_to_open_a_stream_rather_than_decoding() {
 #[test]
 fn an_unmodelled_type_stops_rather_than_guessing_a_length() {
     assert_eq!(
-        read(&[0u8; 8], PropertyType::new(0x0006)),
+        read(&[0u8; 8], PropertyType::new(0x00FD)),
         Err(Error::UnsupportedPropertyType {
-            property_type: 0x0006,
+            property_type: 0x00FD,
             at: 0
         })
     );
@@ -458,3 +458,5 @@ fn values_render_for_humans() {
         "{00000000-0000-0000-0000-000000000000}"
     );
 }
+
+mod types;
