@@ -6,6 +6,15 @@
 # the lab. The README says the same thing, so nobody has to infer it.
 #
 # scripts/Invoke-Gate.ps1 mirrors this file step for step. If you change one, change the other.
+# Steps are named after the gate's, so a red step here is the `-Only` name to rerun locally.
+#
+# Checks are grouped into jobs by what they need rather than one job per check. A runner spends
+# about 25 seconds booting, installing the toolchain and restoring the cache before it does
+# anything, and most checks here take less time than that once the cache is warm; fifteen jobs
+# were mostly setup. `features` is the critical path at over three minutes, so every other job
+# can absorb several checks without the run getting any longer. Inside a job, each check after
+# the first runs `if: !cancelled()`, so one failure does not hide the others — the property that
+# separate jobs had and that the gate keeps locally.
 
 name: CI
 
@@ -31,29 +40,22 @@ env:
 
 jobs:
   # ---------------------------------------------------------------------------
-  # rust-toolchain.toml is the single source of truth. Every other job reads the
-  # version from here rather than repeating it.
+  # Everything that needs no compiler: the version claims, formatting, spelling and
+  # the licence allowlist.
   # ---------------------------------------------------------------------------
-  toolchain:
-    name: toolchain
+  lint:
+    name: lint
     runs-on: ubuntu-latest
-    outputs:
-      channel: ${{ steps.parse.outputs.channel }}
-      coverage-floor: ${{ steps.parse.outputs.coverage_floor }}
     steps:
       - uses: actions/checkout@v7
 
-      - id: parse
-        name: Parse pinned toolchain and coverage floor
+      # rust-toolchain.toml is the single source of truth for the compiler, and rustup reads it
+      # directly in every job that builds. What is checked here is the two places that restate it.
+      - name: toolchain
         run: |
           set -euo pipefail
 
           channel=$(grep -oP 'channel\s*=\s*"\K[^"]+' rust-toolchain.toml)
-          echo "channel=$channel" >> "$GITHUB_OUTPUT"
-
-          # The coverage floor is defined once, in codecov.yml. Read it, do not repeat it.
-          floor=$(grep -A3 '^\s*project:' codecov.yml | grep -oP 'target:\s*\K\d+' | head -1)
-          echo "coverage_floor=$floor" >> "$GITHUB_OUTPUT"
 
           # An MSRV claim that disagrees with the pinned toolchain is a claim that is wrong.
           declared=$(grep -oP '^rust-version\s*=\s*"\K[^"]+' Cargo.toml)
@@ -73,137 +75,82 @@ jobs:
             echo "::error::README MSRV badge says $badge but rust-toolchain.toml pins $channel"; exit 1
           fi
 
-          echo "toolchain $channel | MSRV $declared | badge $badge | coverage floor ${floor}%" >> "$GITHUB_STEP_SUMMARY"
+          echo "toolchain $channel | MSRV $declared | badge $badge" >> "$GITHUB_STEP_SUMMARY"
 
-  # ---------------------------------------------------------------------------
-  fmt:
-    name: fmt
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
       # Nightly, because rustfmt.toml uses nightly-only options (error_on_line_overflow,
       # wrap_comments, imports_granularity). The compiler itself stays on stable.
       - uses: dtolnay/rust-toolchain@nightly
+        if: ${{ !cancelled() }}
         with:
           components: rustfmt
-      - run: cargo +nightly fmt --all -- --check
+      - name: fmt
+        if: ${{ !cancelled() }}
+        run: cargo +nightly fmt --all -- --check
+
+      - name: typos
+        if: ${{ !cancelled() }}
+        uses: crate-ci/typos@v1
+
+      # The mechanism behind "permissive dependencies only": a copyleft transitive dependency
+      # fails the build rather than being noticed at publish time.
+      - name: deny
+        if: ${{ !cancelled() }}
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
 
   # ---------------------------------------------------------------------------
-  clippy:
-    name: clippy
-    needs: toolchain
+  # Every --all-features check on Linux, in one job so they share one cache and one
+  # build: clippy, build, doc, test and coverage.
+  # ---------------------------------------------------------------------------
+  check:
+    name: check
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ needs.toolchain.outputs.channel }}
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo clippy --workspace --all-targets --all-features -- -D warnings
-
-  # ---------------------------------------------------------------------------
-  # Every other job builds --all-features, the one combination no consumer who
-  # turns a feature off ever gets. The powerset is read from each crate's own
-  # [features] table, so a feature added later is covered without editing this.
-  # ---------------------------------------------------------------------------
-  features:
-    name: features
-    needs: toolchain
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ needs.toolchain.outputs.channel }}
-          components: clippy
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@cargo-hack
-      - run: cargo hack clippy --workspace --feature-powerset --skip default --all-targets -- -D warnings
-      - run: cargo hack test --workspace --feature-powerset --skip default
-      # A doc link to an item behind a feature is broken in every combination without it; the
-      # docs job sees only --all-features. Mirrors scripts/Invoke-Gate.ps1.
-      - run: cargo hack doc --workspace --feature-powerset --skip default --no-deps
-        env:
-          RUSTDOCFLAGS: -D warnings
-
-  # ---------------------------------------------------------------------------
-  build:
-    name: build
-    needs: toolchain
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ needs.toolchain.outputs.channel }}
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo build --workspace --all-features
-
-  # ---------------------------------------------------------------------------
-  # Both platforms, because this crate's whole point is that it does not require
-  # Windows — an accidental platform dependency must fail here, not for a user.
-  # ---------------------------------------------------------------------------
-  test:
-    name: test (${{ matrix.os }})
-    needs: toolchain
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, windows-latest]
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ needs.toolchain.outputs.channel }}
+      # No version here: with no argument, rustup installs what rust-toolchain.toml names,
+      # components and profile included.
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - uses: taiki-e/install-action@v2
         with:
-          tool: nextest
+          tool: nextest,cargo-llvm-cov
+
+      - name: clippy
+        run: cargo clippy --workspace --all-targets --all-features -- -D warnings
+
+      - name: build
+        if: ${{ !cancelled() }}
+        run: cargo build --workspace --all-features
+
+      - name: doc
+        if: ${{ !cancelled() }}
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc --workspace --all-features --no-deps
+
       # --no-tests=warn because the workspace is still being populated and nextest treats an empty
       # suite as an error. Not a hole in the gate: a suite that silently emptied out would fail
       # the 95% coverage floor long before it would fail here.
-      - run: cargo nextest run --workspace --all-features --no-tests=warn
+      - name: test
+        if: ${{ !cancelled() }}
+        run: cargo nextest run --workspace --all-features --no-tests=warn
       # nextest does not run doctests, and the doctests on the main entry points are part of the
       # public API contract. Run them rather than lose them.
-      - run: cargo test --workspace --all-features --doc
+      - name: test (doc)
+        if: ${{ !cancelled() }}
+        run: cargo test --workspace --all-features --doc
 
-  # ---------------------------------------------------------------------------
-  doc:
-    name: doc
-    needs: toolchain
-    runs-on: ubuntu-latest
-    env:
-      RUSTDOCFLAGS: -D warnings
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ needs.toolchain.outputs.channel }}
-      - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --workspace --all-features --no-deps
-
-  # ---------------------------------------------------------------------------
-  coverage:
-    name: coverage
-    needs: toolchain
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@master
-        with:
-          toolchain: ${{ needs.toolchain.outputs.channel }}
-          components: llvm-tools-preview
-      - uses: Swatinem/rust-cache@v2
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-llvm-cov
-
-      - name: Measure coverage
+      - name: coverage
+        id: coverage
+        if: ${{ !cancelled() }}
         run: |
           set -euo pipefail
-          floor='${{ needs.toolchain.outputs.coverage-floor }}'
+
+          # The coverage floor is defined once, in codecov.yml. Read it, do not repeat it.
+          floor=$(grep -A3 '^\s*project:' codecov.yml | grep -oP 'target:\s*\K\d+' | head -1)
+          echo "coverage floor ${floor}%" >> "$GITHUB_STEP_SUMMARY"
 
           cargo llvm-cov --workspace --all-features \
             --ignore-filename-regex 'crates.mapi-cli.src' \
@@ -225,6 +172,7 @@ jobs:
           cargo llvm-cov report --ignore-filename-regex 'crates.mapi-cli.src' --fail-under-lines "$floor"
 
       - name: Upload to Codecov
+        if: ${{ !cancelled() && steps.coverage.outcome == 'success' }}
         uses: codecov/codecov-action@v7
         with:
           files: lcov.info
@@ -234,22 +182,74 @@ jobs:
           fail_ci_if_error: false
 
   # ---------------------------------------------------------------------------
-  # The mechanism behind "permissive dependencies only": a copyleft transitive
-  # dependency fails the build rather than being noticed at publish time.
+  # `check` builds --all-features, the one combination no consumer who turns a
+  # feature off ever gets. The powerset is read from each crate's own [features]
+  # table, so a feature added later is covered without editing this. Its own job
+  # because it is the slowest thing here, and everything else runs beside it.
   # ---------------------------------------------------------------------------
-  deny:
-    name: deny
+  features:
+    name: features
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - uses: EmbarkStudios/cargo-deny-action@v2
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@cargo-hack
+      - run: cargo hack clippy --workspace --feature-powerset --skip default --all-targets -- -D warnings
+      - if: ${{ !cancelled() }}
+        run: cargo hack test --workspace --feature-powerset --skip default
+      # A doc link to an item behind a feature is broken in every combination without it; the
+      # doc step sees only --all-features. Mirrors scripts/Invoke-Gate.ps1.
+      - if: ${{ !cancelled() }}
+        run: cargo hack doc --workspace --feature-powerset --skip default --no-deps
+        env:
+          RUSTDOCFLAGS: -D warnings
+
+  # ---------------------------------------------------------------------------
+  # The tests again on Windows, because this crate's whole point is that it does
+  # not require Windows — an accidental platform dependency must fail here, not for
+  # a user. And the two checks that are PowerShell 5.1 scripts, which is
+  # Windows-only by definition (see scripts/_Boot.ps1 for why 5.1): one
+  # implementation, exercised the same way locally and in CI.
+  # ---------------------------------------------------------------------------
+  windows:
+    name: windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+      - uses: taiki-e/install-action@v2
         with:
-          command: check
-          arguments: --all-features
+          tool: nextest
+
+      - name: test
+        run: cargo nextest run --workspace --all-features --no-tests=warn
+      - name: test (doc)
+        if: ${{ !cancelled() }}
+        run: cargo test --workspace --all-features --doc
+
+      - name: file-length
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: .\scripts\Check-FileLength.ps1
+
+      # The fixtures are byte-exact captures from a real mailbox, which makes an accidental
+      # disclosure a live risk rather than a theoretical one. mapi-cli refuses to write a file that
+      # still carries a needle and Capture-Fixtures.ps1 checks again afterwards — but both of those
+      # run on the machine that has the lab. This is the check that runs on every pull request,
+      # from anyone, with no lab at all: it looks for non-placeholder GUIDs, long hexadecimal runs
+      # and URL hosts this repository did not choose.
+      - name: no-secrets
+        if: ${{ !cancelled() }}
+        shell: powershell
+        run: .\scripts\Assert-NoSecrets.ps1
 
   # ---------------------------------------------------------------------------
   # Posts the public API diff on every PR, so an accidental breaking change is
-  # visible in review rather than after publish.
+  # visible in review rather than after publish. Advisory, so it is not one of
+  # ci-ok's needs — and that is why it stays a job of its own rather than a step
+  # in `lint`, where a failure to install the tool would fail the gate.
   # ---------------------------------------------------------------------------
   public-api:
     name: public-api
@@ -301,54 +301,13 @@ jobs:
           done
 
   # ---------------------------------------------------------------------------
-  typos:
-    name: typos
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v7
-      - uses: crate-ci/typos@v1
-
-  # ---------------------------------------------------------------------------
-  # Runs on Windows because Check-FileLength.ps1 is a PowerShell 5.1 script, and
-  # 5.1 is Windows-only by definition (see scripts/_Boot.ps1 for why 5.1). One
-  # implementation, exercised the same way locally and in CI.
-  # ---------------------------------------------------------------------------
-  file-length:
-    name: file-length
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Check the 500-line limit
-        shell: powershell
-        run: .\scripts\Check-FileLength.ps1
-
-  # ---------------------------------------------------------------------------
-  # The fixtures are byte-exact captures from a real mailbox, which makes an
-  # accidental disclosure a live risk rather than a theoretical one. mapi-cli
-  # refuses to write a file that still carries a needle and Capture-Fixtures.ps1
-  # checks again afterwards — but both of those run on the machine that has the
-  # lab. This is the check that runs on every pull request, from anyone, with no
-  # lab at all: it looks for non-placeholder GUIDs, long hexadecimal runs and URL
-  # hosts this repository did not choose.
-  # ---------------------------------------------------------------------------
-  no-secrets:
-    name: no-secrets
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v7
-      - name: Check the fixtures identify no real deployment
-        shell: powershell
-        run: .\scripts\Assert-NoSecrets.ps1
-
-  # ---------------------------------------------------------------------------
   # One required check to point branch protection at, so adding a job later does
   # not silently leave it unenforced.
   # ---------------------------------------------------------------------------
   ci-ok:
     name: ci-ok
     if: always()
-    needs:
-      [toolchain, fmt, clippy, features, build, test, doc, coverage, deny, typos, file-length, no-secrets]
+    needs: [lint, check, features, windows]
     runs-on: ubuntu-latest
     steps:
       - name: Fail if any needed job did not succeed
