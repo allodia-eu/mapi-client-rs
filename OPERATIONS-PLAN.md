@@ -330,9 +330,14 @@ turned up:
   four appointments, three contacts and one message with a 60 KB body and one attachment of each
   kind into a mailbox through EWS — deliberately not through this client, because a corpus a client
   built for itself proves nothing about the client.
-- **`MaxRopOut` has an effective ceiling of about 32 KiB that no document states.** The field is
-  honoured directly below it — a 21,099-byte output buffer succeeds at `MaxRopOut` 40,000 and a
-  24,675-byte one is refused at 20,000 — but a read refused at 65,536 is refused identically at
+- **`MaxRopOut` has an effective ceiling of about 32 KiB.** This first read as a ceiling no
+  document states. It is stated, in a document pinned only later: [MS-OXCRPC] §3.1.4.2.1.2.2 says
+  the server "MUST NOT produce more than 32 KB worth of response data for all ROP requests",
+  whatever the output buffer allows. The same section gives the remedy: with the `Chain` flag, a
+  final `RopQueryRows`, `RopReadStream` or `RopFastTransferSourceGetBuffer` can pack further 32 KB
+  payloads behind the first. The measurement stands. The field is honoured directly below it — a
+  21,099-byte output buffer succeeds at `MaxRopOut` 40,000 and a 24,675-byte one is refused at
+  20,000 — but a read refused at 65,536 is refused identically at
   `0x00040000`, the maximum [MS-OXCRPC] §3.1.4.2 allows, so raising it past the ceiling achieves
   nothing. Every refusal reports `SizeNeeded` = 32,767 whatever was asked for, so [MS-OXCROPS]
   §3.1.5.1.2's remedy — resend with the buffer at least `SizeNeeded` — is already satisfied and

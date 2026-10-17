@@ -11,9 +11,9 @@ without "the spec says Y" is unverifiable.
 
 ## Pinned documents
 
-Fifteen of the twenty share one release; [MS-OXDSCLI] and [MS-OXOCAL] were revised three months
-later, and the three authentication documents are on their own schedule entirely — which is exactly
-the drift the version pin exists to make visible. This table is the single source of truth:
+Seventeen of the twenty-two share one release; [MS-OXDSCLI] and [MS-OXOCAL] were revised three
+months later, and the three authentication documents are on their own schedule entirely — which is
+exactly the drift the version pin exists to make visible. This table is the single source of truth:
 `scripts/Get-Specs.ps1` parses it to download, and `scripts/Check-SpecVersion.ps1` parses it to
 verify.
 
@@ -29,11 +29,13 @@ copying the one above it will 404.
 | MS-OXCMAPIHTTP | v20250520 | 96 | MAPI extensions for HTTP — the envelope | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCMAPIHTTP/%5bMS-OXCMAPIHTTP%5d.pdf |
 | MS-OXCROPS | v20250520 | 236 | ROP list and encoding | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCROPS/%5bMS-OXCROPS%5d.pdf |
 | MS-OXCDATA | v20250520 | 137 | Data structures, property types, PropertyRow | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCDATA/%5bMS-OXCDATA%5d.pdf |
+| MS-OXCRPC | v20250520 | 94 | Wire Format Protocol — `RPC_HEADER_EXT`, the 32 KB payload limit, packing | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCRPC/%5bMS-OXCRPC%5d.pdf |
 | MS-OXCTABL | v20250520 | 64 | Table Object Protocol | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCTABL/%5bMS-OXCTABL%5d.pdf |
 | MS-OXCSTOR | v20250520 | 63 | Store Object Protocol (logon) | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCSTOR/%5bMS-OXCSTOR%5d.pdf |
 | MS-OXCFOLD | v20250520 | 72 | Folder Object Protocol | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCFOLD/%5bMS-OXCFOLD%5d.pdf |
 | MS-OXCPRPT | v20250520 | 66 | Property and Stream Object Protocol | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCPRPT/%5bMS-OXCPRPT%5d.pdf |
 | MS-OXCMSG | v20250520 | 91 | Message and Attachment Object Protocol | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCMSG/%5bMS-OXCMSG%5d.pdf |
+| MS-OXCFXICS | v20250520 | 213 | Bulk Data Transfer — FastTransfer streams and incremental sync (ICS) | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXCFXICS/%5bMS-OXCFXICS%5d.pdf |
 | MS-OXOMSG | v20250520 | 101 | Email Object Protocol — recipients, submit | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXOMSG/%5bMS-OXOMSG%5d.pdf |
 | MS-OXOSFLD | v20250520 | 40 | Special Folders — how Calendar and Contacts are located | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXOSFLD/%5bMS-OXOSFLD%5d.pdf |
 | MS-OXOCAL | v20250819 | 185 | Appointment and Meeting Object Protocol | https://officeprotocoldoc.z19.web.core.windows.net/files/MS-OXOCAL/%5bMS-OXOCAL%5d.pdf |
@@ -49,7 +51,7 @@ copying the one above it will 404.
 
 <!-- SPEC-TABLE-END -->
 
-Fifteen released **20 May 2025**; [MS-OXDSCLI] and [MS-OXOCAL] on **19 August 2025**; [MS-NLMP] on
+Seventeen released **20 May 2025**; [MS-OXDSCLI] and [MS-OXOCAL] on **19 August 2025**; [MS-NLMP] on
 **30 March 2026**, [MS-SPNG] on **14 July 2026** and [MS-KILE] on **28 September 2026**.
 
 [MS-NLMP] and [MS-SPNG] were added when the client learned to speak `NTLM` and `Negotiate`. They
@@ -102,8 +104,8 @@ is the same deliberate review a Microsoft version bump forces: read the new RFC,
 
 ## URLs in the repository, PDFs never
 
-`scripts/Get-Specs.ps1` reads both tables above, downloads all twenty documents and the fifteen RFCs
-into a **gitignored `spec/`** directory, and extracts each PDF to text alongside it. A fresh clone is therefore one command
+`scripts/Get-Specs.ps1` reads both tables above, downloads all twenty-two documents and the fifteen
+RFCs into a **gitignored `spec/`** directory, and extracts each PDF to text alongside it. A fresh clone is therefore one command
 away from having the authoritative sources, and the repository carries no Microsoft PDFs.
 
 ```powershell
@@ -113,7 +115,7 @@ powershell.exe -File scripts\Get-Specs.ps1
 The Microsoft IP notice permits local copies "in order to develop implementations", but committing
 58 MB of Microsoft PDFs to a public repository is both unnecessary and muddies the licensing story.
 
-The `spec/*.txt` extracts are the useful artefact day to day: 2,192 pages of PDF are painful to
+The `spec/*.txt` extracts are the useful artefact day to day: 2,499 pages of PDF are painful to
 search, but `Select-String` over the text extracts is instant.
 
 ```powershell
@@ -136,7 +138,7 @@ log before touching any code.
 ## Citation rule
 
 **Every protocol item cites its source in a doc comment** — `[MS-OXCROPS] §2.2.4.1.1`, not just
-"the spec". With 2,192 pages across twenty documents and fifteen RFCs, an uncited constant is
+"the spec". With 2,499 pages across twenty-two documents and fifteen RFCs, an uncited constant is
 unverifiable in practice, which in a binary protocol means it is indistinguishable from a
 transcription error.
 

@@ -14,11 +14,11 @@ enforced or was paid for in debugging time, and the note attached to each says w
 
 **The Microsoft Open Specification documents are the authoritative resource — always.** Not this
 repository's documentation, not a blog post, not another implementation, and not an inference from
-an observed transcript. Twenty documents and the fifteen RFCs Kerberos rests on, pinned in
+an observed transcript. Twenty-two documents and the fifteen RFCs Kerberos rests on, pinned in
 [`SPEC.md`](SPEC.md), fetched with `scripts\Get-Specs.ps1` into a gitignored `spec/` and never
 committed.
 
-Read the `spec/*.txt` extracts, not the PDFs — 2,192 pages are painful to page through and instant
+Read the `spec/*.txt` extracts, not the PDFs — 2,499 pages are painful to page through and instant
 to `Select-String`. Start a property lookup in [MS-OXPROPS], which is an index rather than a
 narrative: it maps every `PidTag` and `PidLid` to its id, its type and the document that defines it,
 which is usually the question being asked.
