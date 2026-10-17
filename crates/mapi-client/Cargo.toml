@@ -39,9 +39,9 @@ mapi-auth = { workspace = true, optional = true }
 mapi-autodiscover = { workspace = true, optional = true }
 thiserror.workspace = true
 
-# `sync` only, for the mutex that serialises requests while a connection-oriented handshake is in
-# flight. It is not a new runtime in the tree: reqwest already brings tokio, and this asks for one
-# more feature of it rather than one more dependency.
+# `sync` only, for the semaphore that caps the authenticated connections and the mutex that makes
+# the first handshakes to a server take turns. It is not a new runtime in the tree: reqwest already
+# brings tokio, and this asks for one more feature of it rather than one more dependency.
 tokio = { version = "1", features = ["sync"], optional = true }
 
 # TLS is rustls with the *platform* verifier rather than a bundled root list, which is the whole
