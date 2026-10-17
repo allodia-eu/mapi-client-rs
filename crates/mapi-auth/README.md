@@ -69,6 +69,56 @@ because the same handshake is needed by anyone using `mapi-proto` with an HTTP c
 - **Signing and sealing.** NTLM's own message protection, which HTTP does not carry and TLS already
   provides. Leaving it out removes DES and RC4 from this crate entirely.
 
+## How much of each protocol this is
+
+This is the **client half of HTTP `Negotiate` and `NTLM`, with a password**, and very little else.
+Taking that slice whole is deliberate; so is everything outside it.
+
+| | What a client authenticating over HTTP needs | The protocol as a whole |
+|---|---|---|
+| **NTLM** ([MS-NLMP]) | All of it: the three messages, NTLM v2, the AV pairs, the MIC, the channel binding | About 40% of the normative text. No server role, no connectionless mode, no NTLM v1 or LM, no session security — the signing, sealing and key exchange of §3.4, which HTTP never uses |
+| **Kerberos** ([RFC4120], [MS-KILE]) | Nearly all of it: AS and TGS with a password, referrals, the AP exchange with mutual authentication and channel binding, MIC tokens | Perhaps 10–15% of what a general Kerberos library carries. No KDC or acceptor role, no RC4, DES or 3DES, no PKINIT or smart cards, no FAST, no S4U or delegation, no user-to-user, no ticket renewal or forwarding, no `KRB-SAFE`/`KRB-PRIV`, no GSS wrap and unwrap, no password change, no keytab or credential cache, no UDP or KDC proxy |
+| **SPNEGO** ([RFC4178], [MS-SPNG]) | The initiator, with Kerberos and NTLM and both `mechListMIC`s | No acceptor, no NegoEx |
+
+Those percentages are rough, measured by section rather than by line, but the shape is not: the
+client slice is closed, and the rest is a different product. Requests for it are declined by the
+same rules the list above states — this crate is not on its way to being a general Kerberos library.
+
+## Why not an existing crate
+
+Measured against what an Exchange deployment demands, on the versions current in October 2026:
+
+- **Extended Protection is the dividing line.** Exchange refuses a handshake that does not carry
+  the channel binding, with the same 401 a wrong password earns. Of the pure-Rust NTLM crates,
+  `ntlmclient` 0.2.0 names the `MsvAvChannelBindings` AV pair but never computes it and sends no
+  MIC, and `ntlmssp` 0.1.1 sends a MIC without the `MsvAvFlags` bit that announces it and no
+  binding at all. Neither Kerberos-only crate builds the `0x8003` checksum's binding field or
+  [MS-KILE]'s `KERB_AP_OPTIONS_CBT`: `kerbcore` 0.3.0 has nowhere to put the latter, and `krb5-rs`
+  0.1.0 is a placeholder. `rasn-kerberos` is the RFC 4120 message types and no client.
+- **`sspi`** (Devolutions, and the engine behind IronRDP) does carry both bindings, and is the
+  serious alternative. It is a different shape: it mirrors the Windows SSPI API, reads the clock
+  and the operating system's random source itself with no way to supply either, and, unless named
+  a KDC, finds one itself — environment variables, `krb5.conf`, the platform's DNS. So no
+  published test vector can be replayed through it, and a host's own resolver, which knows its VPN
+  and its split DNS, cannot be the one that answers.
+  Kerberos there is AES-SHA1 and 3DES, without the RFC 8009 types [MS-KILE] §3.1.5.2 makes a MUST
+  or the `PA-REQ-ENC-PA-REP` that makes the first KDC exchange tamper-evident. It brings around
+  thirty dependencies, some pinned to pre-release versions, ships `unsafe` in the crate itself, and
+  has made five breaking releases in 2026. None of that makes it wrong — it does far more
+  than this crate — but each is a property `mapi-client` gives its own callers, and would lose.
+- **`picky-krb`**, the message layer under `sspi`, is free of I/O and could have carried these
+  messages, but its encryption draws its confounder from the operating system's random source with
+  no way to supply one, and it has neither RFC 8009 nor the structure `KERB_AP_OPTIONS_CBT` rides
+  in.
+- **`libgssapi` and `cross-krb5`** bind the system's GSSAPI or SSPI: a C toolchain and system
+  libraries off Windows, and whatever the machine's own stack does on it. `kerbeiros` is
+  AGPL-3.0, which this MIT-or-Apache workspace cannot take.
+
+What writing it here bought is what the rest of the workspace already has: every field cites the
+section that defines it, every primitive is pinned to the specification's own vectors — [MS-NLMP]
+§4.2.4 and RFC 3961, 3962 and 8009 — because time and entropy are inputs, no parser can panic on
+hostile input, and the crate's tests cover 99% of its lines.
+
 ## This crate cannot make the connection stick
 
 NTLM and Negotiate authenticate a **TCP connection**, not a request. Every leg of a handshake, and
