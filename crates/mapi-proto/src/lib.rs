@@ -67,6 +67,7 @@
 
 pub mod error;
 pub mod http;
+pub mod ics;
 pub mod oxcdata;
 pub mod rop;
 pub mod session;
@@ -80,6 +81,7 @@ pub use crate::error::{Error, ErrorCode, Result};
 pub use crate::http::{
     CookieJar, Headers, Lcid, MetaTag, Payload, Request, RequestType, ResponseCode,
 };
+pub use crate::ics::{ChangeNumber, GlobCnt, GlobSet, IcsState, IdSet, SyncKind, SyncScope};
 pub use crate::oxcdata::{
     APPOINTMENT_COLUMNS, APPOINTMENT_PROPERTIES, ATTACHMENT_COLUMNS, ATTACHMENT_PROPERTIES,
     AttachMethod, AttachmentNumber, COMPLETE_FLAG_PROPERTIES, CONTACT_COLUMNS, CONTACT_PROPERTIES,
