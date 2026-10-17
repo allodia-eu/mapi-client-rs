@@ -1,6 +1,6 @@
 mod catalogue;
 
-use catalogue::{CATALOGUE, MAIL_CATALOGUE};
+use catalogue::{CATALOGUE, MAIL_CATALOGUE, SYNC_CATALOGUE};
 
 use super::*;
 use crate::oxcdata::columns::{
@@ -21,7 +21,10 @@ fn a_tag_is_type_then_id_on_the_wire() {
 
 /// Both halves of the catalogue, which between them cover both halves of the constants.
 fn catalogued() -> impl Iterator<Item = (PropertyTag, u16, PropertyType, &'static str)> {
-    CATALOGUE.into_iter().chain(MAIL_CATALOGUE)
+    CATALOGUE
+        .into_iter()
+        .chain(MAIL_CATALOGUE)
+        .chain(SYNC_CATALOGUE)
 }
 
 #[test]
@@ -130,7 +133,9 @@ fn an_unknown_tag_still_prints_usefully() {
 fn the_catalogue_names_every_tag_the_crate_has_a_constant_for() {
     let arms = include_str!("names.rs")
         .lines()
-        .filter(|line| line.contains("=> ") && line.contains("PidTag"))
+        .filter(|line| {
+            line.contains("=> ") && (line.contains("PidTag") || line.contains("MetaTag"))
+        })
         .count();
     let catalogued = catalogued().count();
 
