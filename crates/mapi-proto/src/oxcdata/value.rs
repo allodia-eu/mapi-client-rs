@@ -4,6 +4,9 @@ use crate::error::ErrorCode;
 use crate::oxcdata::{FileTime, Guid, PropertyType, ServerEntryId};
 
 mod codec;
+mod numeric;
+
+pub use numeric::{Currency, Floating32};
 
 #[cfg(test)]
 mod tests;
@@ -193,6 +196,33 @@ pub enum PropertyValue {
     MultipleString(Vec<TableString>),
     /// A `PtypMultipleBinary` value.
     MultipleBinary(Vec<Vec<u8>>),
+    /// A `PtypFloating32` value.
+    Floating32(Floating32),
+    /// A `PtypCurrency` value.
+    Currency(Currency),
+    /// A `PtypFloatingTime` value: days since 30 December 1899, the fraction a time of day.
+    ///
+    /// The OLE automation date, kept as the binary64 it is rather than converted, because the
+    /// conversion needs a time zone the value does not carry.
+    FloatingTime(Floating64),
+    /// A `PtypMultipleInteger16` value.
+    MultipleInteger16(Vec<u16>),
+    /// A `PtypMultipleFloating32` value.
+    MultipleFloating32(Vec<Floating32>),
+    /// A `PtypMultipleFloating64` value.
+    MultipleFloating64(Vec<Floating64>),
+    /// A `PtypMultipleCurrency` value.
+    MultipleCurrency(Vec<Currency>),
+    /// A `PtypMultipleFloatingTime` value.
+    MultipleFloatingTime(Vec<Floating64>),
+    /// A `PtypMultipleInteger64` value.
+    MultipleInteger64(Vec<u64>),
+    /// A `PtypMultipleString8` value, each string decoded as [`String8`](Self::String8) is.
+    MultipleString8(Vec<TableString>),
+    /// A `PtypMultipleTime` value.
+    MultipleTime(Vec<FileTime>),
+    /// A `PtypMultipleGuid` value.
+    MultipleGuid(Vec<Guid>),
     /// The server returned an error code where a value was asked for.
     ///
     /// Routine rather than exceptional: it is how a value too large for a row or for the response
@@ -224,6 +254,18 @@ impl PropertyValue {
             Self::MultipleInteger32(_) => PropertyType::MultipleInteger32,
             Self::MultipleString(_) => PropertyType::MultipleString,
             Self::MultipleBinary(_) => PropertyType::MultipleBinary,
+            Self::Floating32(_) => PropertyType::Floating32,
+            Self::Currency(_) => PropertyType::Currency,
+            Self::FloatingTime(_) => PropertyType::FloatingTime,
+            Self::MultipleInteger16(_) => PropertyType::MultipleInteger16,
+            Self::MultipleFloating32(_) => PropertyType::MultipleFloating32,
+            Self::MultipleFloating64(_) => PropertyType::MultipleFloating64,
+            Self::MultipleCurrency(_) => PropertyType::MultipleCurrency,
+            Self::MultipleFloatingTime(_) => PropertyType::MultipleFloatingTime,
+            Self::MultipleInteger64(_) => PropertyType::MultipleInteger64,
+            Self::MultipleString8(_) => PropertyType::MultipleString8,
+            Self::MultipleTime(_) => PropertyType::MultipleTime,
+            Self::MultipleGuid(_) => PropertyType::MultipleGuid,
             Self::Error(_) => PropertyType::ErrorCode,
             Self::Absent => return None,
         })
@@ -356,7 +398,7 @@ impl core::fmt::Display for PropertyValue {
             Self::Binary(bytes) => write!(f, "{} byte(s)", bytes.len()),
             Self::ServerId(value) => write!(f, "{value}"),
             Self::MultipleInteger32(values) => write!(f, "{values:?}"),
-            Self::MultipleString(values) => {
+            Self::MultipleString(values) | Self::MultipleString8(values) => {
                 f.write_str("[")?;
                 for (index, text) in values.iter().enumerate() {
                     if index > 0 {
@@ -370,10 +412,37 @@ impl core::fmt::Display for PropertyValue {
                 let total: usize = values.iter().map(Vec::len).sum();
                 write!(f, "{} value(s), {total} byte(s)", values.len())
             }
+            Self::Floating32(value) => write!(f, "{value}"),
+            Self::Currency(value) => write!(f, "{value}"),
+            Self::FloatingTime(value) => write!(f, "{value} day(s) since 1899-12-30"),
+            Self::MultipleInteger16(values) => write!(f, "{values:?}"),
+            Self::MultipleInteger64(values) => write!(f, "{values:?}"),
+            Self::MultipleFloating32(values) => show_list(f, values),
+            Self::MultipleFloating64(values) | Self::MultipleFloatingTime(values) => {
+                show_list(f, values)
+            }
+            Self::MultipleCurrency(values) => show_list(f, values),
+            Self::MultipleGuid(values) => show_list(f, values),
+            Self::MultipleTime(values) => write!(f, "{} time(s)", values.len()),
             Self::Error(code) => write!(f, "<{code}>"),
             Self::Absent => f.write_str("<absent>"),
         }
     }
+}
+
+/// A list of values, each as it displays on its own.
+fn show_list<T: core::fmt::Display>(
+    f: &mut core::fmt::Formatter<'_>,
+    values: &[T],
+) -> core::fmt::Result {
+    f.write_str("[")?;
+    for (index, value) in values.iter().enumerate() {
+        if index > 0 {
+            f.write_str(", ")?;
+        }
+        write!(f, "{value}")?;
+    }
+    f.write_str("]")
 }
 
 /// A string value, saying so when the table cut it short.
