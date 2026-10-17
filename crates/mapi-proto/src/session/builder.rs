@@ -131,6 +131,7 @@ impl SessionBuilder {
             lcid_string: self.lcid_string,
             cookies: CookieJar::new(),
             pending: None,
+            abandoned: false,
             connected: false,
             table_columns: Vec::new(),
         }

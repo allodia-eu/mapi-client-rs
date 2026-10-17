@@ -85,9 +85,10 @@
 //!   every one of one mailbox's ids names a real, different property in the other — so the mistake
 //!   is answered with a plausible value rather than an error. [`NamedProperties`] carries the store
 //!   that issued its ids and cannot be given a foreign one.
-//! * **A failed round trip ends the connection.** When a request fails in transit there is no way
-//!   to know whether the server acted on it, so the connection reports [`Error::Poisoned`] rather
-//!   than sending the next request into an unknown state.
+//! * **A failed round trip ends the connection, and so does an abandoned one.** When a request
+//!   fails in transit, or the future driving it is dropped, there is no way to know whether the
+//!   server acted on it, so the connection reports [`Error::Poisoned`] rather than sending the next
+//!   request into an unknown state. It is never wedged: [`Connection::disconnect`] still works.
 //! * **No secret reaches a log.** [`Credentials`] implements [`Debug`] by hand and redacts.
 //!
 //! # Transport

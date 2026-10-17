@@ -102,6 +102,11 @@
     survives afterwards - a streamed attachment, a paged table, a write - and none of that is shown
     by one logon.
 
+.PARAMETER Filter
+    Runs only the live tests whose names contain this, as cargo test's own filter does. For
+    re-measuring one claim without the minutes the whole suite takes; a change is still verified
+    by the whole suite, never by the test that was written for it.
+
 .EXAMPLE
     powershell.exe -File scripts\Test-Live.ps1
 
@@ -124,7 +129,8 @@ param(
     [string]   $Password,
     [string]   $ReferralUser,
     [ValidateSet('basic', 'ntlm', 'negotiate')]
-    [string]   $Auth
+    [string]   $Auth,
+    [string]   $Filter
 )
 
 $ErrorActionPreference = 'Stop'
@@ -173,7 +179,7 @@ function Invoke-LiveSuite {
 
     Invoke-Native -FilePath $script:cargo -WorkingDirectory (Get-RepoRoot) -Arguments @(
         'test', '--package', 'mapi-client', '--test', 'live', '--features', 'hickory-dns',
-        '--', '--ignored', '--nocapture', '--test-threads', '1'
+        '--', '--ignored', '--nocapture', '--test-threads', '1', $script:Filter
     )
 }
 
