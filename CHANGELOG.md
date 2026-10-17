@@ -15,6 +15,10 @@ Two conventions specific to this project:
 
 ## [Unreleased]
 
+Nothing yet.
+
+## [0.4.0] - 2026-10-17
+
 Acting on items, and then reaching mailboxes the account does not own. `0.3.0` could create, read
 and delete a message; this adds *sending* one, *moving* one, and both of the things MAPI means by
 *flagging* one — the read bit of `PidTagMessageFlags`, which has its own ROP, and the follow-up flag
@@ -35,13 +39,29 @@ domain-joined Windows client does, and the whole live suite runs over it — aut
 Kerberos, which the client now reports rather than leaving to be guessed — including a user from a
 second realm reaching Exchange through a referral.
 
+**And a client authenticated with either runs its requests concurrently**, as it always could under
+Basic: each connection is authenticated once, up to four of them by default, and shared by the
+client's clones.
+
 Verified against Exchange Server SE `15.02.2562.045` and both lab mailboxes, with mail actually sent
 between them in both directions and a shared mailbox opened on a delegate's own credentials. The
 corpus grows by three scenarios and the whole of it re-captures byte for byte — 546 files identical
 — with two write scenarios in it.
 
-**This is a breaking release**: `SESSION_EXCHANGES` aside, three public items changed shape and one
-behavioural change is not visible to `cargo-semver-checks` at all. Both are listed under *Changed*.
+**There is a new crate**: `mapi-auth`, published here for the first time. It is a dependency of
+`mapi-client` under the default `ntlm` feature, and is separately useful to anyone driving
+`mapi-proto` with an HTTP client of their own.
+
+**This is a breaking release**, in one type: `NamedProperty::ALL` grows from sixteen entries to
+twenty-four, which changes its type, and the new variants are declared before four of the old ones,
+so `Location`, `Recurring`, `ResponseStatus` and `SideEffects` cast with `as` to 20–23 rather than
+12–15. `ErrorCode`, `Attachment` and `EmbeddedMessage` moved to modules of their own and are
+re-exported from where they were, so nothing breaks at the path a caller writes.
+
+**Two changes `cargo-semver-checks` cannot see**: `Credentials::Ntlm` and `Credentials::Negotiate`
+reconfigure the HTTP client — HTTP/1.1, and an HTTP client per authenticated connection — and
+handshake legs are not reported to an `Observer`. Both are listed under *Changed*, and neither
+affects `Basic` or `Bearer`.
 
 ### Added
 
@@ -362,7 +382,6 @@ Open Specification feedback.
   `MapiClient::authentication()` says why. A KDC's refusal of the credential itself — a wrong
   password, a locked or expired account — is reported as `Error::Unauthorized` instead, because NTLM
   would only fail it less clearly.
-
 - **Choosing a connection-oriented scheme reconfigures the HTTP client.** `Credentials::Ntlm` and
   `Credentials::Negotiate` make `MapiClientBuilder::build` force HTTP/1.1, retain the server
   certificate, and give **each connection an HTTP client of its own**, holding one idle connection
@@ -378,11 +397,23 @@ Open Specification feedback.
   `X-RequestType` and an empty body — so feeding one to the fixture recorder would write a file that
   is not a request/response pair. The exchange that carried the real request is observed as before,
   and the fixture corpus is captured with Basic.
-
+- **`chacha20` moved from `0.10.1` to `0.10.2` in the lockfile**, because `0.10.1` is yanked and
+  `cargo publish` says so. It is not a vulnerability: `0.10.1`'s SSE2 backend used an SSE4.1
+  instruction, which faults on an x86 processor without SSE4.1. Only the optional `hickory-dns`
+  feature reaches it — through `rand`, in the resolver — so no default build ever compiled it; what
+  the bump buys is a clean `cargo publish`, and a `--locked` build of this repository that runs on
+  every x86 processor.
 - **`NamedProperty::ALL` grows from sixteen entries to twenty-four**, which changes its type. The
   same is true of `PropertyType`, `PropertyValue` and `RopResponse`, which gain variants — all three
   are `#[non_exhaustive]`, so that is not breaking, but a caller matching exhaustively on the raw
   `PropertyType::Unsupported(0x00FB)` would silently stop matching.
+- **Four `NamedProperty` variants cast to new numbers.** The eight new ones are declared among the
+  old, so `Location`, `Recurring`, `ResponseStatus` and `SideEffects` are 20–23 under `as` rather
+  than 12–15. The order the old variants compare in is unchanged: `NamedProperty`, `PropertyType`
+  and `PropertyValue` derive `Ord` from declaration order, and every new variant went in between
+  old ones without moving any old one past another, so a sorted collection of `0.3.0`'s values sorts
+  the same. `cargo semver-checks` reports both, run as a patch release; checking a 0.x minor bump,
+  it skips every check, because such a bump may break anything.
 - **`ErrorCode` moved to its own module** within `mapi-proto`'s `error`, and `Attachment` and
   `EmbeddedMessage` to their own module within `mapi-client`'s `message`. Both are re-exported from
   where they were; nothing a caller writes changes.
@@ -865,7 +896,8 @@ to the repository.
   measured, so neither LZ77/DIRECT2 nor the `0xA5` XOR layer is implemented. A server that refuses
   those flags is not supported.
 
-[Unreleased]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.2.0...v0.3.0
 [0.2.0]: https://github.com/allodia-eu/mapi-client-rs/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/allodia-eu/mapi-client-rs/releases/tag/v0.1.0
