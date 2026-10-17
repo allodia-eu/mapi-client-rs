@@ -33,8 +33,8 @@
 //! comes back 401 and the handshake runs again, which is why a lane's authentication is a belief
 //! rather than a fact.
 
-use mapi_auth::{Identity, Scheme};
 use mapi_proto::{Headers, Request};
+use negotiate_auth::{Identity, Scheme};
 use reqwest::StatusCode;
 
 use crate::error::{Error, Result};

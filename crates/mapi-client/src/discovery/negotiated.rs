@@ -50,8 +50,8 @@ impl Search<'_> {
         &self,
         url: &Url,
         address: &EmailAddress,
-        scheme: mapi_auth::Scheme,
-        identity: &mapi_auth::Identity,
+        scheme: negotiate_auth::Scheme,
+        identity: &negotiate_auth::Identity,
         last: bool,
     ) -> Result<Attempt> {
         let url_text = url.to_string();

@@ -10,7 +10,7 @@
 //! ```
 //! use core::time::Duration;
 //!
-//! use mapi_auth::{Entropy, Handshake, Identity, Scheme};
+//! use negotiate_auth::{Entropy, Handshake, Identity, Scheme};
 //!
 //! let mut handshake = Handshake::new(
 //!     Scheme::Ntlm,
@@ -23,7 +23,7 @@
 //! assert!(first.starts_with("NTLM "));
 //! // POST with `Authorization: {first}`, expect 401, feed the WWW-Authenticate value to
 //! // `handshake.advance(…)`, and POST the real request with what that returns.
-//! # Ok::<(), mapi_auth::Error>(())
+//! # Ok::<(), negotiate_auth::Error>(())
 //! ```
 //!
 //! Most callers do not use this crate directly: `mapi-client` drives it, supplies the entropy from
@@ -41,7 +41,7 @@
 //! ```no_run
 //! use core::time::Duration;
 //!
-//! use mapi_auth::{Entropy, Handshake, Identity, KerberosEntropy, TicketRequest, TicketStep};
+//! use negotiate_auth::{Entropy, Handshake, Identity, KerberosEntropy, TicketRequest, TicketStep};
 //!
 //! # fn kdc(realm: &str, message: &[u8]) -> Vec<u8> { unimplemented!() }
 //! # fn entropy() -> KerberosEntropy { KerberosEntropy::new([0; 64], Duration::ZERO) }
@@ -64,7 +64,7 @@
 //! );
 //! let first = handshake.initial()?;
 //! // Send it; on success, `handshake.finish(Some(www_authenticate))` checks the AP-REP.
-//! # Ok::<(), mapi_auth::Error>(())
+//! # Ok::<(), negotiate_auth::Error>(())
 //! ```
 //!
 //! # What is implemented

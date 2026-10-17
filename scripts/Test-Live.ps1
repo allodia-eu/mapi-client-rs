@@ -38,8 +38,8 @@
     Two more are for Kerberos, which Negotiate tries first:
 
         MAPI_LIVE_KDC                  host:port of a KDC for the account's realm, which the test
-                                       that drives mapi-auth directly asks for its ticket. Set from
-                                       this machine's domain controller when the script runs on one.
+                                       that drives negotiate-auth directly asks for its ticket. Set
+                                       from this machine's domain controller when run on one.
         MAPI_LIVE_REFERRAL_USERNAME    a user of a child domain, by UPN, for the referral test; its
                                        password is MAPI_LIVE_REFERRAL_PASSWORD, or the lab's own.
 
@@ -148,7 +148,7 @@ if ($Password) { $env:MAPI_LIVE_PASSWORD = $Password }
 if ($Auth)     { $env:MAPI_LIVE_AUTH     = $Auth }
 if ($ReferralUser) { $env:MAPI_LIVE_REFERRAL_USERNAME = $ReferralUser }
 
-# The KDC the direct mapi-auth test asks: this machine's domain controller, when it is in a domain.
+# The KDC the direct negotiate-auth test asks: this machine's domain controller, when it is in one.
 if (-not $env:MAPI_LIVE_KDC) {
     try {
         $dc = [System.DirectoryServices.ActiveDirectory.Domain]::GetCurrentDomain().FindDomainController().Name

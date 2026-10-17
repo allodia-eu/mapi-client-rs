@@ -2,7 +2,7 @@
 resolver = "3"
 members = [
     "crates/mapi-proto",
-    "crates/mapi-auth",
+    "crates/negotiate-auth",
     "crates/mapi-autodiscover",
     "crates/mapi-client",
     "crates/mapi-cli",
@@ -23,7 +23,7 @@ categories = ["email", "network-programming", "parser-implementations"]
 
 [workspace.dependencies]
 mapi-proto = { version = "0.4.0", path = "crates/mapi-proto" }
-mapi-auth = { version = "0.4.0", path = "crates/mapi-auth" }
+negotiate-auth = { version = "0.4.0", path = "crates/negotiate-auth" }
 mapi-autodiscover = { version = "0.4.0", path = "crates/mapi-autodiscover" }
 mapi-client = { version = "0.4.0", path = "crates/mapi-client" }
 

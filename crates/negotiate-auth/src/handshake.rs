@@ -96,7 +96,7 @@ pub enum Mechanism {
 ///
 /// ```
 /// use core::time::Duration;
-/// use mapi_auth::{ChannelBinding, Entropy, Handshake, Identity, Scheme};
+/// use negotiate_auth::{ChannelBinding, Entropy, Handshake, Identity, Scheme};
 ///
 /// let mut handshake = Handshake::new(
 ///     Scheme::Ntlm,
@@ -117,7 +117,7 @@ pub enum Mechanism {
 ///                         AHYAZQByAAAAAAA=";
 /// let second = handshake.advance(www_authenticate)?;
 /// assert!(second.starts_with("NTLM "));
-/// # Ok::<(), mapi_auth::Error>(())
+/// # Ok::<(), negotiate_auth::Error>(())
 /// ```
 #[derive(Clone, Debug)]
 pub struct Handshake {

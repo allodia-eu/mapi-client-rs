@@ -1002,21 +1002,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
-name = "mapi-auth"
-version = "0.4.0"
-dependencies = [
- "aes",
- "base64",
- "hmac",
- "md-5",
- "md4",
- "pbkdf2",
- "sha1",
- "sha2",
- "thiserror",
-]
-
-[[package]]
 name = "mapi-autodiscover"
 version = "0.4.0"
 dependencies = [
@@ -1042,9 +1027,9 @@ dependencies = [
  "getrandom 0.4.3",
  "hickory-resolver",
  "hyper-util",
- "mapi-auth",
  "mapi-autodiscover",
  "mapi-proto",
+ "negotiate-auth",
  "reqwest",
  "thiserror",
  "tokio",
@@ -1117,6 +1102,21 @@ name = "ndk-context"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
+
+[[package]]
+name = "negotiate-auth"
+version = "0.4.0"
+dependencies = [
+ "aes",
+ "base64",
+ "hmac",
+ "md-5",
+ "md4",
+ "pbkdf2",
+ "sha1",
+ "sha2",
+ "thiserror",
+]
 
 [[package]]
 name = "num-traits"

@@ -3,8 +3,8 @@
 //! What these tests are for is the *arrangement*, not the cryptography: how many round trips a
 //! handshake costs, which requests carry an `Authorization` header and which do not, what happens
 //! when the connection stops being authenticated part way through a session, and how each way of
-//! failing is reported. The messages themselves are `mapi-auth`'s business and are checked there
-//! against [MS-NLMP]'s published values; a real Exchange's agreement with all of it is
+//! failing is reported. The messages themselves are `negotiate-auth`'s business and are checked
+//! there against [MS-NLMP]'s published values; a real Exchange's agreement with all of it is
 //! `tests/live.rs`.
 //!
 //! The challenge every test here replies with is [MS-NLMP] §4.2.4.3's own `CHALLENGE_MESSAGE`,
@@ -213,7 +213,7 @@ async fn a_negotiate_handshake_wraps_the_messages_in_spnego() {
     // A NetBIOS domain names no realm, so the handshake was NTLM — and the client says so, with
     // the reason, rather than leaving a deployment that meant Kerberos to guess.
     let authentication = client.authentication().unwrap();
-    assert_eq!(authentication.mechanism, mapi_auth::Mechanism::Ntlm);
+    assert_eq!(authentication.mechanism, negotiate_auth::Mechanism::Ntlm);
     assert!(authentication.kerberos_unavailable.is_some());
 }
 

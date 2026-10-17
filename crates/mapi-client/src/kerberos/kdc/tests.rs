@@ -269,12 +269,12 @@ async fn a_realms_kdcs_are_looked_up_once() {
     );
 }
 
-/// A real first message for `realm`, from `mapi-auth`, so that what goes over the wire is an
+/// A real first message for `realm`, from `negotiate-auth`, so that what goes over the wire is an
 /// AS-REQ.
 fn message_for(realm: &str) -> KdcMessage {
-    let identity = mapi_auth::Identity::new("alice", "hunter2").realm(realm);
-    let entropy = mapi_auth::KerberosEntropy::new([7; 64], Duration::new(1_800_000_000, 0));
-    mapi_auth::TicketRequest::new(&identity, "HTTP/mail.example.test", &entropy)
+    let identity = negotiate_auth::Identity::new("alice", "hunter2").realm(realm);
+    let entropy = negotiate_auth::KerberosEntropy::new([7; 64], Duration::new(1_800_000_000, 0));
+    negotiate_auth::TicketRequest::new(&identity, "HTTP/mail.example.test", &entropy)
         .unwrap()
         .1
 }

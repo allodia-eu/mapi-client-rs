@@ -31,7 +31,7 @@ deliberate omission rather than an operation still to come.
 **And the authentication gap is closed.** `Negotiate` and `NTLM` have been listed as missing since
 `0.1.0`, and they are the two schemes a default-configured Exchange offers — so until now this
 client required somebody to enable Basic on the MAPI virtual directory before it would talk to an
-otherwise untouched deployment. A new crate, `mapi-auth`, implements both; the whole live suite
+otherwise untouched deployment. A new crate, `negotiate-auth`, implements both; the whole live suite
 passes over each of them, against both lab mailboxes.
 
 **And `Negotiate` speaks Kerberos.** It offers a Kerberos ticket first and NTLM behind it, as a
@@ -48,7 +48,7 @@ between them in both directions and a shared mailbox opened on a delegate's own 
 corpus grows by three scenarios and the whole of it re-captures byte for byte — 546 files identical
 — with two write scenarios in it.
 
-**There is a new crate**: `mapi-auth`, published here for the first time. It is a dependency of
+**There is a new crate**: `negotiate-auth`, published here for the first time. It is a dependency of
 `mapi-client` under the default `ntlm` feature, and is separately useful to anyone driving
 `mapi-proto` with an HTTP client of their own.
 
@@ -65,14 +65,14 @@ affects `Basic` or `Bearer`.
 
 ### Added
 
-- **Kerberos**, offered first inside `Negotiate`, with NTLM behind it. Sans-io in `mapi-auth`, like
-  the NTLM it sits beside: `TicketRequest` turns a password into a service ticket one KDC message at
-  a time — the AS exchange, the TGS exchange, and referrals across realms in both directions
-  ([RFC 6806] §7 and §8) — and `Handshake::kerberos` offers that ticket inside SPNEGO, checking the
-  server's AP-REP rather than assuming it. The four AES encryption types [MS-KILE] §3.1.5.2
-  requires, pinned to the RFC 3961, 3962 and 8009 vectors; `PA-REQ-ENC-PA-REP`, which makes the
-  unauthenticated first request tamper-evident; clock-skew recovery at the KDC and at the server;
-  the channel binding Extended Protection needs, in the authenticator.
+- **Kerberos**, offered first inside `Negotiate`, with NTLM behind it. Sans-io in `negotiate-auth`,
+  like the NTLM it sits beside: `TicketRequest` turns a password into a service ticket one KDC
+  message at a time — the AS exchange, the TGS exchange, and referrals across realms in both
+  directions ([RFC 6806] §7 and §8) — and `Handshake::kerberos` offers that ticket inside SPNEGO,
+  checking the server's AP-REP rather than assuming it. The four AES encryption types [MS-KILE]
+  §3.1.5.2 requires, pinned to the RFC 3961, 3962 and 8009 vectors; `PA-REQ-ENC-PA-REP`, which makes
+  the unauthenticated first request tamper-evident; clock-skew recovery at the KDC and at the
+  server; the channel binding Extended Protection needs, in the authenticator.
 
   `mapi-client` carries the messages: a **`kerberos`** feature, on by default, finds a realm's KDCs
   through DNS SRV records ([RFC 4120] §7.2.3.2) answered by an **`SrvResolver`** the host supplies —
@@ -104,17 +104,17 @@ affects `Basic` or `Bearer`.
   Kerberos messages carry the same time, which a server's replay cache would refuse ([RFC 4120]
   §3.2.3).
 
-- **`NTLM` and `Negotiate` authentication**, in a new crate: **`mapi-auth`**. The gap the changelog
-  has listed since `0.1.0` is closed, and with it the requirement that Basic be enabled on the MAPI
-  virtual directory — a default-configured Exchange offers only these two schemes.
+- **`NTLM` and `Negotiate` authentication**, in a new crate: **`negotiate-auth`**. The gap the
+  changelog has listed since `0.1.0` is closed, and with it the requirement that Basic be enabled on
+  the MAPI virtual directory — a default-configured Exchange offers only these two schemes.
 
-  `mapi-auth` is sans-io in the same sense `mapi-proto` is: it says what to put in `Authorization`
-  and reads what came back in `WWW-Authenticate`, with **no network, no clock and no randomness of
-  its own**. That is not tidiness. [MS-NLMP] §4.2.4 publishes worked NTLM v2 values, and they are
-  only reproducible if the client challenge and the timestamp are inputs — so the boundary is what
-  makes the implementation checkable against the specification rather than only against one server.
-  `mapi-client` supplies the entropy from the operating system and the channel binding from the TLS
-  connection it already has.
+  `negotiate-auth` is sans-io in the same sense `mapi-proto` is: it says what to put in
+  `Authorization` and reads what came back in `WWW-Authenticate`, with **no network, no clock and no
+  randomness of its own**. That is not tidiness. [MS-NLMP] §4.2.4 publishes worked NTLM v2 values,
+  and they are only reproducible if the client challenge and the timestamp are inputs — so the
+  boundary is what makes the implementation checkable against the specification rather than only
+  against one server. `mapi-client` supplies the entropy from the operating system and the channel
+  binding from the TLS connection it already has.
 
   What is inside: **NTLM v2** ([MS-NLMP] §3.3.2) with the message integrity code of §3.1.5.1.2,
   **SPNEGO** offering NTLM as its only mechanism ([RFC 4178], [MS-SPNG]) with the `mechListMIC`
