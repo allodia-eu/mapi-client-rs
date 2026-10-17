@@ -47,7 +47,7 @@ and HTTP redirect probing need DNS and HTTP, so this crate names them and the ca
 
 `AlternativeMailbox` elements are now parsed, which is the whole of *list mailboxes*: MAPI/HTTP has
 no enumeration verb, so this is the only place in the protocol family a shared, delegated or archive
-mailbox is ever named. Measured against Exchange Server SE `15.02.2562.045`, and the measurement
+mailbox is ever named. Measured against Exchange Server SE `15.02.2562.056`, and the measurement
 shapes the API: Exchange names such a mailbox by **SMTP address** and never by the distinguished
 name [MS-OXDSCLI] §2.2.4.1.1.2.5.2 offers, so opening one costs a second lookup. `MailboxAddress`
 is an enum rather than a struct of options because the two forms are mutually exclusive in four

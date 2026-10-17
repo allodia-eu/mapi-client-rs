@@ -131,7 +131,7 @@ impl<'a> NewMessage<'a> {
     ///
     /// **The document says "copied" and the server moves.** §2.2.3.10 has "a copy of the message
     /// is created in the specified folder after the message is sent", which reads as leaving the
-    /// original in place too. On Exchange Server SE `15.02.2562.045` the original does not stay: a
+    /// original in place too. On Exchange Server SE `15.02.2562.056` the original does not stay: a
     /// message drafted in Drafts and sent with this set is in Sent Items and nowhere else — **and
     /// it is there under a different id** from the one [`SavedMessage::id`] reported, as a
     /// [`Folder::move_messages`](crate::Folder::move_messages) also mints one. Nothing in the

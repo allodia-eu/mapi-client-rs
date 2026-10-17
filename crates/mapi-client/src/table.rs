@@ -7,7 +7,7 @@
 //!
 //! **Later pages do not re-send the column set.** The session remembers which columns belong to
 //! which table handle, so a page request is a `RopQueryRows` and nothing else. Verified against
-//! Exchange Server SE `15.02.2562.045`: eight consecutive pages of a hierarchy table decoded
+//! Exchange Server SE `15.02.2562.056`: eight consecutive pages of a hierarchy table decoded
 //! correctly with `RopSetColumns` sent only in the first batch.
 //!
 //! [MS-OXCROPS] §2.2.5.1 — `RopSetColumns`
@@ -403,7 +403,7 @@ impl Rows<'_> {
     ///
     /// The object's own handles are released in the same batch. A table is a Server object in its
     /// own right and outlives the folder or message handle it was obtained from — verified against
-    /// Exchange Server SE `15.02.2562.045`, where paging continued normally after the release — so
+    /// Exchange Server SE `15.02.2562.056`, where paging continued normally after the release — so
     /// keeping them open would tie up server objects for nothing.
     ///
     /// **Order matters here and is not arbitrary.** `RopSetColumns` comes first because

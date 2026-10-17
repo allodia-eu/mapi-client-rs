@@ -155,7 +155,7 @@ impl<'a> Folder<'a> {
     /// is one round trip however far apart they are in the hierarchy.
     ///
     /// **The moved message gets a new id, and nothing tells you what it is.** Measured on Exchange
-    /// Server SE `15.02.2562.045`: a message moved from Drafts to Deleted Items arrived under a
+    /// Server SE `15.02.2562.056`: a message moved from Drafts to Deleted Items arrived under a
     /// different `PidTagMid` from the one the move named. Neither [MS-OXCFOLD] §2.2.1.6 nor
     /// [MS-OXCROPS] §2.2.4.6.2 says whether the identifier survives, and the response carries no
     /// room for a new one — so a caller holding the old id after a move holds an id for nothing,

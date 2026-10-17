@@ -191,7 +191,7 @@ impl PropertyName {
     /// this ROP, and it says the opposite in as many words: *"A value in the `Kind` field of
     /// `0xFF`. There is no other return data for this entry."*
     ///
-    /// Exchange Server SE `15.02.2562.045` does exactly that — asked for the name of the
+    /// Exchange Server SE `15.02.2562.056` does exactly that — asked for the name of the
     /// unregistered id `0xFFFE`, it answered a 30-byte ROP whose `RopSize` ends on the `0xFF`
     /// itself. Reading §2.6.1's sixteen bytes there consumes the next structure, or the handle
     /// table, or runs off the buffer, which is how this crate found out it had read only half the

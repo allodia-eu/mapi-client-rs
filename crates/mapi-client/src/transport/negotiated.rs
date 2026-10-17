@@ -28,7 +28,7 @@
 //!
 //! One extra round trip on the first request over a connection, and nothing afterwards. IIS answers
 //! a completed handshake with `Persistent-Auth: true` and leaves the connection authenticated —
-//! measured against Exchange Server SE `15.02.2562.045` — so later requests carry no
+//! measured against Exchange Server SE `15.02.2562.056` — so later requests carry no
 //! `Authorization` header at all. If the pool ever hands over a different connection, that request
 //! comes back 401 and the handshake runs again, which is why a lane's authentication is a belief
 //! rather than a fact.

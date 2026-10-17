@@ -162,7 +162,7 @@ impl OpenMessageResponse {
     /// Not decoration. Reaching an embedded message opens the message it is attached to first, so
     /// a batch that opens one carries **two** of these responses, and picking the first reports the
     /// outer message's subject as the inner one's — a wrong answer that looks entirely plausible.
-    /// Measured against Exchange Server SE `15.02.2562.045`, where exactly that reported the
+    /// Measured against Exchange Server SE `15.02.2562.056`, where exactly that reported the
     /// parent's subject for an attachment named `forwarded.msg`.
     #[must_use]
     pub const fn rop(&self) -> RopId {
@@ -175,7 +175,7 @@ impl OpenMessageResponse {
     ///
     /// **Exchange answers zero here**, which is not what [MS-OXCMSG] §2.2.3.16.2's "8 bytes
     /// containing the MID for the Message object" leads a reader to expect. Measured on Exchange
-    /// Server SE `15.02.2562.045` against both lab mailboxes: an `afEmbeddedMessage` attachment
+    /// Server SE `15.02.2562.056` against both lab mailboxes: an `afEmbeddedMessage` attachment
     /// opened as a message reports `0x0000000000000000`. That is consistent with an embedded
     /// message having no identity in the store of its own — it is reached through its attachment
     /// and by no other route — but it means the value cannot be used to re-open the message later.

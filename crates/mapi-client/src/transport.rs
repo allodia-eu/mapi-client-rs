@@ -232,7 +232,7 @@ impl Transport {
             // `reqwest` sends no `Content-Length` at all for an empty body, and `http.sys` answers
             // a POST without one with 411 — *before* authentication, so the handshake leg that
             // carries no MAPI request never reaches the challenge it was sent for. Measured
-            // against Exchange Server SE `15.02.2562.045`: the same request with this header is a
+            // against Exchange Server SE `15.02.2562.056`: the same request with this header is a
             // 401 carrying `WWW-Authenticate`, and without it a 411 carrying none.
             builder = builder.header(reqwest::header::CONTENT_LENGTH, "0");
         }
@@ -300,7 +300,7 @@ impl Transport {
 
         // A MAPI endpoint reports protocol-level refusals as HTTP 200 with a non-zero
         // `X-ResponseCode`, so any other status means the request never reached the protocol and
-        // the body is not a MAPI response. Measured against Exchange Server SE `15.02.2562.045`:
+        // the body is not a MAPI response. Measured against Exchange Server SE `15.02.2562.056`:
         // an unknown `X-RequestType` and a missing required header both come back 200, while an
         // endpoint URL without its `MailboxId` parameter comes back 400 with an empty body.
         if !status.is_success() {

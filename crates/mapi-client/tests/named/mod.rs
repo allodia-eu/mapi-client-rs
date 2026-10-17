@@ -278,7 +278,7 @@ async fn resolving_the_same_names_twice_sends_one_request() {
 /// step 3, and not what [MS-OXCDATA] §2.6.1's diagram implies when that section is read alone.
 /// That split is what this test is here to keep an eye on: §2.6.1's sixteen bytes are not on the
 /// wire, and reading them desynchronises whatever follows. Measured on Exchange Server SE
-/// `15.02.2562.045`, where the answer to `0xFFFE` framed a 30-byte ROP ending on the `0xFF` itself.
+/// `15.02.2562.056`, where the answer to `0xFFFE` framed a 30-byte ROP ending on the `0xFF` itself.
 #[tokio::test]
 #[ignore = "needs a live Exchange Server; run scripts\\Test-Live.ps1"]
 async fn a_fixed_id_is_answered_from_ps_mapi_and_an_unknown_one_carries_no_set() {

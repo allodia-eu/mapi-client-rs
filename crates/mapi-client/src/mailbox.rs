@@ -6,7 +6,7 @@
 //! distinguished name while still authenticating as the original user; the server does the access
 //! check.
 //!
-//! Two things measured against Exchange Server SE `15.02.2562.045` shape everything here, and both
+//! Two things measured against Exchange Server SE `15.02.2562.056` shape everything here, and both
 //! cost a round trip to discover the hard way:
 //!
 //! 1. **Exchange names an alternative mailbox by SMTP address, never by distinguished name.**

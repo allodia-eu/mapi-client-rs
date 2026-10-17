@@ -40,7 +40,7 @@ impl RopBatch {
     /// **"All" is not every readable property.** The server returns the values for all properties
     /// *on* the object ([MS-OXCPRPT] §3.2.5.2), while an explicit `RopGetPropertiesSpecific`
     /// returns computed properties as well ([MS-OXCPRPT] §3.2.5.1) — so a computed property is
-    /// simply absent here. Measured on Exchange Server SE `15.02.2562.045`, where a private
+    /// simply absent here. Measured on Exchange Server SE `15.02.2562.056`, where a private
     /// mailbox logon answered with 113 properties and `PidTagMailboxOwnerEntryId` was not among
     /// them, yet was 151 bytes long when asked for by name.
     ///

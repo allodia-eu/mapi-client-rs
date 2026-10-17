@@ -48,7 +48,7 @@ pub enum Credentials {
     /// HTTP Basic, sent preemptively rather than after a 401.
     ///
     /// The username may be `user`, `user@domain` or `DOMAIN\user`; Exchange accepts all three,
-    /// measured against Exchange Server SE `15.02.2562.045`.
+    /// measured against Exchange Server SE `15.02.2562.056`.
     ///
     /// Basic puts a reusable password in every request, so the endpoint must be HTTPS. This crate
     /// enforces that: see [`Error::PlaintextEndpoint`](crate::Error::PlaintextEndpoint).
@@ -75,7 +75,7 @@ pub enum Credentials {
     /// NTLM v2, as `Authorization: NTLM …` over a three-message handshake.
     ///
     /// The scheme a default-configured Exchange offers alongside `Negotiate`. Measured against
-    /// Exchange Server SE `15.02.2562.045`: the handshake costs one extra round trip on the first
+    /// Exchange Server SE `15.02.2562.056`: the handshake costs one extra round trip on the first
     /// request of a connection and nothing thereafter, because IIS answers a completed handshake
     /// with `Persistent-Auth: true` and keeps the connection authenticated.
     ///

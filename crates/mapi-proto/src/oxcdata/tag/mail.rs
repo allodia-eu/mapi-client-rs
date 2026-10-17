@@ -32,7 +32,7 @@ impl PropertyTag {
     ///
     /// **It is not evidence that anything was submitted.** [MS-OXOMSG] §2.2.3.11 has the server set
     /// it "when the e-mail message is submitted", which invites reading its presence as a send. On
-    /// Exchange Server SE `15.02.2562.045` a draft created by `RopCreateMessage` and committed by
+    /// Exchange Server SE `15.02.2562.056` a draft created by `RopCreateMessage` and committed by
     /// `RopSaveChangesMessage`, with no `RopSubmitMessage` anywhere near it, already carries one —
     /// so the property is set at save time. `mfUnsent` and `mfSubmitted` in
     /// [`MESSAGE_FLAGS`](Self::MESSAGE_FLAGS) are what actually answer the question; see

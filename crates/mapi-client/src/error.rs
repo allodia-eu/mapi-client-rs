@@ -126,7 +126,7 @@ pub enum Error {
     /// A MAPI endpoint reports protocol failures as HTTP 200 with a non-zero `X-ResponseCode`, so
     /// a non-2xx status means the request never reached the protocol at all. The common cause is
     /// an endpoint URL missing its `MailboxId` query parameter, which Exchange answers with an
-    /// empty HTTP 400 — measured against Exchange Server SE `15.02.2562.045`.
+    /// empty HTTP 400 — measured against Exchange Server SE `15.02.2562.056`.
     #[error("{url} answered HTTP {status}{}", suffix(.detail.as_ref()))]
     Http {
         /// The status code.

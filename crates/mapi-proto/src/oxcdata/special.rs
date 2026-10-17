@@ -16,7 +16,7 @@
 //!
 //! **And not every one of them is inside the user-visible tree.** [MS-OXOSFLD] §3.1.1.1 puts
 //! Reminders directly under the Root folder, a sibling of Top of Personal Folders rather than a
-//! child of it — confirmed on Exchange Server SE `15.02.2562.045`, where a recursive walk of the
+//! child of it — confirmed on Exchange Server SE `15.02.2562.056`, where a recursive walk of the
 //! IPM subtree does not contain the folder this resolves Reminders to. A client that looked for
 //! special folders by walking the tree Outlook shows would not find it at all, which is the second
 //! reason this chain exists rather than a name search.

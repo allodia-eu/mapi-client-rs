@@ -100,7 +100,7 @@ fn the_shared_mailbox_in_the_capture_is_read_whole() {
     assert_eq!(shared.owner_smtp_address(), Some("shared@lab.local"));
 }
 
-/// **Measured against Exchange Server SE `15.02.2562.045`, and the reason opening one costs a
+/// **Measured against Exchange Server SE `15.02.2562.056`, and the reason opening one costs a
 /// second round trip.** [MS-OXDSCLI] §2.2.4.1.1.2.5.2 offers a `LegacyDN` — everything a `Connect`
 /// needs, with no further lookup — and Exchange sends the `SmtpAddress` form instead. A client
 /// written from §2.2.4.1.1.2.5.2 alone finds no distinguished name at all.

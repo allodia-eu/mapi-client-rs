@@ -418,7 +418,7 @@ Write-Step 'Rebuilding MANIFEST.toml'
 
 # The version the *server itself* put in X-ServerApplication, taken from a capture rather than from
 # Get-ExchangeServer. The two disagree - the cmdlet says `Version 15.2 (Build 2562.17)` where the
-# header says `Exchange/15.02.2562.045` - and this repository standardised on the header, because
+# header says `Exchange/15.02.2562.056` - and this repository standardised on the header, because
 # that is the value a client can see and therefore the one a version-tied claim can be checked
 # against. [MS-OXCMAPIHTTP] 2.2.3.3.7
 $anyMeta = @(Get-ChildItem -Path $Root -Filter '*.meta.txt' -Recurse -File)[0]
