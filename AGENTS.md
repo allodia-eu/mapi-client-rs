@@ -208,3 +208,12 @@ caller, the script then runs with no helpers defined and exits 0. `Invoke-Gate.p
   what was measured, what it cost, and what would otherwise be re-derived. See `git log`.
 - **Review fixes belong in the commit that introduced the code**, then restack — not in a follow-up
   commit that leaves the original wrong for anyone reading history.
+- **Dependent PRs are a native GitHub stack**, managed with `gh stack` — a one-time
+  `gh extension install github/gh-stack` — and the [`gh-stack`](.agents/skills/gh-stack/SKILL.md)
+  skill, GitHub's own, pinned to the extension's release. A hand-chained base branch does not
+  survive a squash merge: the PR above it keeps the parent's original commits, which conflict with
+  their squashed copy until someone rebases them away by hand; `gh stack sync` does that itself. A
+  review fix goes into the layer whose commit introduced the code, followed by
+  `gh stack rebase --upstack`. Move the skill to a new release with
+  `gh skill install github/gh-stack gh-stack --pin <tag> --dir .agents/skills --force` — a pinned
+  skill is one `gh skill update` skips — and never edit it by hand.
