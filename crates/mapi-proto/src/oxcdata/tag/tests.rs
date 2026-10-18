@@ -133,9 +133,9 @@ fn an_unknown_tag_still_prints_usefully() {
 fn the_catalogue_names_every_tag_the_crate_has_a_constant_for() {
     let arms = include_str!("names.rs")
         .lines()
-        .filter(|line| {
-            line.contains("=> ") && (line.contains("PidTag") || line.contains("MetaTag"))
-        })
+        // The name, not the arrow: an arm too long for one line is wrapped by rustfmt, and the
+        // name is what lands on a line of its own.
+        .filter(|line| line.contains("\"PidTag") || line.contains("\"MetaTag"))
         .count();
     let catalogued = catalogued().count();
 
