@@ -117,14 +117,16 @@ powershell.exe -File scripts\Verify-Fixtures.ps1 -Mailbox developer,developer2 -
 
 **Pass `-SharedMailbox` to all three, and the same one every time.** `Test-Live.ps1` needs it for
 the shared-mailbox suite; the other two need it for the `wrong-server` capture, and a verify run
-without it re-captures nine scenarios out of ten and reports the tenth as missing — which is a
-difference about the arguments rather than about the server.
+without it re-captures eleven scenarios out of twelve and reports the twelfth as missing — which is
+a difference about the arguments rather than about the server.
 
 Re-captures into a scratch directory and demands byte-for-byte equality with what is committed.
 Any difference is a finding. That rule is only usable because capture already removes the few
 things that genuinely differ every time — the clocks, the per-connection `RetryDelay`, the logon
-timestamps, and the response auxiliary buffer, whose length and contents change on every
-connection. Each capture's `.meta.txt` itemises exactly what was removed.
+timestamps, the response auxiliary buffer, whose length and contents change on every connection,
+and the upper bound of a final ICS state's `MetaTagCnsetSeen`, which is the newest change number in
+the whole mailbox and moves whenever any scenario writes. Each capture's `.meta.txt` itemises
+exactly what was removed.
 
 Two more are removed by the *scenario* saying so rather than by an anchored offset: the message id a
 save mints, and **`PidTagMessageSizeExtended`**, which is how large the mailbox is at the moment of

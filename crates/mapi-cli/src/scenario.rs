@@ -11,6 +11,7 @@
 mod acts;
 mod items;
 mod session;
+mod sync;
 mod writes;
 
 use std::path::PathBuf;
@@ -23,6 +24,7 @@ use crate::capture::{Recorder, scenario_directory, write_scenario};
 use crate::scenario::acts::acts;
 use crate::scenario::items::items;
 use crate::scenario::session::session;
+use crate::scenario::sync::sync;
 use crate::scenario::writes::writes;
 use crate::scrub::Rules;
 use crate::settings::Connection;
@@ -97,6 +99,9 @@ pub(crate) enum Scenario {
     /// reports it nowhere, so the scenario reads the destination folder to find out what the
     /// message is now called.
     Acts,
+    /// Two incremental downloads of the Inbox: a first synchronization across several buffers, and
+    /// one resumed from its checkpoint that reports nothing.
+    Sync,
     /// A `Connect` the server refuses because it cannot map the distinguished name.
     ///
     /// Needs `--user-dn-override` naming something the server has never heard of.
@@ -118,6 +123,7 @@ impl Scenario {
             Self::Items => "items",
             Self::Writes => "writes",
             Self::Acts => "acts",
+            Self::Sync => "sync",
             Self::ConnectRefused => "connect-refused",
             Self::WrongServer => "wrong-server",
         }
@@ -144,6 +150,7 @@ pub(crate) async fn capture(
         Scenario::Items => items(&client, &recorder).await?,
         Scenario::Writes => writes(&client, &recorder).await?,
         Scenario::Acts => acts(&client, &recorder).await?,
+        Scenario::Sync => sync(&client, &recorder).await?,
         Scenario::ConnectRefused => connect_refused(&client, &recorder).await?,
         Scenario::WrongServer => wrong_server(&client, &recorder).await?,
     }
@@ -355,6 +362,7 @@ mod tests {
         assert_eq!(Scenario::Session.directory_name(), "session");
         assert_eq!(Scenario::Items.directory_name(), "items");
         assert_eq!(Scenario::Writes.directory_name(), "writes");
+        assert_eq!(Scenario::Sync.directory_name(), "sync");
         assert_eq!(Scenario::ConnectRefused.directory_name(), "connect-refused");
         assert_eq!(
             parse(&["connect-refused"]).scenario,

@@ -21,6 +21,9 @@
 #[allow(clippy::match_same_arms, reason = "a lookup table, one row per opcode")]
 pub(crate) fn rop_list(rops: &[u8]) -> Vec<(u8, &[u8])> {
     let u16_at = |at: usize| usize::from(u16::from_le_bytes([rops[at], rops[at + 1]]));
+    let u32_at = |at: usize| {
+        usize::try_from(u32::from_le_bytes(rops[at..at + 4].try_into().unwrap())).unwrap()
+    };
 
     let mut out = Vec::new();
     let mut at = 0;
@@ -58,6 +61,13 @@ pub(crate) fn rop_list(rops: &[u8]) -> Vec<(u8, &[u8])> {
             0x5D => 3,                      // RopCommitStream
             0x66 => 7 + 8 * u16_at(at + 5), // RopSetReadFlags: ReadFlags, a count, then the ids
             0xFE => 14 + u16_at(at + 12),   // RopLogon: EssdnSize counts the NUL
+            0x4E => 7,                      // RopFastTransferSourceGetBuffer: BufferSize
+            // 0xBABE, so MaximumBufferSize
+            0x70 => synchronization_configure(rops, at),
+            0x75 => 11, // RopSynchronizationUploadStateStreamBegin: StateProperty, the size
+            0x76 => 7 + u32_at(at + 3), // ...UploadStateStreamContinue: StreamDataSize, the data
+            0x77 => 3,  // RopSynchronizationUploadStateStreamEnd
+            0x82 => 4,  // RopSynchronizationGetTransferState
             other => panic!("ROP 0x{other:02X} is not one this crate sends"),
         };
         out.push((opcode, &rops[at..at + length]));
@@ -81,6 +91,17 @@ fn modify_recipients(rops: &[u8], at: usize) -> usize {
         length += 7 + u16_at(at + length + 5);
     }
     length
+}
+
+/// The length of a `RopSynchronizationConfigure`: a restriction counted by `RestrictionDataSize`,
+/// then the extra flags, then a counted list of tags.
+///
+/// [MS-OXCROPS] §2.2.13.1.1 — request buffer
+fn synchronization_configure(rops: &[u8], at: usize) -> usize {
+    let u16_at = |at: usize| usize::from(u16::from_le_bytes([rops[at], rops[at + 1]]));
+    let restriction = u16_at(at + 8);
+    let tags = u16_at(at + 10 + restriction + 4);
+    10 + restriction + 4 + 2 + 4 * tags
 }
 
 /// The opcodes of a ROP list, in order.

@@ -28,6 +28,8 @@
 
 /// The ROP walker, which grows with every ROP the crate learns to send.
 mod roplist;
+/// The responses to the ROPs of an incremental download.
+pub(crate) mod sync;
 /// The responses to the ROPs that change a mailbox, which are their own half of the harness.
 pub(crate) mod writes;
 
