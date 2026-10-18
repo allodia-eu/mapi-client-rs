@@ -10,12 +10,12 @@
 use crate::error::ErrorCode;
 use crate::oxcdata::{LongTermId, PropertySet, ShortTermId};
 use crate::rop::{
-    CreateAttachmentResponse, CreateMessageResponse, DeleteMessagesResponse, GetPropertiesResponse,
-    GetTableResponse, IdFromLongTermIdResponse, LogonResponse, LongTermIdFromIdResponse,
-    MoveCopyMessagesResponse, OpenFolderResponse, OpenMessageResponse, ProgressResponse,
-    PropertyIdsResponse, PropertyNamesResponse, PropertyProblemsResponse, QueryRowsResponse,
-    ReadStreamResponse, RopId, SaveChangesResponse, SetColumnsResponse, SetReadFlagsResponse,
-    StreamSizeResponse, TableStatusResponse, WriteStreamResponse,
+    CreateAttachmentResponse, CreateMessageResponse, DeleteMessagesResponse, GetBufferResponse,
+    GetPropertiesResponse, GetTableResponse, IdFromLongTermIdResponse, LogonResponse,
+    LongTermIdFromIdResponse, MoveCopyMessagesResponse, OpenFolderResponse, OpenMessageResponse,
+    ProgressResponse, PropertyIdsResponse, PropertyNamesResponse, PropertyProblemsResponse,
+    QueryRowsResponse, ReadStreamResponse, RopId, SaveChangesResponse, SetColumnsResponse,
+    SetReadFlagsResponse, StreamSizeResponse, TableStatusResponse, WriteStreamResponse,
 };
 
 /// One decoded ROP response.
@@ -111,7 +111,19 @@ pub enum RopResponse {
     IdFromLongTermId(IdFromLongTermIdResponse),
     /// A successful `RopLongTermIdFromId`.
     LongTermIdFromId(LongTermIdFromIdResponse),
-    /// A ROP the server refused. Its body stopped after `ReturnValue`.
+    /// A successful `RopFastTransferSourceGetBuffer`: one buffer of a `FastTransfer` stream.
+    FastTransferBuffer(GetBufferResponse),
+    /// A `RopFastTransferSourceGetBuffer` refused because the server is busy, and how long it asks
+    /// the client to wait — the refusal of that ROP whose body goes on past `ReturnValue`.
+    ///
+    /// [MS-OXCROPS] §2.2.12.4.2 — `BackoffTime`, "present if the `ReturnValue` is 0x00000480"
+    /// [MS-OXCFXICS] §3.3.5.9.1 — the client SHOULD wait at least that long before retrying
+    FastTransferBusy {
+        /// Milliseconds to wait.
+        backoff_ms: u32,
+    },
+    /// A ROP the server refused. Its body stopped after `ReturnValue`, except for a refused
+    /// `RopFastTransferSourceGetBuffer`, whose transfer fields and buffer were read past.
     Failed {
         /// Which ROP failed.
         rop: RopId,
@@ -120,7 +132,7 @@ pub enum RopResponse {
     },
     /// The mailbox is not on this server; log on again at `server_name`.
     ///
-    /// The one refusal whose body does *not* stop after `ReturnValue`: `RopLogon` answering
+    /// A refusal whose body does *not* stop after `ReturnValue`: `RopLogon` answering
     /// `ecWrongServer` appends `LogonFlags`, `ServerNameSize` and `ServerName`. Reading it as a
     /// bare failure would leave those bytes in the stream and decode every later response against
     /// them.
@@ -345,6 +357,15 @@ impl RopResponse {
         }
     }
 
+    /// The buffer, if this is a successful `RopFastTransferSourceGetBuffer` response.
+    #[must_use]
+    pub const fn as_fast_transfer_buffer(&self) -> Option<&GetBufferResponse> {
+        match self {
+            Self::FastTransferBuffer(response) => Some(response),
+            _ => None,
+        }
+    }
+
     /// The error code, if the server refused this ROP.
     ///
     /// A redirect is a refusal too: it reports [`ErrorCode::WRONG_SERVER`], so a caller that only
@@ -354,6 +375,7 @@ impl RopResponse {
         match self {
             Self::Failed { code, .. } => Some(*code),
             Self::LogonRedirect { .. } => Some(ErrorCode::WRONG_SERVER),
+            Self::FastTransferBusy { .. } => Some(ErrorCode::SERVER_BUSY),
             _ => None,
         }
     }

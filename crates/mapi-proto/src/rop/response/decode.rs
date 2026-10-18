@@ -12,23 +12,27 @@
 //!   for, or `RopProgress` for one it chose to run asynchronously.
 //! * A failing ROP's response stops right after `ReturnValue`, so its success fields are simply
 //!   absent — which is why that field is read before anything else.
-//! * Two refusals are exceptions to the line above, and both would desynchronise everything after
-//!   them. `RopLogon` answering `ecWrongServer` appends a redirect naming the server to use
+//! * Three refusals are exceptions to the line above, and all three would desynchronise everything
+//!   after them. `RopLogon` answering `ecWrongServer` appends a redirect naming the server to use
 //!   instead; `RopMoveCopyMessages` answering `ecDstNullObject` appends a four-byte
-//!   `DestHandleIndex` and a `PartialCompletion`.
+//!   `DestHandleIndex` and a `PartialCompletion`; `RopFastTransferSourceGetBuffer` has no failure
+//!   layout at all, so every refusal of it appends its transfer fields, then a `BackoffTime` for
+//!   `ServerBusy` or a `TransferBuffer` for anything else.
 //!
 //! [MS-OXCROPS] §2.2.1 — ROP output buffers
 
 use crate::error::{Error, ErrorCode, Result};
 use crate::oxcdata::PropertyTag;
 use crate::rop::send::is_null_destination;
+use crate::rop::sync::read_refusal;
 use crate::rop::{
-    CreateAttachmentResponse, CreateMessageResponse, DeleteMessagesResponse, GetPropertiesResponse,
-    GetTableResponse, IdFromLongTermIdResponse, LogonResponse, LongTermIdFromIdResponse,
-    MoveCopyMessagesResponse, OpenFolderResponse, OpenMessageResponse, ProgressResponse,
-    PropertyIdsResponse, PropertyNamesResponse, PropertyProblemsResponse, QueryRowsResponse,
-    ReadStreamResponse, RopId, RopResponse, SaveChangesResponse, SetColumnsResponse,
-    SetReadFlagsResponse, StreamSizeResponse, TableStatusResponse, WriteStreamResponse,
+    CreateAttachmentResponse, CreateMessageResponse, DeleteMessagesResponse, GetBufferResponse,
+    GetPropertiesResponse, GetTableResponse, IdFromLongTermIdResponse, LogonResponse,
+    LongTermIdFromIdResponse, MoveCopyMessagesResponse, OpenFolderResponse, OpenMessageResponse,
+    ProgressResponse, PropertyIdsResponse, PropertyNamesResponse, PropertyProblemsResponse,
+    QueryRowsResponse, ReadStreamResponse, RopId, RopResponse, SaveChangesResponse,
+    SetColumnsResponse, SetReadFlagsResponse, StreamSizeResponse, TableStatusResponse,
+    WriteStreamResponse,
 };
 use crate::wire::Reader;
 
@@ -83,11 +87,13 @@ pub(crate) fn decode_all(rops: &[u8], context: Decoding<'_>) -> Result<Vec<RopRe
         let handle_index = r.u8()?;
         let code = ErrorCode::new(r.u32()?);
         if !code.is_success() {
-            // The two exceptions to "a failing ROP stops after ReturnValue". Both append fields,
-            // and reading either as a bare failure leaves those bytes in the stream — so the next
-            // RopId is taken from the middle of a field and every later response is nonsense.
+            // The exceptions to "a failing ROP stops after ReturnValue". Each appends fields, and
+            // reading one as a bare failure leaves those bytes in the stream — so the next RopId
+            // is taken from the middle of a field and every later response is nonsense.
             out.push(if rop == RopId::LOGON && code == ErrorCode::WRONG_SERVER {
                 read_logon_redirect(&mut r)?
+            } else if rop == RopId::FAST_TRANSFER_SOURCE_GET_BUFFER {
+                read_refusal(&mut r, code)?
             } else if rop == RopId::MOVE_COPY_MESSAGES && is_null_destination(code) {
                 RopResponse::MoveCopyMessages(MoveCopyMessagesResponse::read_null_destination(
                     &mut r,
@@ -140,7 +146,15 @@ fn decode_success(
         | RopId::REMOVE_ALL_RECIPIENTS
         | RopId::SAVE_CHANGES_ATTACHMENT
         | RopId::SUBMIT_MESSAGE
-        | RopId::COMMIT_STREAM => RopResponse::Succeeded { rop },
+        | RopId::COMMIT_STREAM
+        | RopId::SYNCHRONIZATION_CONFIGURE
+        | RopId::SYNCHRONIZATION_UPLOAD_STATE_STREAM_BEGIN
+        | RopId::SYNCHRONIZATION_UPLOAD_STATE_STREAM_CONTINUE
+        | RopId::SYNCHRONIZATION_UPLOAD_STATE_STREAM_END
+        | RopId::SYNCHRONIZATION_GET_TRANSFER_STATE => RopResponse::Succeeded { rop },
+        RopId::FAST_TRANSFER_SOURCE_GET_BUFFER => {
+            RopResponse::FastTransferBuffer(GetBufferResponse::read(r)?)
+        }
         RopId::MOVE_COPY_MESSAGES => {
             RopResponse::MoveCopyMessages(MoveCopyMessagesResponse::read(r)?)
         }
