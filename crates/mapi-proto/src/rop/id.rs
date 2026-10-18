@@ -41,6 +41,10 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.8.8
     pub const DELETE_PROPERTIES: Self = Self(0x0B);
+    /// `RopFastTransferSourceGetBuffer`, `0x4E` — the next buffer of a `FastTransfer` stream.
+    ///
+    /// [MS-OXCROPS] §2.2.12.4
+    pub const FAST_TRANSFER_SOURCE_GET_BUFFER: Self = Self(0x4E);
     /// `RopGetAttachmentTable`, `0x21` — the attachments on a message.
     ///
     /// Its response carries **no row count**, unlike the folder tables, so how many attachments
@@ -192,6 +196,30 @@ impl RopId {
     ///
     /// [MS-OXCROPS] §2.2.7.1
     pub const SUBMIT_MESSAGE: Self = Self(0x32);
+    /// `RopSynchronizationConfigure`, `0x70` — opens an incremental download context on a folder.
+    ///
+    /// [MS-OXCROPS] §2.2.13.1
+    pub const SYNCHRONIZATION_CONFIGURE: Self = Self(0x70);
+    /// `RopSynchronizationGetTransferState`, `0x82` — opens a transfer object over a context's
+    /// current ICS state.
+    ///
+    /// [MS-OXCROPS] §2.2.13.8
+    pub const SYNCHRONIZATION_GET_TRANSFER_STATE: Self = Self(0x82);
+    /// `RopSynchronizationUploadStateStreamBegin`, `0x75` — begins uploading one ICS state
+    /// property.
+    ///
+    /// [MS-OXCROPS] §2.2.13.9
+    pub const SYNCHRONIZATION_UPLOAD_STATE_STREAM_BEGIN: Self = Self(0x75);
+    /// `RopSynchronizationUploadStateStreamContinue`, `0x76` — uploads part of one ICS state
+    /// property.
+    ///
+    /// [MS-OXCROPS] §2.2.13.10
+    pub const SYNCHRONIZATION_UPLOAD_STATE_STREAM_CONTINUE: Self = Self(0x76);
+    /// `RopSynchronizationUploadStateStreamEnd`, `0x77` — ends the upload of one ICS state
+    /// property.
+    ///
+    /// [MS-OXCROPS] §2.2.13.11
+    pub const SYNCHRONIZATION_UPLOAD_STATE_STREAM_END: Self = Self(0x77);
     /// `RopWriteStream`, `0x2D` — writes bytes at the stream's cursor.
     ///
     /// [MS-OXCROPS] §2.2.9.3
@@ -252,6 +280,18 @@ impl RopId {
             Self::BACKOFF => "RopBackoff",
             Self::LOGON => "RopLogon",
             Self::BUFFER_TOO_SMALL => "RopBufferTooSmall",
+            Self::FAST_TRANSFER_SOURCE_GET_BUFFER => "RopFastTransferSourceGetBuffer",
+            Self::SYNCHRONIZATION_CONFIGURE => "RopSynchronizationConfigure",
+            Self::SYNCHRONIZATION_GET_TRANSFER_STATE => "RopSynchronizationGetTransferState",
+            Self::SYNCHRONIZATION_UPLOAD_STATE_STREAM_BEGIN => {
+                "RopSynchronizationUploadStateStreamBegin"
+            }
+            Self::SYNCHRONIZATION_UPLOAD_STATE_STREAM_CONTINUE => {
+                "RopSynchronizationUploadStateStreamContinue"
+            }
+            Self::SYNCHRONIZATION_UPLOAD_STATE_STREAM_END => {
+                "RopSynchronizationUploadStateStreamEnd"
+            }
             _ => return None,
         })
     }
@@ -328,6 +368,36 @@ mod tests {
             (RopId::BACKOFF, 0xF9, "RopBackoff"),
             (RopId::LOGON, 0xFE, "RopLogon"),
             (RopId::BUFFER_TOO_SMALL, 0xFF, "RopBufferTooSmall"),
+            (
+                RopId::FAST_TRANSFER_SOURCE_GET_BUFFER,
+                0x4E,
+                "RopFastTransferSourceGetBuffer",
+            ),
+            (
+                RopId::SYNCHRONIZATION_CONFIGURE,
+                0x70,
+                "RopSynchronizationConfigure",
+            ),
+            (
+                RopId::SYNCHRONIZATION_GET_TRANSFER_STATE,
+                0x82,
+                "RopSynchronizationGetTransferState",
+            ),
+            (
+                RopId::SYNCHRONIZATION_UPLOAD_STATE_STREAM_BEGIN,
+                0x75,
+                "RopSynchronizationUploadStateStreamBegin",
+            ),
+            (
+                RopId::SYNCHRONIZATION_UPLOAD_STATE_STREAM_CONTINUE,
+                0x76,
+                "RopSynchronizationUploadStateStreamContinue",
+            ),
+            (
+                RopId::SYNCHRONIZATION_UPLOAD_STATE_STREAM_END,
+                0x77,
+                "RopSynchronizationUploadStateStreamEnd",
+            ),
         ] {
             assert_eq!(rop.as_u8(), raw);
             assert_eq!(RopId::new(raw), rop);

@@ -81,6 +81,11 @@ impl ErrorCode {
     ///
     /// One of the refusals [MS-OXOMSG] §3.3.5.1.1 lists for `RopSubmitMessage`. [MS-OXCDATA] §2.4.2
     pub const QUOTA_EXCEEDED: Self = Self(0x0000_04D9);
+    /// `ServerBusy`, `0x00000480` — the server is too busy; a `RopFastTransferSourceGetBuffer`
+    /// answering this says how long to wait.
+    ///
+    /// [MS-OXCDATA] §2.4.1
+    pub const SERVER_BUSY: Self = Self(0x0000_0480);
     /// A string exceeded the maximum permitted length. `0x80040105`, `ecStringTooLarge`.
     pub const STRING_TOO_LONG: Self = Self(0x8004_0105);
     /// The operation succeeded. `0x00000000`, also written `ecSuccess`.
@@ -134,6 +139,7 @@ impl ErrorCode {
             Self::SUCCESS => "Success",
             Self::UNKNOWN_USER => "UnknownUser",
             Self::WRONG_SERVER => "WrongServer",
+            Self::SERVER_BUSY => "ServerBusy",
             Self::LOGIN_PERMISSION => "LoginPermission",
             Self::GENERAL_FAILURE => "GeneralFailure",
             Self::NOT_SUPPORTED => "NotSupported",

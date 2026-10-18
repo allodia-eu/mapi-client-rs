@@ -82,6 +82,18 @@ mailbox as it was first provisioned.
   structural meta-properties.
 - **`PropertyValue::Object`**, for a `PtypObject` a stream carries inline. A property fetch still
   refuses one.
+- **The ROPs of an incremental download**, on `RopBatch`: `synchronization_configure`,
+  `upload_state_begin`, `upload_state_continue` and `upload_state_end`, `fast_transfer_get_buffer`
+  and `synchronization_get_transfer_state`. The configuration is `ContentsDownload`, a type rather
+  than three flag words, because most of the bits are not choices. `Unicode` and `ForceUnicode`,
+  `RecoverMode`, `NoForeignIdentifiers`, `Eid`, `CN` and `MessageSize` are always set; the
+  restriction, the property filter, normal or FAI messages, read state, partial items, progress
+  and newest-first are named choices. `RopFastTransferSourceGetBuffer` answering `ServerBusy` is
+  decoded as `RopResponse::FastTransferBusy` with its `BackoffTime`. Every refusal of that ROP
+  continues past `ReturnValue`, as §2.2.12.4.2's single layout says: the transfer fields, then the
+  wait for `ServerBusy` or a buffer for anything else. On Exchange Server SE `15.02.2562.056`, a
+  refusal with `ecNotSupported` carried the nine bytes of the transfer fields and an empty buffer.
+  Reading any of them as a bare failure would desynchronise the rest of the buffer.
 
 ### Changed
 
