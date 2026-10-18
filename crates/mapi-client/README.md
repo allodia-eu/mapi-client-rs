@@ -208,7 +208,9 @@ event at a time, fetched only as the caller reads, and checkpointed as each mess
 so that a download cut short resumes where it stopped. The state carries the scope it was obtained
 for and is refused for any other, because the server cannot tell. `Logon::folder_stamps` reads
 every folder's `FolderStamp` in one hierarchy-table read, which says which folders a pass need not
-download at all.
+download at all. A download whose server turns out to be behind the state — restored from a
+backup — is refused rather than trusted, because it skips every change it numbers with a change
+number the state has already seen.
 
 No notifications and no address book.
 

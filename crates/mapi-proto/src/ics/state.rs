@@ -396,12 +396,23 @@ impl IcsState {
     /// more efficient version than the version obtained by using checkpointing alone". A property
     /// the `state` element left out becomes empty, since the element *is* the final state.
     ///
+    /// A final state from a server that has gone back in time is refused rather than kept, and
+    /// this state is left as it was: such a state lists as delivered a message the server never
+    /// sent. See [`check_not_ahead_of`](Self::check_not_ahead_of).
+    ///
+    /// # Errors
+    ///
+    /// [`Error::IcsStateAheadOfServer`] when the final state is behind this one.
+    ///
     /// [MS-OXCFXICS] §2.2.4.3.25 — `state` element
-    pub fn complete(&mut self, state: FinalState) {
+    /// [MS-OXCFXICS] §3.3.5.3 — back-in-time detection
+    pub fn complete(&mut self, state: FinalState) -> Result<()> {
+        self.check_not_ahead_of(&state)?;
         self.idset_given = state.idset_given;
         self.cnset_seen = state.cnset_seen;
         self.cnset_seen_fai = state.cnset_seen_fai;
         self.cnset_read = state.cnset_read;
+        Ok(())
     }
 
     /// Encodes the state, scope and all, for a caller to persist.
@@ -486,6 +497,8 @@ fn read_block<'a>(r: &mut Reader<'a>) -> Result<&'a [u8]> {
     let length = usize::try_from(r.u32()?).unwrap_or(usize::MAX);
     r.bytes(length)
 }
+
+mod rollback;
 
 #[cfg(test)]
 mod tests;
