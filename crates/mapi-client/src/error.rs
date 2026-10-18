@@ -148,8 +148,11 @@ pub enum Error {
     /// this connection will not be used again.
     ///
     /// MAPI/HTTP allows exactly one request in flight per Session Context. When a request fails
-    /// in transit there is no way to tell whether the server processed it, and sending the next
-    /// one regardless is how a client ends up reading somebody else's answer. Reconnect.
+    /// in transit, or the future driving it is dropped before its answer arrives, there is no way
+    /// to tell whether the server processed it, and sending the next one regardless is how a
+    /// client ends up reading somebody else's answer. Reconnect —
+    /// [`Connection::disconnect`](crate::Connection::disconnect) still works, and frees the
+    /// server's context sooner than its timeout would.
     ///
     /// [MS-OXCMAPIHTTP] §2.2.3.3.3 — `X-ResponseCode` 15, one request at a time
     #[error("this connection is no longer usable and must be re-established: {cause}")]

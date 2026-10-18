@@ -310,6 +310,165 @@ async fn a_connection_that_lost_a_request_will_not_send_another() {
     );
 }
 
+/// A future dropped while its request is in flight — the deadline a caller wraps around a read,
+/// or a `select!` that takes another branch — leaves the connection saying what happened rather
+/// than wedged. The session behind it was waiting for an answer that will never be handed over,
+/// and a session in that state refuses everything, `Disconnect` included; this is the test that it
+/// no longer does.
+#[tokio::test]
+async fn a_dropped_request_poisons_the_connection_and_disconnect_still_works() {
+    let server = MapiServer::start().await;
+    server.reply(connect_ok("Alice Example"));
+    server.reply_ok(execute_body(&logon_response(0), &[LOGON_HANDLE]));
+    server.reply(mapi_ok(Vec::new()).set_delay(Duration::from_millis(500)));
+    server.reply_ok(support::disconnect_body());
+
+    let client = server.client();
+    let mut logon = client.connect().await.unwrap().logon().await.unwrap();
+    {
+        let mut rows = logon
+            .well_known(WellKnownFolder::Inbox)
+            .unwrap()
+            .contents()
+            .rows();
+        let dropped = tokio::time::timeout(Duration::from_millis(100), rows.try_next()).await;
+        assert!(
+            dropped.is_err(),
+            "the deadline fires while the answer is delayed"
+        );
+
+        let poisoned = rows.try_next().await.unwrap_err();
+        let Error::Poisoned { cause } = &poisoned else {
+            panic!("expected Poisoned, got {poisoned:?}");
+        };
+        assert!(cause.contains("abandoned"), "{cause}");
+    }
+
+    logon.disconnect().await.unwrap();
+
+    let requests = server.requests().await;
+    assert_eq!(
+        requests.len(),
+        4,
+        "connect, logon, the dropped read, disconnect"
+    );
+    let disconnect = &requests[3];
+    assert_eq!(
+        disconnect.headers.get("X-RequestType").unwrap(),
+        "Disconnect"
+    );
+    assert!(
+        disconnect
+            .headers
+            .get("Cookie")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("MapiContext=ctx-0001"),
+        "the disconnect names the context the abandoned request belonged to"
+    );
+}
+
+/// When the server finished the request the client gave up on, Exchange has advanced its
+/// sequence cookie in a response nobody read, and refuses the `Disconnect` as `X-ResponseCode` 15.
+/// The old context is then freed the way [MS-OXCMAPIHTTP] §3.1.5.7 frees one: a `Connect` that
+/// carries its cookies, and a `Disconnect` of the context that creates.
+#[tokio::test]
+async fn a_disconnect_refused_for_its_sequence_reconnects_and_disconnects_again() {
+    let server = MapiServer::start().await;
+    server.reply(connect_ok("Alice Example"));
+    server.reply_ok(execute_body(&logon_response(0), &[LOGON_HANDLE]));
+    server.reply(mapi_ok(Vec::new()).set_delay(Duration::from_millis(500)));
+    server.reply(mapi_response(
+        15,
+        b"Request contains previous sequence cookie".to_vec(),
+    ));
+    server.reply(
+        mapi_ok(support::connect_body("Alice Example"))
+            .append_header("Set-Cookie", "MapiContext=ctx-0002; Path=/mapi; HttpOnly"),
+    );
+    server.reply_ok(support::disconnect_body());
+
+    let client = server.client();
+    let mut logon = client.connect().await.unwrap().logon().await.unwrap();
+    {
+        let mut rows = logon
+            .well_known(WellKnownFolder::Inbox)
+            .unwrap()
+            .contents()
+            .rows();
+        let dropped = tokio::time::timeout(Duration::from_millis(100), rows.try_next()).await;
+        assert!(
+            dropped.is_err(),
+            "the deadline fires while the answer is delayed"
+        );
+    }
+    logon.disconnect().await.unwrap();
+
+    let requests = server.requests().await;
+    let kinds: Vec<_> = requests
+        .iter()
+        .map(|request| {
+            request
+                .headers
+                .get("X-RequestType")
+                .unwrap()
+                .to_str()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "Connect",
+            "Execute",
+            "Execute",
+            "Disconnect",
+            "Connect",
+            "Disconnect"
+        ]
+    );
+    let cookie = |index: usize| {
+        requests[index]
+            .headers
+            .get("Cookie")
+            .map(|value| value.to_str().unwrap().to_owned())
+    };
+    assert!(
+        cookie(4).unwrap().contains("MapiContext=ctx-0001"),
+        "the reconnect names the context it replaces, so the server can clean it up"
+    );
+    assert!(cookie(5).unwrap().contains("MapiContext=ctx-0002"));
+}
+
+/// The same for a request lost in transit rather than dropped: the server still holds a Session
+/// Context, and disconnecting is what frees it before its timeout does.
+#[tokio::test]
+async fn a_connection_that_lost_a_request_can_still_disconnect() {
+    let server = MapiServer::start().await;
+    server.reply(connect_ok("Alice Example"));
+    server.reply_ok(execute_body(&logon_response(0), &[LOGON_HANDLE]));
+    server.reply(mapi_ok(Vec::new()).set_delay(Duration::from_secs(30)));
+    server.reply_ok(support::disconnect_body());
+
+    let client = server
+        .builder()
+        .timeout(Duration::from_millis(150))
+        .build()
+        .unwrap();
+    let mut logon = client.connect().await.unwrap().logon().await.unwrap();
+    let timed_out = logon
+        .well_known(WellKnownFolder::Inbox)
+        .unwrap()
+        .contents()
+        .collect()
+        .await
+        .unwrap_err();
+    assert!(matches!(timed_out, Error::Timeout { .. }), "{timed_out:?}");
+
+    logon.disconnect().await.unwrap();
+}
+
 /// A host that is not listening is not a protocol failure, and the error says so.
 #[tokio::test]
 async fn an_unreachable_endpoint_is_a_connection_failure() {
