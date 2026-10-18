@@ -26,8 +26,7 @@ use mapi_client::{
     PropertyValue, TableString, TaggedValue, WellKnownFolder,
 };
 
-// Each suite below is its own file for two reasons that apply to all of them: each asks its own
-// question, and this file is at the workspace's 500-line limit.
+// Each suite is its own file: each asks its own question, and this file is at the 500-line limit.
 
 /// The entry-id chain, the `Depth` flag and the id conversions: folders `RopLogon` never names.
 mod folders;
@@ -46,6 +45,9 @@ mod writes;
 /// A request given up on part way, and the disconnect that has to work afterwards.
 mod cancellation;
 
+/// Incremental synchronization: a first download, the next one, and the changes between.
+mod sync;
+
 /// Acting on an item once it exists: sending mail to the other lab mailbox, archiving a message,
 /// and marking one read. Self-cleaning like `writes`, and the only suite needing two mailboxes.
 mod acts;
@@ -56,9 +58,8 @@ mod acts;
 #[cfg(feature = "autodiscover")]
 mod shared;
 
-/// A wrong password under each authentication scheme, and the fact that all of them reach the same
-/// mailbox. The only suite that builds its own clients rather than using `builder()` — which it has
-/// to, since the whole question is what happens when the credentials differ.
+/// A wrong password under each authentication scheme, and that all of them reach the same mailbox.
+/// The only suite building its own clients, since the question is what different credentials do.
 mod schemes;
 
 /// Kerberos: what authenticates `Negotiate`, across a referral and through a skew retry.

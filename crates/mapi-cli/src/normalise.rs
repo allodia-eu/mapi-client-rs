@@ -6,7 +6,7 @@
 //! difference that mattered would be lost in the noise. So "any difference at all is a finding"
 //! is the rule, and this module is what earns it.
 //!
-//! Four things qualify, each **measured** against Exchange Server SE `15.02.2562.056` rather than
+//! Five things qualify, each **measured** against Exchange Server SE `15.02.2562.056` rather than
 //! assumed:
 //!
 //! * `X-ElapsedTime` and `X-StartTime` in the response preamble — how long the server took, and
@@ -17,6 +17,8 @@
 //!   the same server. It is per-connection advice, not a server constant.
 //! * `RopLogon`'s `LogonTime` and `GwartTime` — the moment of the logon.
 //! * The **response auxiliary buffer**, which is removed entirely.
+//! * The upper bound of a final ICS state's `MetaTagCnsetSeen`, which is the newest change number
+//!   in the whole mailbox and moves whenever anything in it is written. See [`state`].
 //!
 //! # The auxiliary buffer, and why it goes
 //!
@@ -46,6 +48,8 @@
 //! [MS-OXCSTOR] §2.2.1.1.3 — `RopLogon` success response buffer
 
 use mapi_proto::RequestType;
+
+mod state;
 
 /// The preamble headers whose values are the server's own clock.
 ///
@@ -100,6 +104,7 @@ pub(crate) fn response(request_type: RequestType, payload: &mut Vec<u8>) -> Vec<
         }
         RequestType::Execute => {
             changed.extend(logon_times(payload, body));
+            changed.extend(state::cnset_bounds(payload, body));
             let at = execute_auxiliary_size_at(payload, body);
             changed.extend(auxiliary(payload, at));
         }
