@@ -25,6 +25,7 @@ use crate::wire::Writer;
 
 mod objects;
 mod props;
+mod sync;
 mod tables;
 mod writes;
 
