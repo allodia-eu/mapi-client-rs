@@ -106,6 +106,16 @@ mailbox as it was first provisioned.
   - between two downloads of Drafts, a create, a modify, a delete, a move out, a move in, a read
     flag and a category are reported as exactly those: the read flag as a read-state change and the
     category as a partial change naming the group that holds `Keywords`.
+- **A server that has gone back in time is detected, not trusted.** [MS-OXCFXICS] §3.3.5.3 makes
+  detecting a rollback the client's job. After a restore from backup, the server re-issues change
+  numbers a state has already seen, and skips every change numbered with one.
+  `IcsState::check_not_ahead_of` compares a final state with the state it ends, and `Download`
+  refuses a final state that is behind with `IcsStateAheadOfServer` instead of keeping it.
+  Measured on Exchange Server SE `15.02.2562.056`, for both lab mailboxes, by uploading a state
+  claiming the next 200 change numbers. A message created afterwards was not reported, and the
+  final state's `CnsetSeen` ran to the server's real newest change rather than the claim. It also
+  listed the unreported message as delivered, so keeping it would have lost that message for
+  good. An honest state and a restricted one were not refused.
 - **`Logon::folder_stamps`: which folders a pass need not download.** One hierarchy-table read
   of the whole mailbox returns a `FolderStamp` per folder: `PidTagLocalCommitTimeMax` and
   `PidTagDeletedCountTotal` ([MS-OXCFOLD] §2.2.2.2.1.14–15). A folder whose stamp is unchanged

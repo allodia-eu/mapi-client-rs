@@ -396,6 +396,9 @@ impl IcsState {
     /// more efficient version than the version obtained by using checkpointing alone". A property
     /// the `state` element left out becomes empty, since the element *is* the final state.
     ///
+    /// Check it with [`check_not_ahead_of`](Self::check_not_ahead_of) first: a final state from a
+    /// server that has gone back in time lists as delivered a message it never sent.
+    ///
     /// [MS-OXCFXICS] §2.2.4.3.25 — `state` element
     pub fn complete(&mut self, state: FinalState) {
         self.idset_given = state.idset_given;
@@ -486,6 +489,8 @@ fn read_block<'a>(r: &mut Reader<'a>) -> Result<&'a [u8]> {
     let length = usize::try_from(r.u32()?).unwrap_or(usize::MAX);
     r.bytes(length)
 }
+
+mod rollback;
 
 #[cfg(test)]
 mod tests;

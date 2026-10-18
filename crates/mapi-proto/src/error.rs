@@ -406,6 +406,27 @@ pub enum Error {
         differs: &'static str,
     },
 
+    /// A download's final state is behind the state it started from: the server's newest change
+    /// is older than one the client has already seen, so the server has gone back in time.
+    ///
+    /// See [`IcsState::check_not_ahead_of`](crate::ics::IcsState::check_not_ahead_of) for what was
+    /// measured and what to do.
+    ///
+    /// [MS-OXCFXICS] §3.3.5.3 — back-in-time detection
+    #[error(
+        "the server has gone back in time: this ICS state has seen change {seen} of replica \
+         {replica}, and the server's newest is {newest}. Changes made since the server went back \
+         would be skipped, so abandon the state and synchronize afresh"
+    )]
+    IcsStateAheadOfServer {
+        /// The replica, by REPLGUID.
+        replica: crate::oxcdata::Guid,
+        /// The newest change of that replica the state had seen.
+        seen: crate::ics::GlobCnt,
+        /// The newest change of that replica the server reports.
+        newest: crate::ics::GlobCnt,
+    },
+
     /// Bytes handed to [`IcsState::from_bytes`](crate::ics::IcsState::from_bytes) are not a state
     /// it can read.
     #[error("not a usable ICS state: {reason}")]

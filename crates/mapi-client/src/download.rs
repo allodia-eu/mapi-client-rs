@@ -13,6 +13,11 @@
 //! Persist the checkpoint whenever the events up to it are committed, and a killed process resumes
 //! where it stopped.
 //!
+//! **Refusing a server that went back in time.** A final state behind the checkpoint means the
+//! server was restored to an earlier point, and keeping that state would lose mail for good: see
+//! [`IcsState::check_not_ahead_of`]. [MS-OXCFXICS] §3.3.5.3 makes detecting that the client's job,
+//! so the download refuses that state instead of replacing the checkpoint with it.
+//!
 //! [MS-OXCFXICS] §3.3.4.1 — client behaviour for a synchronization download
 //! [MS-OXCFXICS] §3.3.5.6 — client-side checkpointing
 
@@ -91,11 +96,14 @@ impl<'a> Download<'a> {
     /// the next buffer: nothing has been lost, and calling again after the wait carries on.
     /// [`Error::Protocol`] for a stream that could not be split into elements at all — one
     /// unreadable *object* is an event, [`SyncEvent::Unreadable`] or [`SyncEvent::Failed`], and
-    /// never an error.
+    /// never an error. [`Error::Protocol`] carrying `IcsStateAheadOfServer` in place of the final
+    /// state, when the server has gone back in time — restored from a backup — and would skip
+    /// whatever it numbered with change numbers the state has already seen. The checkpoint is then
+    /// left as it was. Abandon it, and synchronize the folder afresh.
     pub async fn try_next(&mut self) -> Result<Option<SyncEvent>> {
         loop {
             if let Some(event) = self.parser.next_event()? {
-                self.fold(&event);
+                self.fold(&event)?;
                 return Ok(Some(event));
             }
             if self.parser.is_finished() {
@@ -142,8 +150,9 @@ impl<'a> Download<'a> {
         Ok(self.checkpoint)
     }
 
-    /// Folds an event into the checkpoint.
-    fn fold(&mut self, event: &SyncEvent) {
+    /// Folds an event into the checkpoint, refusing a final state from a server that has gone
+    /// back in time rather than keeping it.
+    fn fold(&mut self, event: &SyncEvent) -> Result<()> {
         match event {
             SyncEvent::Message(change) => {
                 let header = change.header();
@@ -152,9 +161,13 @@ impl<'a> Download<'a> {
                         .record_message(id, change_number, header.is_associated());
                 }
             }
-            SyncEvent::State(state) => self.checkpoint.complete(state.clone()),
+            SyncEvent::State(state) => {
+                self.checkpoint.check_not_ahead_of(state)?;
+                self.checkpoint.complete(state.clone());
+            }
             _ => {}
         }
+        Ok(())
     }
 
     /// One round trip: the next part of the starting state, then the next buffer once that is all
