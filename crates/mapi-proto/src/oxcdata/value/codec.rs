@@ -148,6 +148,13 @@ impl PropertyValue {
                              [MS-OXCDATA] §2.11.1.2 says clients SHOULD use",
                 });
             }
+            Self::Object(_) => {
+                return Err(Error::UnencodableValue {
+                    value: "an object",
+                    reason: "an object is reached with RopOpenStream or RopOpenEmbeddedMessage, \
+                             never set as a value",
+                });
+            }
             Self::Error(_) => {
                 return Err(Error::UnencodableValue {
                     value: "an error code",

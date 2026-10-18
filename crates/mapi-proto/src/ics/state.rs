@@ -24,6 +24,7 @@
 //! [MS-OXCFXICS] §3.3.5.5 — determining the synchronization scope
 
 use crate::error::{Error, Result};
+use crate::fasttransfer::FinalState;
 use crate::ics::globset::GlobCnt;
 use crate::ics::idset::{self, IdSet, split};
 use crate::oxcdata::{
@@ -387,6 +388,20 @@ impl IcsState {
         };
         seen.insert(change_guid, change_counter);
         true
+    }
+
+    /// Replaces the state properties with the final state a download ended with.
+    ///
+    /// The server's own, which §3.3.5.6 recommends keeping over a checkpoint because it "is a much
+    /// more efficient version than the version obtained by using checkpointing alone". A property
+    /// the `state` element left out becomes empty, since the element *is* the final state.
+    ///
+    /// [MS-OXCFXICS] §2.2.4.3.25 — `state` element
+    pub fn complete(&mut self, state: FinalState) {
+        self.idset_given = state.idset_given;
+        self.cnset_seen = state.cnset_seen;
+        self.cnset_seen_fai = state.cnset_seen_fai;
+        self.cnset_read = state.cnset_read;
     }
 
     /// Encodes the state, scope and all, for a caller to persist.

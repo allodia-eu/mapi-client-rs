@@ -63,6 +63,25 @@ mailbox as it was first provisioned.
   own bytes: §4.4's IDSET, §3.1.5.4.3.1.3's Bitmask (which the encoder reproduces), and §4.5's
   final state.
 - **Nine meta-property tags**, `PropertyTag::META_TAG_*`, for the identifier sets ICS carries.
+- **`mapi_proto::fasttransfer`: reading a content synchronization download.** `Lexer` splits a
+  `FastTransfer` stream into markers and properties however the server cut it across
+  `RopFastTransferSourceGetBuffer` responses, in the stream's own encoding: a two-byte boolean, a
+  32-bit length on every variable value and list, named properties with their names inline, and
+  strings under code-page types, which are reported under the ordinary string type with the code
+  page kept. Memory is bounded by the largest element, and a half-arrived value is not re-read until
+  its bytes are there. `ContentsSync` reads `contentsSync` one unit at a time and yields a
+  `SyncEvent` per unit: progress, message changes full or partial (each partial with the property
+  groups it changed and the mapping that names them), the three kinds of deletion kept apart,
+  read-state changes, the final state (`IcsState::complete` takes it), and the end. **One bad object
+  never fails the download.** An `errorInfo` is reported as `Failed`, dropping only the message it
+  names by GID. A message whose elements do not fit the grammar is reported as `Unreadable`, with
+  whatever header it had. Tested against all of [MS-OXCFXICS] §4.5's 6,156 bytes, fed whole and in
+  pieces as small as one byte.
+- **Fifteen more tags** for what ICS reads: `PidTagSourceKey`, `PidTagChangeKey`,
+  `PidTagPredecessorChangeList`, `PidTagChangeNumber`, `PidTagAssociated` and the rest, and the
+  structural meta-properties.
+- **`PropertyValue::Object`**, for a `PtypObject` a stream carries inline. A property fetch still
+  refuses one.
 
 ### Changed
 
