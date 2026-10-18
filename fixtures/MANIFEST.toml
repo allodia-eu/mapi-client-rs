@@ -9,7 +9,7 @@
 
 [capture]
 server-version = "Exchange/15.02.2562.056"
-captured-on = "2026-10-17"
+captured-on = "2026-10-18"
 spec-version = "v20250520"
 tool = "mapi-cli capture"
 
@@ -476,6 +476,70 @@ exchanges = ["01-ping", "02-connect", "03-execute-logon", "04-execute-properties
 "23-disconnect.meta.txt" = { bytes = 2538, sha256 = "0413ef96df9eb50d753d1630737febc6bdfe09552bcfa15e1ac7de8172c3baa7" }
 "23-disconnect.request.bin" = { bytes = 4, sha256 = "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119" }
 "23-disconnect.response.bin" = { bytes = 66, sha256 = "3bacb11ee5d82a48df45bced7d01897e31c286439c01d7d8206130f0479a7fda" }
+
+[scenarios."exchange-se/sync-en-us"]
+exchanges = ["01-connect", "02-execute-logon", "03-execute-download", "04-execute-download", "05-execute-download", "06-execute-download-release", "07-execute-resume", "08-execute-resume-release", "09-disconnect"]
+
+[scenarios."exchange-se/sync-en-us".files]
+"01-connect.meta.txt" = { bytes = 2898, sha256 = "f0f78d44af2c1eeccd6319732a5af4a754104166812765935b99039401504bde" }
+"01-connect.request.bin" = { bytes = 143, sha256 = "26176cd5fc973ddf8f011088b7edb6ecb04cdeb31889279028cdfe9e2ae0f1a4" }
+"01-connect.response.bin" = { bytes = 109, sha256 = "d4c452e0d9020bd18d38ecdb3c46b50dac64f900c996001ccf3f9a2d0ff9cd8f" }
+"02-execute-logon.meta.txt" = { bytes = 2713, sha256 = "09c74503ae36e1b4d4180cd8c48e926129d22d148e0b5a84e47b46e0386c32fc" }
+"02-execute-logon.request.bin" = { bytes = 167, sha256 = "d06dee38dbd1230a02955dfd6f2f5875f114f898f6990669acb5e6faf9f8d238" }
+"02-execute-logon.response.bin" = { bytes = 254, sha256 = "c034718fc5ed3ca1502fef63974263850d410f26cfc8011a25960879bc0c995b" }
+"03-execute-download.meta.txt" = { bytes = 2538, sha256 = "1662cfd9359f7e30d16140d0ac8472da1c7d2b3369709706f7ad5e2a629068b3" }
+"03-execute-download.request.bin" = { bytes = 108, sha256 = "950236f9047fcf5d9eb4fa655d0c2f331499b3e3f5ab3e0e2590792a8a5c5443" }
+"03-execute-download.response.bin" = { bytes = 31835, sha256 = "2e8cc63ce87eea9bdb3ba1e4b2f183e0797339df1626bbe7af010daf73501bfe" }
+"04-execute-download.meta.txt" = { bytes = 2537, sha256 = "934859fd6d7d8fc15b07a5ebe9f4ae06a85180a41750ac697ad1c81bd38b1c15" }
+"04-execute-download.request.bin" = { bytes = 37, sha256 = "6bfe475d953e86ef476d56d73d36ffc11be908ef6a45664b46a5d520f16629e0" }
+"04-execute-download.response.bin" = { bytes = 31783, sha256 = "cfbc0b4f512b7c66c31cf11405af32e7e5c97f7c73d82e32632bcaaa3a94ebd5" }
+"05-execute-download.meta.txt" = { bytes = 2765, sha256 = "00172c1aa0e51b12f0f1e81063b9324b88b2aae882f2a6ef434278e53a76ab47" }
+"05-execute-download.request.bin" = { bytes = 37, sha256 = "6bfe475d953e86ef476d56d73d36ffc11be908ef6a45664b46a5d520f16629e0" }
+"05-execute-download.response.bin" = { bytes = 746, sha256 = "6bb79a7878aefcbd4b7fb5b124654d24137a9c30ce5240341ee44fdeb40347cb" }
+"06-execute-download-release.meta.txt" = { bytes = 2542, sha256 = "7042801f8573e32a0455399bf16738b26b5263c4a38d12c028966fd89a32b590" }
+"06-execute-download-release.request.bin" = { bytes = 33, sha256 = "50ea5a8f05f47d6df8f3d60cfa9ad4f71973455d4fc2cde84f672922612555d4" }
+"06-execute-download-release.response.bin" = { bytes = 88, sha256 = "2ad47438ab0ef39edfe2d2ebedde53fd8f607ae52da8b630569ab41db2670a52" }
+"07-execute-resume.meta.txt" = { bytes = 2764, sha256 = "d10237b7c960bcc2b6efdc798bde60da398cfd6faa21cc5c5d9eaf25bf5b5ac5" }
+"07-execute-resume.request.bin" = { bytes = 224, sha256 = "ab3a1c890025f30335b586a70ab858120d2d5b1c70072960a40b81c180c76a24" }
+"07-execute-resume.response.bin" = { bytes = 399, sha256 = "15e8c83f4e35ba3ac792dcddd972fd1ed24f39346d000545b66c65572e75c34d" }
+"08-execute-resume-release.meta.txt" = { bytes = 2540, sha256 = "2fa57ccf65aabbd561dae5d5938d7c5455cd65abd489d6ac41083ec4fa55c9aa" }
+"08-execute-resume-release.request.bin" = { bytes = 33, sha256 = "e1bb552924786d57b11ddc86cf8713cf9142e76cf4a4e4a257cdc63ae90b4a35" }
+"08-execute-resume-release.response.bin" = { bytes = 88, sha256 = "2ad47438ab0ef39edfe2d2ebedde53fd8f607ae52da8b630569ab41db2670a52" }
+"09-disconnect.meta.txt" = { bytes = 2536, sha256 = "dad8edc797ba785a48bf1c2c7ff67b8f0caf7a115b5598446ce0e8f32b20df20" }
+"09-disconnect.request.bin" = { bytes = 4, sha256 = "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119" }
+"09-disconnect.response.bin" = { bytes = 66, sha256 = "3bacb11ee5d82a48df45bced7d01897e31c286439c01d7d8206130f0479a7fda" }
+
+[scenarios."exchange-se/sync-nl-nl"]
+exchanges = ["01-connect", "02-execute-logon", "03-execute-download", "04-execute-download", "05-execute-download", "06-execute-download-release", "07-execute-resume", "08-execute-resume-release", "09-disconnect"]
+
+[scenarios."exchange-se/sync-nl-nl".files]
+"01-connect.meta.txt" = { bytes = 2898, sha256 = "236af8e26b68afd94ac2d8d54ed105004ae243c6120156b571691762500afba7" }
+"01-connect.request.bin" = { bytes = 145, sha256 = "2503b23f6033edf0a31d93c858e59ff8704467d30e778e868632368a9144d92a" }
+"01-connect.response.bin" = { bytes = 113, sha256 = "514fbcf3869a32aba93e7cde6f35e026d370382607d8353d94cc79b46e7e3317" }
+"02-execute-logon.meta.txt" = { bytes = 2713, sha256 = "3beafb7f9400687dc942b8d5b47ab05d39594ffccdd825415dceb0f99b9d595b" }
+"02-execute-logon.request.bin" = { bytes = 169, sha256 = "3e5cede3095c18ef9b9388b7df85f6b4afea0b514353b12ea0c03e36aaf43f7f" }
+"02-execute-logon.response.bin" = { bytes = 254, sha256 = "32b93c4f0ca456b711e693f618ccc8d69c4464f6434e54e1f9f449d76dbae934" }
+"03-execute-download.meta.txt" = { bytes = 2538, sha256 = "0b9a0a1f93439e4fc36470d6cdd9a7558e0041e68a557a99041da5aed3441ece" }
+"03-execute-download.request.bin" = { bytes = 108, sha256 = "950236f9047fcf5d9eb4fa655d0c2f331499b3e3f5ab3e0e2590792a8a5c5443" }
+"03-execute-download.response.bin" = { bytes = 31835, sha256 = "553c445536c030027de24b8d51fd5e8fc79420754c661b301dc70399ed28ccc6" }
+"04-execute-download.meta.txt" = { bytes = 2537, sha256 = "82f30da57cc25ac2d18eed37044dfc66331b20e540a8db4408de85e21c9d15c1" }
+"04-execute-download.request.bin" = { bytes = 37, sha256 = "6bfe475d953e86ef476d56d73d36ffc11be908ef6a45664b46a5d520f16629e0" }
+"04-execute-download.response.bin" = { bytes = 31783, sha256 = "cfbc0b4f512b7c66c31cf11405af32e7e5c97f7c73d82e32632bcaaa3a94ebd5" }
+"05-execute-download.meta.txt" = { bytes = 2765, sha256 = "82da1e717ff27f92fcee56b7ba4cb930cf7ef9476ed67aa7bca4000008df93c8" }
+"05-execute-download.request.bin" = { bytes = 37, sha256 = "6bfe475d953e86ef476d56d73d36ffc11be908ef6a45664b46a5d520f16629e0" }
+"05-execute-download.response.bin" = { bytes = 746, sha256 = "153e8a6d72a2e44dd73156c5aa3f76194828bdb8d7562ccf7daef96c91a46c8f" }
+"06-execute-download-release.meta.txt" = { bytes = 2542, sha256 = "b2d3398bfcfedd2e4eff54ebc27a61a7043be23e7defa1436983f77b07126a50" }
+"06-execute-download-release.request.bin" = { bytes = 33, sha256 = "50ea5a8f05f47d6df8f3d60cfa9ad4f71973455d4fc2cde84f672922612555d4" }
+"06-execute-download-release.response.bin" = { bytes = 88, sha256 = "2ad47438ab0ef39edfe2d2ebedde53fd8f607ae52da8b630569ab41db2670a52" }
+"07-execute-resume.meta.txt" = { bytes = 2764, sha256 = "d7fbfef9774ca5dd719626aea53b7ac6de96ee85a379ceb287e26a7801f04aea" }
+"07-execute-resume.request.bin" = { bytes = 224, sha256 = "0eec7258c0ddbf00ea44534f95ef60990ea43657d5cf616970d85803c8b47b2b" }
+"07-execute-resume.response.bin" = { bytes = 399, sha256 = "612e661d8b41ed9b223db45ab742b9a3e8d4fe6191f861b57ca9cae854677a3f" }
+"08-execute-resume-release.meta.txt" = { bytes = 2540, sha256 = "7e866ef49f60390c8831bd7281b644acab93fac5bc96dcee7fe6f600eccb5cb6" }
+"08-execute-resume-release.request.bin" = { bytes = 33, sha256 = "e1bb552924786d57b11ddc86cf8713cf9142e76cf4a4e4a257cdc63ae90b4a35" }
+"08-execute-resume-release.response.bin" = { bytes = 88, sha256 = "2ad47438ab0ef39edfe2d2ebedde53fd8f607ae52da8b630569ab41db2670a52" }
+"09-disconnect.meta.txt" = { bytes = 2536, sha256 = "580b047be6e5bd986e5f8d0a1e5c9d26c54a7fd29071551fb4439a91c7e01280" }
+"09-disconnect.request.bin" = { bytes = 4, sha256 = "df3f619804a92fdb4057192dc43dd748ea778adc52bc498ce80524c014b81119" }
+"09-disconnect.response.bin" = { bytes = 66, sha256 = "3bacb11ee5d82a48df45bced7d01897e31c286439c01d7d8206130f0479a7fda" }
 
 [scenarios."exchange-se/writes-en-us"]
 exchanges = ["01-connect", "02-execute-logon", "03-execute-drafts-folder", "04-execute-drafts-folder", "05-execute-create-draft", "06-execute-create-draft", "07-execute-create-draft", "08-execute-create-draft", "09-execute-create-draft", "10-execute-read-draft", "11-execute-draft-properties", "12-execute-attachment-table", "13-execute-attachment-table", "14-execute-attachment-content", "15-execute-attachment-content", "16-execute-attachment-content", "17-execute-delete-draft", "18-disconnect"]

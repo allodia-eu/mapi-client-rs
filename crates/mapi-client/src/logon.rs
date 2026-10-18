@@ -1,12 +1,13 @@
 //! A mailbox that has been logged on to, and the folders in it.
 
 use mapi_proto::{
-    Connected, FolderEntryId, FolderId, LogonResponse, LongTermId, MessageId, ObjectHandle,
-    PropertySet, PropertyValue, RopBatch, RopResponse, SPECIAL_FOLDER_PROPERTIES, ShortTermId,
-    SpecialFolder, WellKnownFolder,
+    Connected, ContentsDownload, FolderEntryId, FolderId, IcsState, LogonResponse, LongTermId,
+    MessageId, ObjectHandle, PropertySet, PropertyValue, RopBatch, RopResponse,
+    SPECIAL_FOLDER_PROPERTIES, ShortTermId, SpecialFolder, WellKnownFolder,
 };
 
 use crate::connection::Connection;
+use crate::download::{self, Download};
 use crate::error::{Error, Result};
 use crate::folder::Folder;
 use crate::message::Message;
@@ -340,6 +341,42 @@ impl Logon {
             entries.push(SpecialFolderEntry::new(folder, state));
         }
         Ok(SpecialFolders::new(entries))
+    }
+
+    /// Downloads what changed in a folder since `state` — or everything in it, for a first
+    /// synchronization, when `state` is `None`.
+    ///
+    /// Nothing is sent until the first [`Download::try_next`]. The state is checked against the
+    /// download's scope here, before anything is sent: [MS-OXCFXICS] §3.3.5.5 says the server
+    /// cannot tell a state from another scope, and answers one as though it were right.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::Protocol`] carrying `IcsScopeMismatch` for a state obtained for another folder,
+    /// restriction or mailbox, or whatever the restriction refused to encode.
+    ///
+    /// [MS-OXCFXICS] §3.3.4.1 — a synchronization download
+    pub fn download(
+        &mut self,
+        folder: FolderId,
+        configuration: ContentsDownload,
+        state: Option<IcsState>,
+    ) -> Result<Download<'_>> {
+        let scope = download::scope(self.response.mailbox_guid(), folder, &configuration)?;
+        let state = match state {
+            Some(state) => {
+                state.check_scope(&scope)?;
+                state
+            }
+            None => IcsState::initial(scope),
+        };
+        Download::new(
+            &mut self.connection,
+            self.handle,
+            folder,
+            configuration,
+            state,
+        )
     }
 
     /// Tears the Session Context down.

@@ -29,6 +29,15 @@ mailbox as it was first provisioned.
 
 ### Measured, and worth knowing
 
+- **The logon's `ReplId` is not the replica a mailbox's ids are numbered in.** [MS-OXCSTOR]
+  §2.2.1.1.3 calls it "the replica ID for the logon". On `15.02.2562.056` it was 5, while every id
+  in the mailbox carried REPLID 1 under a GUID only `RopLongTermIdFromId` returns. A checkpoint
+  folded with the logon's pair recorded nothing. `IcsState` therefore keeps a replica map, and a
+  download's first request converts the folder's id to fill it.
+- **A final ICS state's `MetaTagCnsetSeen` runs up to the mailbox's newest change, not the
+  folder's.** It moved when a draft was created and deleted in another folder. Capture rewrites that
+  bound to a constant, which is the only thing that differs between two captures of an unchanged
+  Inbox.
 - **A GLOBCNT is six bytes, most significant first.** No sentence in the documents says so; the
   worked example in [MS-OXCFXICS] §4.4 does, reading `01 00 00 00 00 00 00 05` as REPLID `0001` and
   GLOBCNT `000000000005`. `FolderId::global_counter` and `LongTermId::global_counter` read the same
@@ -82,6 +91,23 @@ mailbox as it was first provisioned.
   structural meta-properties.
 - **`PropertyValue::Object`**, for a `PtypObject` a stream carries inline. A property fetch still
   refuses one.
+- **`Logon::download`: incremental synchronization of a folder.** What changed since an
+  `IcsState`, or everything for a first synchronization, as `SyncEvent`s from
+  `Download::try_next`. Pull-driven: nothing is fetched until it is asked for, and stopping reading
+  stops the download. Each message is folded into `Download::checkpoint` as it is handed over, and
+  the server's final state replaces the checkpoint when the stream ends. A resumed download's
+  state goes up with the opening request, and only a state past 16 KiB takes more. A busy
+  server, whether a `GetBuffer` or a whole batch, is `Error::Backoff`, and calling again carries
+  on without sending the state twice. A state for another scope is refused before anything is
+  sent. Verified against Exchange Server SE `15.02.2562.056` for both lab mailboxes:
+  - a first download of the Inbox spans five round trips, and the next one reports only a state;
+  - a download abandoned after three messages resumes from its checkpoint, losing none and
+    repeating none;
+  - between two downloads of Drafts, a create, a modify, a delete, a move out, a move in, a read
+    flag and a category are reported as exactly those: the read flag as a read-state change and the
+    category as a partial change naming the group that holds `Keywords`.
+- **`mapi-cli capture sync`**, and its corpus for both mailboxes: a first download and one resumed
+  from its checkpoint, replayed byte for byte in CI.
 - **The ROPs of an incremental download**, on `RopBatch`: `synchronization_configure`,
   `upload_state_begin`, `upload_state_continue` and `upload_state_end`, `fast_transfer_get_buffer`
   and `synchronization_get_transfer_state`. The configuration is `ContentsDownload`, a type rather
