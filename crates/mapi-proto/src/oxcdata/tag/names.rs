@@ -76,6 +76,8 @@ const fn rest(tag: PropertyTag) -> Option<&'static str> {
         PropertyTag::ASSOCIATED => "PidTagAssociated",
         PropertyTag::CHANGE_KEY => "PidTagChangeKey",
         PropertyTag::CHANGE_NUMBER => "PidTagChangeNumber",
+        PropertyTag::DELETED_COUNT_TOTAL => "PidTagDeletedCountTotal",
+        PropertyTag::LOCAL_COMMIT_TIME_MAX => "PidTagLocalCommitTimeMax",
         PropertyTag::MESSAGE_ATTACHMENTS => "PidTagMessageAttachments",
         PropertyTag::MESSAGE_RECIPIENTS => "PidTagMessageRecipients",
         PropertyTag::PARENT_SOURCE_KEY => "PidTagParentSourceKey",

@@ -1,9 +1,9 @@
 //! A mailbox that has been logged on to, and the folders in it.
 
 use mapi_proto::{
-    Connected, ContentsDownload, FolderEntryId, FolderId, IcsState, LogonResponse, LongTermId,
-    MessageId, ObjectHandle, PropertySet, PropertyValue, RopBatch, RopResponse,
-    SPECIAL_FOLDER_PROPERTIES, ShortTermId, SpecialFolder, WellKnownFolder,
+    Connected, ContentsDownload, FolderEntryId, FolderId, FolderStamp, FolderStamps, IcsState,
+    LogonResponse, LongTermId, MessageId, ObjectHandle, PropertySet, PropertyValue, RopBatch,
+    RopResponse, SPECIAL_FOLDER_PROPERTIES, ShortTermId, SpecialFolder, WellKnownFolder,
 };
 
 use crate::connection::Connection;
@@ -377,6 +377,32 @@ impl Logon {
             configuration,
             state,
         )
+    }
+
+    /// The [`FolderStamp`] of every folder in the mailbox, from one hierarchy-table read: which
+    /// folders a pass need not download.
+    ///
+    /// Read them **before** downloading, and keep each folder's with the state its download
+    /// produced. A folder whose stamp is
+    /// [unchanged since](mapi_proto::FolderStamps::is_unchanged_since) the one kept has nothing to
+    /// download. A stamp read after a download covers what changed while it ran as well, and that
+    /// change would never be downloaded. See [`FolderStamp`] for the other two rules.
+    ///
+    /// # Errors
+    ///
+    /// Whatever the table read failed with.
+    ///
+    /// [MS-OXCFOLD] §2.2.2.2.1.14 — `PidTagLocalCommitTimeMax`
+    /// [MS-OXCFOLD] §2.2.2.2.1.15 — `PidTagDeletedCountTotal`
+    pub async fn folder_stamps(&mut self) -> Result<FolderStamps> {
+        let root = self.folder_id(WellKnownFolder::MailboxRoot)?;
+        let rows = self
+            .folder(root)
+            .descendants()
+            .columns(FolderStamp::COLUMNS)
+            .collect()
+            .await?;
+        Ok(FolderStamps::from_rows(&rows))
     }
 
     /// Tears the Session Context down.

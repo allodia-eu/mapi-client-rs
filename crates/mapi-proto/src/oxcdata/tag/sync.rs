@@ -1,5 +1,6 @@
 //! The tags incremental synchronization reads: the meta-properties it carries its identifier sets
-//! and its structure in, and the change-tracking properties every object it delivers has.
+//! and its structure in, the change-tracking properties every object it delivers has, and the two
+//! folder properties that say whether a folder needs downloading at all.
 //!
 //! None of these is a property of any object. They exist only inside an ICS state or a
 //! `FastTransfer` stream, which is why they are `MetaTag` rather than `PidTag` and why
@@ -27,6 +28,16 @@ impl PropertyTag {
     ///
     /// [MS-OXCFXICS] §2.2.1.2.3
     pub const CHANGE_NUMBER: Self = Self(0x67A4_0014);
+    /// `PidTagDeletedCountTotal`, `0x670B0003` — how many messages have ever been deleted from a
+    /// folder, its subfolders' not counted. Half of a [`FolderStamp`](crate::ics::FolderStamp).
+    ///
+    /// [MS-OXCFOLD] §2.2.2.2.1.15
+    pub const DELETED_COUNT_TOTAL: Self = Self(0x670B_0003);
+    /// `PidTagLocalCommitTimeMax`, `0x670A0040` — when a message or subfolder directly in a folder
+    /// last changed. Half of a [`FolderStamp`](crate::ics::FolderStamp).
+    ///
+    /// [MS-OXCFOLD] §2.2.2.2.1.14
+    pub const LOCAL_COMMIT_TIME_MAX: Self = Self(0x670A_0040);
     /// `PidTagMessageAttachments`, `0x0E13000D` — names a message's attachments as a subobject.
     ///
     /// [MS-OXCFXICS] §2.2.1.7

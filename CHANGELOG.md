@@ -106,6 +106,14 @@ mailbox as it was first provisioned.
   - between two downloads of Drafts, a create, a modify, a delete, a move out, a move in, a read
     flag and a category are reported as exactly those: the read flag as a read-state change and the
     category as a partial change naming the group that holds `Keywords`.
+- **`Logon::folder_stamps`: which folders a pass need not download.** One hierarchy-table read
+  of the whole mailbox returns a `FolderStamp` per folder: `PidTagLocalCommitTimeMax` and
+  `PidTagDeletedCountTotal` ([MS-OXCFOLD] §2.2.2.2.1.14–15). A folder whose stamp is unchanged
+  since the one kept with its state has nothing to download. There is equality and no ordering,
+  because a stamp that went backwards is a restored server, and that folder must be downloaded.
+  Verified against Exchange Server SE `15.02.2562.056` for both lab mailboxes: a create, a
+  modify, a read flag, a category and a delete each moved their folder's stamp and no other, a
+  move moved both folders', and a delete raised the deleted count.
 - **`mapi-cli capture sync`**, and its corpus for both mailboxes: a first download and one resumed
   from its checkpoint, replayed byte for byte in CI.
 - **The ROPs of an incremental download**, on `RopBatch`: `synchronization_configure`,

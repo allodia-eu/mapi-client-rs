@@ -6,6 +6,8 @@
 //! [`MARKER`] and is swept away before it starts and before it asserts — because the counts the
 //! `items` suite asserts are exact.
 
+mod stamps;
+
 use std::sync::{Arc, Mutex};
 
 use mapi_client::mapi_proto::fasttransfer::{MessageChange, PartialGroup, SyncEvent};
@@ -17,7 +19,7 @@ use mapi_client::{
 };
 
 /// The subject every message this suite creates starts with.
-const MARKER: &str = "mapi-client-rs sync test";
+pub(super) const MARKER: &str = "mapi-client-rs sync test";
 
 /// Counts the `Execute` requests a client sends.
 #[derive(Debug, Default)]
