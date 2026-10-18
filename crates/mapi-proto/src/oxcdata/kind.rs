@@ -149,6 +149,31 @@ pub enum PropertyType {
     MultipleString,
     /// `PtypMultipleBinary`, `0x1102`: a COUNT of values, then that many `PtypBinary`.
     MultipleBinary,
+    /// `PtypFloating32`, `0x0004`: 4 bytes, IEEE 754 binary32.
+    Floating32,
+    /// `PtypCurrency`, `0x0006`: 8 bytes: a signed count of ten-thousandths.
+    Currency,
+    /// `PtypFloatingTime`, `0x0007`: 8 bytes: binary64 days since 1899-12-30, the fraction a time
+    /// of day.
+    FloatingTime,
+    /// `PtypMultipleInteger16`, `0x1002`: a COUNT of values, then that many `PtypInteger16`.
+    MultipleInteger16,
+    /// `PtypMultipleFloating32`, `0x1004`: a COUNT of values, then that many `PtypFloating32`.
+    MultipleFloating32,
+    /// `PtypMultipleFloating64`, `0x1005`: a COUNT of values, then that many `PtypFloating64`.
+    MultipleFloating64,
+    /// `PtypMultipleCurrency`, `0x1006`: a COUNT of values, then that many `PtypCurrency`.
+    MultipleCurrency,
+    /// `PtypMultipleFloatingTime`, `0x1007`: a COUNT of values, then that many `PtypFloatingTime`.
+    MultipleFloatingTime,
+    /// `PtypMultipleInteger64`, `0x1014`: a COUNT of values, then that many `PtypInteger64`.
+    MultipleInteger64,
+    /// `PtypMultipleString8`, `0x101E`: a COUNT of values, then that many `PtypString8`.
+    MultipleString8,
+    /// `PtypMultipleTime`, `0x1040`: a COUNT of values, then that many `PtypTime`.
+    MultipleTime,
+    /// `PtypMultipleGuid`, `0x1048`: a COUNT of values, then that many `PtypGuid`.
+    MultipleGuid,
     /// A type this crate does not model. Its length is unknown, so a value of this type cannot be
     /// skipped over — decoding stops instead of guessing.
     Unsupported(u16),
@@ -175,6 +200,18 @@ impl PropertyType {
             0x1003 => Self::MultipleInteger32,
             0x101F => Self::MultipleString,
             0x1102 => Self::MultipleBinary,
+            0x0004 => Self::Floating32,
+            0x0006 => Self::Currency,
+            0x0007 => Self::FloatingTime,
+            0x1002 => Self::MultipleInteger16,
+            0x1004 => Self::MultipleFloating32,
+            0x1005 => Self::MultipleFloating64,
+            0x1006 => Self::MultipleCurrency,
+            0x1007 => Self::MultipleFloatingTime,
+            0x1014 => Self::MultipleInteger64,
+            0x101E => Self::MultipleString8,
+            0x1040 => Self::MultipleTime,
+            0x1048 => Self::MultipleGuid,
             other => Self::Unsupported(other),
         }
     }
@@ -199,6 +236,18 @@ impl PropertyType {
             Self::MultipleInteger32 => 0x1003,
             Self::MultipleString => 0x101F,
             Self::MultipleBinary => 0x1102,
+            Self::Floating32 => 0x0004,
+            Self::Currency => 0x0006,
+            Self::FloatingTime => 0x0007,
+            Self::MultipleInteger16 => 0x1002,
+            Self::MultipleFloating32 => 0x1004,
+            Self::MultipleFloating64 => 0x1005,
+            Self::MultipleCurrency => 0x1006,
+            Self::MultipleFloatingTime => 0x1007,
+            Self::MultipleInteger64 => 0x1014,
+            Self::MultipleString8 => 0x101E,
+            Self::MultipleTime => 0x1040,
+            Self::MultipleGuid => 0x1048,
             Self::Unsupported(raw) => raw,
         }
     }
@@ -223,6 +272,18 @@ impl PropertyType {
             Self::MultipleInteger32 => "PtypMultipleInteger32",
             Self::MultipleString => "PtypMultipleString",
             Self::MultipleBinary => "PtypMultipleBinary",
+            Self::Floating32 => "PtypFloating32",
+            Self::Currency => "PtypCurrency",
+            Self::FloatingTime => "PtypFloatingTime",
+            Self::MultipleInteger16 => "PtypMultipleInteger16",
+            Self::MultipleFloating32 => "PtypMultipleFloating32",
+            Self::MultipleFloating64 => "PtypMultipleFloating64",
+            Self::MultipleCurrency => "PtypMultipleCurrency",
+            Self::MultipleFloatingTime => "PtypMultipleFloatingTime",
+            Self::MultipleInteger64 => "PtypMultipleInteger64",
+            Self::MultipleString8 => "PtypMultipleString8",
+            Self::MultipleTime => "PtypMultipleTime",
+            Self::MultipleGuid => "PtypMultipleGuid",
             Self::Unsupported(_) => return None,
         })
     }
@@ -255,7 +316,7 @@ mod tests {
     /// Every modelled type, with the code [MS-OXCDATA] §2.11.1 gives it. Transcribed from the
     /// table rather than from this crate's own `new`, so a typo in one is not confirmed by the
     /// other.
-    const MODELLED: [(u16, PropertyType, &str); 16] = [
+    const MODELLED: [(u16, PropertyType, &str); 28] = [
         (0x0002, PropertyType::Integer16, "PtypInteger16"),
         (0x0003, PropertyType::Integer32, "PtypInteger32"),
         (0x0005, PropertyType::Floating64, "PtypFloating64"),
@@ -276,6 +337,42 @@ mod tests {
         ),
         (0x101F, PropertyType::MultipleString, "PtypMultipleString"),
         (0x1102, PropertyType::MultipleBinary, "PtypMultipleBinary"),
+        (0x0004, PropertyType::Floating32, "PtypFloating32"),
+        (0x0006, PropertyType::Currency, "PtypCurrency"),
+        (0x0007, PropertyType::FloatingTime, "PtypFloatingTime"),
+        (
+            0x1002,
+            PropertyType::MultipleInteger16,
+            "PtypMultipleInteger16",
+        ),
+        (
+            0x1004,
+            PropertyType::MultipleFloating32,
+            "PtypMultipleFloating32",
+        ),
+        (
+            0x1005,
+            PropertyType::MultipleFloating64,
+            "PtypMultipleFloating64",
+        ),
+        (
+            0x1006,
+            PropertyType::MultipleCurrency,
+            "PtypMultipleCurrency",
+        ),
+        (
+            0x1007,
+            PropertyType::MultipleFloatingTime,
+            "PtypMultipleFloatingTime",
+        ),
+        (
+            0x1014,
+            PropertyType::MultipleInteger64,
+            "PtypMultipleInteger64",
+        ),
+        (0x101E, PropertyType::MultipleString8, "PtypMultipleString8"),
+        (0x1040, PropertyType::MultipleTime, "PtypMultipleTime"),
+        (0x1048, PropertyType::MultipleGuid, "PtypMultipleGuid"),
     ];
 
     #[test]
@@ -304,12 +401,12 @@ mod tests {
 
     #[test]
     fn an_unmodelled_type_survives_being_read_and_says_so() {
-        // PtypCurrency, which this crate has no reason to decode yet.
-        let currency = PropertyType::new(0x0006);
-        assert_eq!(currency, PropertyType::Unsupported(0x0006));
-        assert_eq!(currency.as_u16(), 0x0006);
-        assert_eq!(currency.name(), None);
-        assert_eq!(currency.to_string(), "unmodelled type 0x0006");
+        // PtypRestriction, which only a rule or a search folder carries.
+        let restriction = PropertyType::new(0x00FD);
+        assert_eq!(restriction, PropertyType::Unsupported(0x00FD));
+        assert_eq!(restriction.as_u16(), 0x00FD);
+        assert_eq!(restriction.name(), None);
+        assert_eq!(restriction.to_string(), "unmodelled type 0x00FD");
     }
 
     /// The widths that decide how many bytes a variable-length value occupies. Wrong here means

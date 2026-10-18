@@ -9,7 +9,8 @@
 use crate::error::{Error, ErrorCode, Result};
 use crate::oxcdata::kind::{CountWidth, ValueContext};
 use crate::oxcdata::{
-    FileTime, Floating64, Guid, PropertyType, PropertyValue, ServerEntryId, TableString,
+    Currency, FileTime, Floating32, Floating64, Guid, PropertyType, PropertyValue, ServerEntryId,
+    TableString,
 };
 use crate::wire::{Reader, Writer};
 
@@ -47,6 +48,42 @@ impl PropertyValue {
             PropertyType::MultipleBinary => {
                 Self::MultipleBinary(read_each(r, context, |r| read_binary(r, context))?)
             }
+            PropertyType::Floating32 => Self::Floating32(Floating32::from_bits(r.u32()?)),
+            PropertyType::Currency => Self::Currency(read_currency(r)?),
+            PropertyType::FloatingTime => Self::FloatingTime(Floating64::from_bits(r.u64()?)),
+            PropertyType::MultipleInteger16 => {
+                Self::MultipleInteger16(read_each(r, context, Reader::u16)?)
+            }
+            PropertyType::MultipleFloating32 => {
+                Self::MultipleFloating32(read_each(r, context, |r| {
+                    Ok(Floating32::from_bits(r.u32()?))
+                })?)
+            }
+            PropertyType::MultipleFloating64 => {
+                Self::MultipleFloating64(read_each(r, context, |r| {
+                    Ok(Floating64::from_bits(r.u64()?))
+                })?)
+            }
+            PropertyType::MultipleCurrency => {
+                Self::MultipleCurrency(read_each(r, context, read_currency)?)
+            }
+            PropertyType::MultipleFloatingTime => {
+                Self::MultipleFloatingTime(read_each(r, context, |r| {
+                    Ok(Floating64::from_bits(r.u64()?))
+                })?)
+            }
+            PropertyType::MultipleInteger64 => {
+                Self::MultipleInteger64(read_each(r, context, Reader::u64)?)
+            }
+            PropertyType::MultipleString8 => Self::MultipleString8(read_each(r, context, |r| {
+                Ok(string(r.ascii_z()?, context))
+            })?),
+            PropertyType::MultipleTime => {
+                Self::MultipleTime(read_each(r, context, |r| Ok(FileTime::new(r.u64()?)))?)
+            }
+            PropertyType::MultipleGuid => Self::MultipleGuid(read_each(r, context, |r| {
+                Ok(Guid::from_bytes(r.array::<16>()?))
+            })?),
             // A store server MUST NOT answer a property fetch with one of these, and if one
             // arrives anyway its length is not something this layer can invent.
             PropertyType::Object => {
@@ -80,7 +117,7 @@ impl PropertyValue {
             Self::Integer64(value) => {
                 w.u64(*value);
             }
-            Self::Floating64(value) => {
+            Self::Floating64(value) | Self::FloatingTime(value) => {
                 w.u64(value.to_bits());
             }
             Self::Boolean(value) => {
@@ -95,27 +132,15 @@ impl PropertyValue {
             Self::String(text) => write_string(w, text)?,
             Self::Binary(bytes) => write_binary(w, bytes, context)?,
             Self::ServerId(value) => write_binary(w, &value.to_bytes(), context)?,
-            Self::MultipleInteger32(values) => {
-                write_count(w, values.len(), PropertyType::MultipleInteger32, context)?;
-                for value in values {
-                    w.u32(*value);
-                }
+            Self::Floating32(value) => {
+                w.u32(value.to_bits());
             }
-            Self::MultipleString(values) => {
-                write_count(w, values.len(), PropertyType::MultipleString, context)?;
-                for text in values {
-                    write_string(w, text)?;
-                }
-            }
-            Self::MultipleBinary(values) => {
-                write_count(w, values.len(), PropertyType::MultipleBinary, context)?;
-                for bytes in values {
-                    write_binary(w, bytes, context)?;
-                }
+            Self::Currency(value) => {
+                w.u64(value.scaled().cast_unsigned());
             }
             // Everything below is a value that exists as a decoding outcome and not as something
             // a client may send.
-            Self::String8(_) => {
+            Self::String8(_) | Self::MultipleString8(_) => {
                 return Err(Error::UnencodableValue {
                     value: "a PtypString8 value",
                     reason: "its code page is the one negotiated for the session, which this \
@@ -130,6 +155,17 @@ impl PropertyValue {
                              value a client can set",
                 });
             }
+            Self::MultipleInteger16(_)
+            | Self::MultipleInteger32(_)
+            | Self::MultipleInteger64(_)
+            | Self::MultipleFloating32(_)
+            | Self::MultipleFloating64(_)
+            | Self::MultipleFloatingTime(_)
+            | Self::MultipleCurrency(_)
+            | Self::MultipleTime(_)
+            | Self::MultipleGuid(_)
+            | Self::MultipleString(_)
+            | Self::MultipleBinary(_) => self.write_multiple(w, context)?,
             Self::Absent => {
                 return Err(Error::UnencodableValue {
                     value: "an absent value",
@@ -139,6 +175,38 @@ impl PropertyValue {
             }
         }
         Ok(())
+    }
+
+    /// Writes a multi-valued property: a COUNT of values, then each one.
+    ///
+    /// Split from [`write`](Self::write) because the list types are a dozen arms of the same shape,
+    /// and the refusals that matter are easier to see without them.
+    fn write_multiple(&self, w: &mut Writer, context: ValueContext) -> Result<()> {
+        let kind = self.property_type().unwrap_or(PropertyType::Unsupported(0));
+        match self {
+            Self::MultipleInteger16(v) => each(w, kind, context, v, |w, x| done(w.u16(*x))),
+            Self::MultipleInteger32(v) => each(w, kind, context, v, |w, x| done(w.u32(*x))),
+            Self::MultipleInteger64(v) => each(w, kind, context, v, |w, x| done(w.u64(*x))),
+            Self::MultipleFloating32(v) => {
+                each(w, kind, context, v, |w, x| done(w.u32(x.to_bits())))
+            }
+            Self::MultipleFloating64(v) | Self::MultipleFloatingTime(v) => {
+                each(w, kind, context, v, |w, x| done(w.u64(x.to_bits())))
+            }
+            Self::MultipleCurrency(v) => each(w, kind, context, v, |w, x| {
+                done(w.u64(x.scaled().cast_unsigned()))
+            }),
+            Self::MultipleTime(v) => each(w, kind, context, v, |w, x| done(w.u64(x.as_u64()))),
+            Self::MultipleGuid(v) => each(w, kind, context, v, |w, x| done(w.bytes(x.as_bytes()))),
+            Self::MultipleString(v) => each(w, kind, context, v, write_string),
+            Self::MultipleBinary(v) => {
+                each(w, kind, context, v, |w, x| write_binary(w, x, context))
+            }
+            _ => Err(Error::UnencodableValue {
+                value: "a single value",
+                reason: "it was handed to the multi-valued encoder, which is a bug in this crate",
+            }),
+        }
     }
 }
 
@@ -177,6 +245,35 @@ fn read_each<'a, T>(
         values.push(each(r)?);
     }
     Ok(values)
+}
+
+/// A `PtypCurrency`: eight bytes, a signed count of ten-thousandths.
+fn read_currency(r: &mut Reader<'_>) -> Result<Currency> {
+    Ok(Currency::from_scaled(r.u64()?.cast_signed()))
+}
+
+/// Writes a COUNT of values, then each one as `write` writes it.
+fn each<T>(
+    w: &mut Writer,
+    property_type: PropertyType,
+    context: ValueContext,
+    values: &[T],
+    write: impl Fn(&mut Writer, &T) -> Result<()>,
+) -> Result<()> {
+    write_count(w, values.len(), property_type, context)?;
+    for value in values {
+        write(w, value)?;
+    }
+    Ok(())
+}
+
+/// Adapts a write that cannot fail to the shape [`each`] takes.
+#[expect(
+    clippy::unnecessary_wraps,
+    reason = "the Result is the shape `each` takes; the fallible writes share it"
+)]
+const fn done(_: &mut Writer) -> Result<()> {
+    Ok(())
 }
 
 /// Reads a COUNT field of the width its context gives it.

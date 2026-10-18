@@ -56,4 +56,4 @@ pub use serverid::ServerEntryId;
 pub use sort::{SortDirection, SortOrder, SortOrderSet};
 pub use special::{SPECIAL_FOLDER_PROPERTIES, SpecialFolder};
 pub use tag::PropertyTag;
-pub use value::{Floating64, PropertyValue, TableString};
+pub use value::{Currency, Floating32, Floating64, PropertyValue, TableString};
