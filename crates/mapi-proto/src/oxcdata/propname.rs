@@ -87,6 +87,18 @@ impl PropertyName {
         }
     }
 
+    /// Names a property by a string, as a `FastTransfer` stream or a property group mapping
+    /// carries one.
+    ///
+    /// Without [`named`](Self::named)'s checks, which are about what can be *sent* in a one-byte
+    /// `NameSize`: a name the server has already sent is the name, whatever its length.
+    pub(crate) const fn from_stream(set: PropertySetId, name: String) -> Self {
+        Self {
+            set,
+            kind: PropertyNameKind::Name(name),
+        }
+    }
+
     /// Names a property by a string inside its set.
     ///
     /// # Errors

@@ -196,6 +196,11 @@ pub enum PropertyValue {
     MultipleString(Vec<TableString>),
     /// A `PtypMultipleBinary` value.
     MultipleBinary(Vec<Vec<u8>>),
+    /// A `PtypObject` value a `FastTransfer` stream carried inline, as its bytes.
+    ///
+    /// Only a stream does this. A property fetch or a table refuses one instead, because a store
+    /// server MUST NOT return an object that way ([MS-OXCDATA] §2.11.1.5).
+    Object(Vec<u8>),
     /// A `PtypFloating32` value.
     Floating32(Floating32),
     /// A `PtypCurrency` value.
@@ -254,6 +259,7 @@ impl PropertyValue {
             Self::MultipleInteger32(_) => PropertyType::MultipleInteger32,
             Self::MultipleString(_) => PropertyType::MultipleString,
             Self::MultipleBinary(_) => PropertyType::MultipleBinary,
+            Self::Object(_) => PropertyType::Object,
             Self::Floating32(_) => PropertyType::Floating32,
             Self::Currency(_) => PropertyType::Currency,
             Self::FloatingTime(_) => PropertyType::FloatingTime,
@@ -412,6 +418,7 @@ impl core::fmt::Display for PropertyValue {
                 let total: usize = values.iter().map(Vec::len).sum();
                 write!(f, "{} value(s), {total} byte(s)", values.len())
             }
+            Self::Object(bytes) => write!(f, "an object of {} byte(s)", bytes.len()),
             Self::Floating32(value) => write!(f, "{value}"),
             Self::Currency(value) => write!(f, "{value}"),
             Self::FloatingTime(value) => write!(f, "{value} day(s) since 1899-12-30"),
