@@ -12,13 +12,18 @@
 //!   folds each message into the state as it arrives — client-side checkpointing, which is why
 //!   insertion into a [`GlobSet`] is cheap.
 //!
+//! Deciding *which* folders to download is the other half of a pass, and a [`FolderStamp`] per
+//! folder from one hierarchy-table read answers it.
+//!
 //! [MS-OXCFXICS] — Bulk Data Transfer Protocol: ICS and `FastTransfer`
 
 mod globset;
 mod idset;
+mod stamp;
 mod state;
 
 pub use globset::{GlobCnt, GlobSet, GlobSetRanges};
 pub use idset::{IdSet, IdSetReplicas, MessageIds, ReplicaKey};
 pub(crate) use idset::{WireKey, read as read_idset};
+pub use stamp::{FolderStamp, FolderStamps, FolderStampsIter};
 pub use state::{ChangeNumber, IcsState, SyncKind, SyncScope};

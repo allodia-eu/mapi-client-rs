@@ -1,10 +1,10 @@
-//! The meta-properties [`tag::sync`](crate::PropertyTag) declares, with the id and type
-//! [MS-OXCFXICS] §2.2.1.1 and §2.2.1.3 give each.
+//! The tags [`tag::sync`](crate::PropertyTag) declares, with the id and type [MS-OXCFXICS]
+//! §2.2.1.1 and §2.2.1.3, or [MS-OXCFOLD] §2.2.2.2.1.14–15 for a folder's stamp, give each.
 
 use crate::oxcdata::{PropertyTag, PropertyType};
 
 pub(in crate::oxcdata::tag::tests) const SYNC_CATALOGUE: [(PropertyTag, u16, PropertyType, &str);
-    24] = [
+    26] = [
     (
         PropertyTag::ASSOCIATED,
         0x67AA,
@@ -22,6 +22,18 @@ pub(in crate::oxcdata::tag::tests) const SYNC_CATALOGUE: [(PropertyTag, u16, Pro
         0x67A4,
         PropertyType::Integer64,
         "PidTagChangeNumber",
+    ),
+    (
+        PropertyTag::DELETED_COUNT_TOTAL,
+        0x670B,
+        PropertyType::Integer32,
+        "PidTagDeletedCountTotal",
+    ),
+    (
+        PropertyTag::LOCAL_COMMIT_TIME_MAX,
+        0x670A,
+        PropertyType::Time,
+        "PidTagLocalCommitTimeMax",
     ),
     (
         PropertyTag::MESSAGE_ATTACHMENTS,
