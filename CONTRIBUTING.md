@@ -60,7 +60,7 @@ Get the documents (never committed, gitignored under `spec/`):
 powershell.exe -File scripts\Get-Specs.ps1
 ```
 
-Then grep the text extracts rather than the PDFs — 2,192 pages across twenty documents, plus
+Then grep the text extracts rather than the PDFs — 2,499 pages across twenty-two documents, plus
 fifteen RFCs as `spec\RFC<n>.txt`:
 
 ```powershell
