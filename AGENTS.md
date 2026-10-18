@@ -35,6 +35,23 @@ which is usually the question being asked.
 Patents are the one open item: the IP notice grants copyright permission to implement but no patent
 licence. See [`SPEC.md`](SPEC.md#patents). It gates publishing, nothing else.
 
+## Exchange Server SE only
+
+**The one supported server is Exchange Server Subscription Edition.** It is the only on-premises
+Exchange Microsoft still supports, so it is the only one this library targets, tests or works
+around. Exchange Online is out of scope as well.
+
+The product-behaviour notes in the specifications are where this bites. Every pinned document lists
+SE among its applicable products, but most notes stop at Exchange 2019, so:
+
+- **A note naming Exchange 2019 and not SE is a prior, not a fact.** SE grew out of 2019, so the
+  note is the best guess at what SE does — and a guess, until it is measured on SE and recorded with
+  the build that produced it.
+- **A note about Exchange 2003–2016 alone describes a server nobody here supports.** Nothing is
+  built to accommodate one: no version sniffing, no fallback path, no flag that exists only for it.
+- **Another implementation is a tripwire, never a target.** Where Gromox or anything else disagrees
+  with SE, check the specification and SE; the disagreement is recorded, not accommodated.
+
 ## The sans-io boundary
 
 `mapi-proto` owns all bytes and all state; the caller owns all I/O. **Nothing in `mapi-proto` may

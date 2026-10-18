@@ -47,6 +47,13 @@ repository existed. Two findings make it tractable:
 > shared mailbox read by a delegate, and the whole suite run over each authentication scheme. The
 > gaps are stated below and in the changelog rather than left to be discovered.
 
+## Supported server
+
+**Exchange Server Subscription Edition, and nothing else.** It is the only on-premises Exchange
+Microsoft still supports. Exchange 2019 and earlier are not targeted, tested or worked around — no
+version sniffing, no fallback paths — and Exchange Online is out of scope as well. Every claim in
+these docs about what the server does was measured on SE, with the build named beside it.
+
 ## Install
 
 ```toml
