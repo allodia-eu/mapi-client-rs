@@ -28,10 +28,10 @@
 //! [MS-OXCPRPT] §2.2.14 — semantics
 
 use mapi_proto::{
-    ObjectHandle, PropertyTag, PropertyType, ReadStreamResponse, RopBatch, RopResponse, StreamMode,
+    PropertyTag, PropertyType, ReadStreamResponse, RopBatch, RopResponse, StreamMode,
 };
 
-use crate::connection::Connection;
+use crate::connection::{Connection, Held};
 use crate::error::{Error, Result};
 use crate::target::Target;
 
@@ -139,17 +139,21 @@ impl<'a> StreamRead<'a> {
             .iter()
             .find_map(RopResponse::as_stream_size)
             .map(mapi_proto::StreamSizeResponse::size);
-        let handle = execution.handle(stream).filter(|h| !h.is_none());
+        let handle = execution
+            .handle(stream)
+            .filter(|h| !h.is_none())
+            .map(|handle| connection.hold(handle));
 
         // The stream first, then the chain from the inside out — the order they were opened in
         // reverse, which is the order a release has to take.
-        let mut open: Vec<ObjectHandle> = handle.into_iter().collect();
+        let mut open: Vec<Held> = handle.into_iter().collect();
         open.extend(
             opened
                 .slots()
                 .iter()
                 .filter_map(|slot| execution.handle(*slot))
-                .filter(|handle| !handle.is_none()),
+                .filter(|handle| !handle.is_none())
+                .map(|handle| connection.hold(handle)),
         );
 
         let mut bytes = first_chunk(&execution);
@@ -186,7 +190,7 @@ fn first_chunk(execution: &mapi_proto::Execution) -> Vec<u8> {
 /// hand is a prefix, and a caller told it was the whole thing would index a truncated body.
 async fn read_rest(
     connection: &mut Connection,
-    handle: Option<ObjectHandle>,
+    handle: Option<Held>,
     bytes: &mut Vec<u8>,
 ) -> Result<bool> {
     let Some(handle) = handle else {
@@ -202,7 +206,7 @@ async fn read_rest(
 
     for _ in 0..MAX_READS {
         let mut batch = RopBatch::new();
-        let stream = batch.bind(handle);
+        let stream = connection.bind(&mut batch, handle, "reading a property stream")?;
         batch.read_stream(stream, CHUNK);
 
         let execution = connection
@@ -232,14 +236,18 @@ async fn read_rest(
 /// Context times the handles out on its own. Not releasing them at all is a different matter —
 /// a caller reading one property of each of a hundred attachments would leave three hundred
 /// behind — which is why this runs on the way out of a successful read *and* a failed one.
-async fn release(connection: &mut Connection, handles: &[ObjectHandle]) {
-    if handles.is_empty() {
-        return;
-    }
+///
+/// Handles from a Session Context since replaced are skipped: they went with it, and the same
+/// value in the new one names something else.
+async fn release(connection: &mut Connection, handles: &[Held]) {
     let mut batch = RopBatch::new();
     for handle in handles {
-        let slot = batch.bind(*handle);
-        batch.release(slot);
+        if let Ok(slot) = connection.bind(&mut batch, *handle, "releasing a stream") {
+            batch.release(slot);
+        }
+    }
+    if batch.is_empty() {
+        return;
     }
     let _ = connection.execute(batch, "releasing a stream").await;
 }

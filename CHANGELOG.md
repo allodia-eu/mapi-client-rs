@@ -29,6 +29,12 @@ mailbox as it was first provisioned.
 
 ### Measured, and worth knowing
 
+- **What Exchange answers for a Session Context it does not have.** On `15.02.2562.056`: 10 for one
+  replaced by a reconnect, for one disconnected, and for the right cookies sent with another
+  account's credentials; 13 with `MapiContext` or `MapiSequence` left out; 6 for a `MapiContext`
+  that is not base64. Each carries a .NET exception's text as its body, and none runs the request.
+  A `PING` for a context that is gone is answered 10 as well. The logon handle of a replaced
+  context, sent to its successor, fails the whole `Execute` with `ecRpcFormat` (0x4B6).
 - **A Session Context's idle lifetime is five minutes until the logon, and fifteen after.** On
   `15.02.2562.056`, the `Connect` response carries `X-ExpirationInfo: 300000`, and every response
   once `RopLogon` has run carries `900000`. A `PING` with the session's cookies carries it too,
@@ -151,6 +157,20 @@ mailbox as it was first provisioned.
   `Error::NotRefreshed`. `Session::expiration` is the sans-io half, reporting what the last
   response said.
 
+- **A lost Session Context is re-established on the request that finds out.** `X-ResponseCode`
+  10, 6 and 13 name no context the server has, and Exchange runs nothing it answers that way. The
+  connection sends a `Connect` passing the old cookies ([MS-OXCMAPIHTTP] §3.1.5.7), logs on again,
+  and sends the request once more — when nothing in it but the logon belonged to the old context.
+  A request holding any other handle (a table being paged, a stream, a message being written)
+  fails as `Error::SessionLost`, and the object refuses to go on with `Error::SessionReplaced`
+  rather than send a handle the new context never issued. `Connection::reconnect` and
+  `Logon::reconnect` do the same on request, and make a poisoned connection usable again;
+  `reconnects` counts how often it has happened. Named-property ids are kept across a reconnect to
+  the same mailbox and asked for afresh if the logon now names another instance of it.
+- **`RopBatch::bind_logon`, `rebind_logon` and `binds_only_the_logon`**, which let a batch built
+  for one Session Context's logon be sent to its successor, and say when that is meaningless.
+  `RopBatch` is now `Clone`, and `ResponseCode` is re-exported from `mapi-client`.
+
 ### Changed
 
 - **Every `mapi-client` request can be dropped part way without wedging anything.** The connection
@@ -166,6 +186,15 @@ mailbox as it was first provisioned.
 
 ### Fixed
 
+- **A failure reported after `DONE` fails the request.** [MS-OXCMAPIHTTP] §3.2.5.2 lets a server
+  send a second `X-ResponseCode` among the headers that follow `DONE`; it was ignored, and such a
+  response decoded as a success. It is now `mapi_proto::Error::FailedAfterDone`, apart from
+  `Transport` because the request had been accepted and how much of it ran is not known — so a
+  context lost that late is re-established on the next request rather than retried.
+- **A reconnect no longer mixes two Session Contexts' cookies.** §3.2.5.6 says the client "MUST NOT
+  comingle the new cookies with cookies from the previous Session Context"; the jar kept any old
+  cookie the new context did not set. It is now replaced once the reconnect succeeds, and kept
+  whole when it fails, for the next attempt to pass on.
 - **A table read abandoned during its first round trip reported an empty table.** `Rows` took the
   unopened table out before the request and put it back only on failure, so a future dropped
   mid-open lost it, and the next `try_next` found nothing to do and answered `None`. It is now

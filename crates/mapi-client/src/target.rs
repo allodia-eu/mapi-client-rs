@@ -35,8 +35,8 @@ pub(crate) struct MessagePath {
 /// Which object a fetch, a table read or a stream is aimed at.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Target {
-    /// A handle the server is already holding — the Logon object, or a table being paged.
-    Open(ObjectHandle),
+    /// The Logon object itself, which needs no opening.
+    Logon(ObjectHandle),
     /// A folder to open in the same batch as the operation.
     Folder {
         /// The Logon object the folder hangs off.
@@ -68,12 +68,12 @@ impl Target {
     /// Puts the object into `batch`, along with whatever had to be opened to reach it.
     pub(crate) fn open(self, batch: &mut RopBatch) -> Opened {
         match self {
-            Self::Open(handle) => Opened {
-                slot: batch.bind(handle),
+            Self::Logon(handle) => Opened {
+                slot: batch.bind_logon(handle),
                 opened: Vec::new(),
             },
             Self::Folder { logon, id } => {
-                let logon = batch.bind(logon);
+                let logon = batch.bind_logon(logon);
                 let folder = batch.open_folder(logon, id);
                 Opened {
                     slot: folder,
@@ -114,7 +114,7 @@ impl Target {
 /// succeeds, so asking for write access a read does not need turns a working read into an error.
 /// The write path builds its own batch and says so there.
 fn open_message(batch: &mut RopBatch, path: MessagePath) -> HandleSlot {
-    let logon = batch.bind(path.logon);
+    let logon = batch.bind_logon(path.logon);
     batch.open_message(logon, path.folder, path.id, MessageMode::ReadOnly)
 }
 
@@ -164,7 +164,7 @@ mod tests {
     #[test]
     fn an_already_open_object_costs_no_rops_at_all() {
         let mut batch = RopBatch::new();
-        let opened = Target::Open(ObjectHandle::new(0x2A)).open(&mut batch);
+        let opened = Target::Logon(ObjectHandle::new(0x2A)).open(&mut batch);
         opened.release(&mut batch);
 
         assert_eq!(opened.slot.index(), 0);
@@ -224,7 +224,7 @@ mod tests {
     #[test]
     fn each_target_opens_what_it_has_to() {
         for (target, opens) in [
-            (Target::Open(ObjectHandle::new(1)), 0),
+            (Target::Logon(ObjectHandle::new(1)), 0),
             (
                 Target::Folder {
                     logon: ObjectHandle::new(1),

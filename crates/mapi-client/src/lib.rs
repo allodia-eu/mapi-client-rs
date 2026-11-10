@@ -172,10 +172,10 @@ pub use mapi_proto::{
     OpenRecipient, ProgressResponse, PropertyFilter, PropertyName, PropertyNameKind,
     PropertyProblem, PropertyRow, PropertySet, PropertySetId, PropertySetIter, PropertyTag,
     PropertyType, PropertyValue, ReadFlags, Recipient, RecipientType, RelationalOperator,
-    ReplicaId, RequestType, Restriction, RowForm, SMTP_ADDRESS_TYPE, STATE_PROPERTIES,
-    ServerEntryId, SetReadFlagsResponse, ShortTermId, SortDirection, SortOrder, SortOrderSet,
-    SpecialFolder, StoreObjectType, SubmitFlags, SyncScope, TableStatus, TableString, TaggedValue,
-    WellKnownFolder, one_off_provider,
+    ReplicaId, RequestType, ResponseCode, Restriction, RowForm, SMTP_ADDRESS_TYPE,
+    STATE_PROPERTIES, ServerEntryId, SetReadFlagsResponse, ShortTermId, SortDirection, SortOrder,
+    SortOrderSet, SpecialFolder, StoreObjectType, SubmitFlags, SyncScope, TableStatus, TableString,
+    TaggedValue, WellKnownFolder, one_off_provider,
 };
 /// The sans-io NTLM and SPNEGO handshakes this crate drives, for
 /// [`Identity`](negotiate_auth::Identity) and for anyone wiring one up to an HTTP client of

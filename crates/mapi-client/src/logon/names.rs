@@ -67,7 +67,7 @@ impl Logon {
         I::Item: Into<PropertyName>,
     {
         let asked: Vec<PropertyName> = names.into_iter().map(Into::into).collect();
-        let wanted = self.named.missing(&asked);
+        let wanted = self.current_names().missing(&asked);
         self.ask(wanted, NameRegistration::Existing).await
     }
 
@@ -101,7 +101,7 @@ impl Logon {
         I::Item: Into<PropertyName>,
     {
         let asked: Vec<PropertyName> = names.into_iter().map(Into::into).collect();
-        let wanted = self.named.unregistered(&asked);
+        let wanted = self.current_names().unregistered(&asked);
         // A name the store answered `0x0000` for is cached as an entry with no id. Left there, the
         // id this call is about to be given would be invisible to every later lookup.
         self.named.forget(&wanted);
@@ -122,7 +122,7 @@ impl Logon {
         }
 
         let mut batch = RopBatch::new();
-        let logon = batch.bind(self.handle);
+        let logon = batch.bind_logon(self.handle());
         batch.property_ids_from_names(logon, &wanted, registration);
 
         let execution = self
@@ -138,8 +138,22 @@ impl Logon {
                 found: "no property ids in the batch's responses",
             })?;
 
-        self.named.absorb(wanted, PropertyIdsResponse::ids(ids));
+        // A reconnect inside that round trip may have logged on to another instance of the mailbox,
+        // whose ids these are; the cache follows it rather than mixing two stores' answers.
+        self.current_names()
+            .absorb(wanted, PropertyIdsResponse::ids(ids));
         Ok(&self.named)
+    }
+
+    /// The cache, emptied first if the logon now names another mailbox than the one it was filled
+    /// from — which a reconnect to a restored or moved mailbox does. A named-property id is a fact
+    /// about one store ([MS-OXCPRPT] §3.1.2), so another store's answers are worth nothing here.
+    fn current_names(&mut self) -> &mut NamedProperties {
+        let store = self.mailbox().mailbox_guid();
+        if self.named.store() != store {
+            self.named = NamedProperties::new(store);
+        }
+        &mut self.named
     }
 
     /// The named properties resolved so far, without sending anything.
@@ -174,7 +188,7 @@ impl Logon {
         }
 
         let mut batch = RopBatch::new();
-        let logon = batch.bind(self.handle);
+        let logon = batch.bind_logon(self.handle());
         batch.names_from_property_ids(logon, &ids);
 
         let execution = self

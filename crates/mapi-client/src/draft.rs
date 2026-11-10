@@ -20,7 +20,7 @@ use mapi_proto::{
     TaggedValue,
 };
 
-use crate::connection::Connection;
+use crate::connection::{Connection, Held};
 use crate::error::{Error, Result};
 
 /// One attachment of the item being created, which is its own object with its own save.
@@ -270,7 +270,7 @@ impl<'a> NewMessage<'a> {
         values.extend(properties);
 
         let mut batch = RopBatch::new();
-        let logon_slot = batch.bind(logon);
+        let logon_slot = batch.bind_logon(logon);
         let message = batch.create_message(logon_slot, folder);
         batch.set_properties(message, &values);
         if !recipients.is_empty() {
@@ -285,6 +285,7 @@ impl<'a> NewMessage<'a> {
         let handle = execution
             .handle(message)
             .filter(|handle| !handle.is_none())
+            .map(|handle| connection.hold(handle))
             .ok_or(Error::Unexpected {
                 expected: "a handle for the new message",
                 found: "no message handle in the batch's responses",
@@ -328,9 +329,13 @@ impl<'a> NewMessage<'a> {
 ///
 /// A failure here is not worth reporting over the one that caused it: the Session Context times the
 /// handle out on its own.
-async fn abandon(connection: &mut Connection, handle: ObjectHandle) {
+///
+/// A handle from a Session Context since replaced went with it, so nothing is sent for one.
+async fn abandon(connection: &mut Connection, handle: Held) {
     let mut batch = RopBatch::new();
-    let slot = batch.bind(handle);
+    let Ok(slot) = connection.bind(&mut batch, handle, "releasing a message") else {
+        return;
+    };
     batch.release(slot);
     let _ = connection.execute(batch, "releasing a message").await;
 }
@@ -340,24 +345,20 @@ async fn abandon(connection: &mut Connection, handle: ObjectHandle) {
 /// The order is the whole point. `RopSubmitMessage` acts on what is in the store, so a submit
 /// before the save sends the message as it was before the properties, the recipients and the
 /// attachments were written — which is to say an empty one, successfully.
-async fn commit(
-    connection: &mut Connection,
-    handle: ObjectHandle,
-    submit: bool,
-) -> Result<MessageId> {
+async fn commit(connection: &mut Connection, handle: Held, submit: bool) -> Result<MessageId> {
+    let what = if submit {
+        "sending a message"
+    } else {
+        "saving a message"
+    };
     let mut batch = RopBatch::new();
-    let message = batch.bind(handle);
+    let message = connection.bind(&mut batch, handle, what)?;
     batch.save_message(message);
     if submit {
         batch.submit_message(message, SubmitFlags::None);
     }
     batch.release(message);
 
-    let what = if submit {
-        "sending a message"
-    } else {
-        "saving a message"
-    };
     let execution = connection.execute(batch, what).await?;
     if submit
         && !execution

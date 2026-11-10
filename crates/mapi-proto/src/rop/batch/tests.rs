@@ -41,6 +41,60 @@ fn the_chain_threads_slots_not_handles() {
     assert_eq!(rops.get(18..21), Some(&[0x12, 0x00, 0x02][..]));
 }
 
+/// A batch that binds only the logon carries over to a new Session Context whole, and the bytes
+/// that go out are the old ones with the new logon in the table.
+#[test]
+fn a_batch_binding_only_the_logon_is_carried_over_to_a_new_one() {
+    let mut batch = RopBatch::new();
+    let logon = batch.bind_logon(ObjectHandle::new(0x2A));
+    let folder = batch.open_folder(logon, FolderId::new(1));
+    let _ = batch.contents_table(folder);
+    let before = batch.clone();
+    assert!(batch.binds_only_the_logon());
+
+    batch.rebind_logon(ObjectHandle::new(0x07));
+    let built = batch.build().unwrap();
+    assert_eq!(
+        built.initial_handles,
+        vec![
+            ObjectHandle::new(0x07),
+            ObjectHandle::NONE,
+            ObjectHandle::NONE
+        ]
+    );
+
+    let unchanged = before.build().unwrap();
+    let rops = |bytes: &[u8]| bytes.get(..bytes.len() - 12).unwrap().to_vec();
+    assert_eq!(
+        rops(&unchanged.bytes),
+        rops(&built.bytes),
+        "only the handle table differs"
+    );
+}
+
+/// Any other handle belonged to the old Session Context — even one whose value is the logon's —
+/// so a batch holding one does not carry over, and only the logon's own slot is repointed.
+#[test]
+fn a_batch_holding_any_other_handle_is_not_carried_over() {
+    let mut batch = RopBatch::new();
+    let _ = batch.bind_logon(ObjectHandle::new(0x2A));
+    let table = batch.bind(ObjectHandle::new(0x2A));
+    batch.query_rows(table, 10);
+    assert!(!batch.binds_only_the_logon());
+
+    batch.rebind_logon(ObjectHandle::new(0x07));
+    assert_eq!(
+        batch.build().unwrap().initial_handles,
+        vec![ObjectHandle::new(0x07), ObjectHandle::new(0x2A)],
+        "the value alone does not make a handle the logon's"
+    );
+
+    assert!(
+        RopBatch::new().binds_only_the_logon(),
+        "nothing bound at all"
+    );
+}
+
 /// The handle table is sized by the slots used, and every slot a ROP will fill starts unowned.
 ///
 /// [MS-OXCROPS] §3.1.4.1

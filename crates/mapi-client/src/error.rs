@@ -150,9 +150,11 @@ pub enum Error {
     /// MAPI/HTTP allows exactly one request in flight per Session Context. When a request fails
     /// in transit, or the future driving it is dropped before its answer arrives, there is no way
     /// to tell whether the server processed it, and sending the next one regardless is how a
-    /// client ends up reading somebody else's answer. Reconnect —
-    /// [`Connection::disconnect`](crate::Connection::disconnect) still works, and frees the
-    /// server's context sooner than its timeout would.
+    /// client ends up reading somebody else's answer.
+    /// [`Connection::reconnect`](crate::Connection::reconnect) replaces the Session Context and
+    /// makes the connection usable again, as [MS-OXCMAPIHTTP] §3.1.7.2 prescribes for a response
+    /// that never arrived; [`Connection::disconnect`](crate::Connection::disconnect) still works
+    /// too, and frees the server's context sooner than its timeout would.
     ///
     /// [MS-OXCMAPIHTTP] §2.2.3.3.3 — `X-ResponseCode` 15, one request at a time
     #[error("this connection is no longer usable and must be re-established: {cause}")]
@@ -175,6 +177,42 @@ pub enum Error {
          Session Context was refreshed"
     )]
     NotRefreshed,
+
+    /// The server has no Session Context for this request, and did not run it.
+    ///
+    /// `X-ResponseCode` 10, 6 or 13: the context expired, was replaced, or was created under
+    /// another authentication context, or its cookie was unreadable or missing. See
+    /// [`Connection`](crate::Connection#a-lost-session-context) for what is done about it: a
+    /// request that held nothing but the logon is sent again on a new Session Context and never
+    /// reports this. One that held a handle from the old context cannot be, and does.
+    ///
+    /// **The server did not act on the request**, so retrying the operation is safe — a write
+    /// included — once whatever object it came from has been made afresh.
+    ///
+    /// [MS-OXCMAPIHTTP] §3.2.5.6 — "the client SHOULD reconnect and establish a new Session
+    /// Context"
+    #[error("the server has no Session Context for this request and did not run it: {code}{}",
+        suffix(.diagnostic.as_ref()))]
+    SessionLost {
+        /// The `X-ResponseCode` the server answered with.
+        code: mapi_proto::ResponseCode,
+        /// Whatever the server said about it.
+        diagnostic: Option<String>,
+    },
+
+    /// An object held server handles in a Session Context that has since been replaced.
+    ///
+    /// A [`Rows`](crate::Rows) part way through a table, a stream part way through, a message
+    /// being written: each holds a handle that only meant something to the Session Context that
+    /// issued it, and a reconnect replaced that context. Nothing was sent. Start the operation
+    /// again from the [`Logon`](crate::Logon), which has re-established itself.
+    #[error(
+        "{during} needs handles from a Session Context that has since been replaced; start it again"
+    )]
+    SessionReplaced {
+        /// What the object was doing, in the caller's terms.
+        during: &'static str,
+    },
 
     /// The server ran the batch and refused one of the ROPs in it.
     #[error("{during} was refused: {code}")]
