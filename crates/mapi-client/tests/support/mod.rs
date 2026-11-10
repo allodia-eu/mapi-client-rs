@@ -26,6 +26,8 @@
     reason = "these builders hand their bytes onward to wiremock, which wants them owned"
 )]
 
+/// A server that goes away, hangs up and cuts answers short, which wiremock cannot.
+pub(crate) mod fault;
 /// The ROP walker, which grows with every ROP the crate learns to send.
 mod roplist;
 /// The responses to the ROPs of an incremental download.

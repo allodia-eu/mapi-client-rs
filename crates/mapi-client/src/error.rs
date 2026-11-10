@@ -15,6 +15,11 @@ use core::time::Duration;
 
 use mapi_proto::{ErrorCode, SpecialFolder, WellKnownFolder};
 
+/// How far a failed request got.
+mod delivery;
+
+pub use delivery::Delivery;
+
 /// The result of anything in this crate.
 pub type Result<T> = core::result::Result<T, Error>;
 

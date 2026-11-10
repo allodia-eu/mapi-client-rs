@@ -139,3 +139,55 @@ fn a_reconnect_needs_a_context_and_an_idle_session() {
         Err(Error::InvalidState { .. })
     ));
 }
+
+/// An `Execute` accepted and then failed — after `DONE`, or with a non-zero `StatusCode` — may have
+/// run any of its ROPs, so the session no longer knows its handle table and leaves only what an
+/// abandoned request leaves.
+#[test]
+fn an_execute_accepted_and_then_failed_is_treated_as_abandoned() {
+    for payload in [
+        b"PROCESSING\r\nDONE\r\nX-ResponseCode: 1\r\n\r\n".to_vec(),
+        with_preamble(&[1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]),
+    ] {
+        let mut session = connected();
+        session.execute(RopBatch::new()).unwrap();
+        let error = session.on_response(&ok_headers(), &payload).unwrap_err();
+        assert!(
+            matches!(
+                error,
+                Error::FailedAfterDone { .. } | Error::ExecuteFailed { .. }
+            ),
+            "{error:?}"
+        );
+        assert!(session.is_abandoned(), "{error:?}");
+        assert!(session.execute(RopBatch::new()).is_err());
+        assert!(session.begin_disconnect().is_ok());
+    }
+}
+
+/// [MS-OXCMAPIHTTP] §3.1.7.1: a request that never reached the server is resubmitted as it was,
+/// with no new Session Context. Retracting it leaves the session exactly as before it was built,
+/// so the same request built again is the same bytes, counter included — and nothing is refused.
+#[test]
+fn a_retracted_request_comes_out_again_the_same() {
+    let mut session = connected();
+    let first = session.execute(RopBatch::new()).unwrap();
+    assert!(session.retract());
+    assert!(!session.is_awaiting_response());
+    assert!(!session.is_abandoned(), "retracting is not giving up");
+
+    let again = session.execute(RopBatch::new()).unwrap();
+    assert_eq!(first.headers(), again.headers());
+    assert_eq!(first.body(), again.body());
+
+    session
+        .on_response(&ok_headers(), &execute_payload(&[], &[]))
+        .unwrap();
+    assert!(!session.retract(), "nothing in flight, nothing changes");
+    let next = session.execute(RopBatch::new()).unwrap();
+    assert_ne!(
+        next.headers().get("X-RequestId"),
+        again.headers().get("X-RequestId"),
+        "a request that was answered is not taken back"
+    );
+}
