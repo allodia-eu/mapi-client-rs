@@ -60,6 +60,23 @@ impl Logon {
         self.connection.server()
     }
 
+    /// When the server will time this logon's Session Context out if nothing more is sent. See
+    /// [`Connection::expires_at`].
+    #[must_use]
+    pub const fn expires_at(&self) -> Option<std::time::Instant> {
+        self.connection.expires_at()
+    }
+
+    /// Keeps the Session Context alive, and returns its new deadline. See
+    /// [`Connection::keep_alive`].
+    ///
+    /// # Errors
+    ///
+    /// As [`Connection::keep_alive`].
+    pub async fn keep_alive(&mut self) -> Result<std::time::Instant> {
+        self.connection.keep_alive().await
+    }
+
     /// The id of one of the thirteen special folders.
     ///
     /// This is why reaching the Inbox costs nothing: a private-mailbox logon hands back every

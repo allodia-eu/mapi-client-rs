@@ -42,8 +42,8 @@ mod named;
 /// deletes again; every test self-cleaning, because the counts the `items` suite asserts are exact.
 mod writes;
 
-/// A request given up on part way, and the disconnect that has to work afterwards.
-mod cancellation;
+/// A Session Context over time: kept alive, given up on part way, lost and found again.
+mod lifetime;
 
 /// Incremental synchronization: a first download, the next one, and the changes between.
 mod sync;

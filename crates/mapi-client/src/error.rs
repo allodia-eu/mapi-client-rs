@@ -161,6 +161,21 @@ pub enum Error {
         cause: String,
     },
 
+    /// A `PING` succeeded without saying that it refreshed the Session Context.
+    ///
+    /// [MS-OXCMAPIHTTP] §3.1.5.3 verifies a refresh only by "a successful PING response containing
+    /// the X-ExpirationInfo header", and a successful `PING` alone is not one: the endpoint
+    /// answers a `PING` that names no Session Context successfully too, and without the header —
+    /// measured against Exchange Server SE `15.02.2562.056`. So the Session Context may be gone,
+    /// and the next request is what says.
+    ///
+    /// [MS-OXCMAPIHTTP] §3.1.5.3 — keeping a Session Context alive
+    #[error(
+        "the PING succeeded without an X-ExpirationInfo header, so it did not show that the \
+         Session Context was refreshed"
+    )]
+    NotRefreshed,
+
     /// The server ran the batch and refused one of the ROPs in it.
     #[error("{during} was refused: {code}")]
     Rop {
