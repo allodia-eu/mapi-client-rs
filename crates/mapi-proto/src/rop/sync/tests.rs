@@ -15,6 +15,7 @@ fn decode(rops: &[u8]) -> Vec<RopResponse> {
         Decoding {
             columns: &[],
             property_tags: &[],
+            code_page: crate::CodePage::WINDOWS_1252,
         },
     )
     .unwrap()

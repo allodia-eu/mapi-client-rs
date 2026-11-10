@@ -24,6 +24,7 @@ fn against(columns: &[Option<Vec<PropertyTag>>]) -> Decoding<'_> {
     Decoding {
         columns,
         property_tags: &[],
+        code_page: crate::CodePage::WINDOWS_1252,
     }
 }
 
@@ -111,6 +112,7 @@ fn a_property_fetch_decodes_against_the_tags_its_request_carried() {
         Decoding {
             columns: &no_columns(),
             property_tags: &tags,
+            code_page: crate::CodePage::WINDOWS_1252,
         },
     )
     .unwrap();
@@ -151,6 +153,7 @@ fn two_fetches_on_one_handle_each_decode_against_their_own_tags() {
         Decoding {
             columns: &no_columns(),
             property_tags: &tags,
+            code_page: crate::CodePage::WINDOWS_1252,
         },
     )
     .unwrap();
@@ -188,6 +191,7 @@ fn a_refused_fetch_still_consumes_the_tags_its_request_carried() {
         Decoding {
             columns: &no_columns(),
             property_tags: &tags,
+            code_page: crate::CodePage::WINDOWS_1252,
         },
     )
     .unwrap();

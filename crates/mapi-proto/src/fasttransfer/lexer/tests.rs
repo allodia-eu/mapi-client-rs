@@ -3,7 +3,7 @@ use crate::oxcdata::{PropertyNameKind, ServerEntryId};
 
 /// Lexes one whole element from `bytes`, asserting nothing is left over.
 fn element(bytes: &[u8]) -> Element {
-    let mut lexer = Lexer::new();
+    let mut lexer = Lexer::new(CodePage::WINDOWS_1252);
     lexer.feed(bytes);
     let element = lexer.next_element().unwrap().expect("a whole element");
     assert_eq!(
@@ -225,7 +225,7 @@ fn a_named_property_carries_its_name_inline() {
     unknown.push(0x02);
     let mut bytes = 0x8008_000B_u32.to_le_bytes().to_vec();
     bytes.extend_from_slice(&unknown);
-    let mut lexer = Lexer::new();
+    let mut lexer = Lexer::new(CodePage::WINDOWS_1252);
     lexer.feed(&bytes);
     assert!(matches!(
         lexer.next_element(),
@@ -263,7 +263,7 @@ fn idset_given_is_read_as_binary_despite_its_tag() {
 
 #[test]
 fn a_string_that_is_not_utf16_is_refused() {
-    let mut lexer = Lexer::new();
+    let mut lexer = Lexer::new(CodePage::WINDOWS_1252);
     let mut bytes = 0x0037_001F_u32.to_le_bytes().to_vec();
     bytes.extend_from_slice(&counted(&[0x00, 0xD8]));
     lexer.feed(&bytes);
@@ -279,7 +279,7 @@ fn a_string_that_is_not_utf16_is_refused() {
 fn a_split_value_waits_for_the_bytes_it_needs() {
     let mut bytes = 0x0FF9_0102_u32.to_le_bytes().to_vec();
     bytes.extend_from_slice(&counted(&[0xEE; 100]));
-    let mut lexer = Lexer::new();
+    let mut lexer = Lexer::new(CodePage::WINDOWS_1252);
     lexer.feed(&bytes[..10]);
     assert_eq!(lexer.next_element().unwrap(), None);
     assert_eq!(lexer.pending(), 10);
@@ -305,9 +305,76 @@ fn a_named_property_split_inside_its_name_waits() {
     bytes.push(0x01);
     bytes.extend_from_slice(&utf16_z("Keywords"));
     bytes.extend_from_slice(&[0, 0, 0, 0]);
-    let mut lexer = Lexer::new();
+    let mut lexer = Lexer::new(CodePage::WINDOWS_1252);
     lexer.feed(&bytes[..25]);
     assert_eq!(lexer.next_element().unwrap(), None);
     lexer.feed(&bytes[25..]);
     assert!(lexer.next_element().unwrap().is_some());
+}
+
+/// An 8-bit string is decoded in the code page it was written in: the one its code-page type
+/// names, or the connection's for a plain `PtypString8`.
+#[test]
+fn an_eight_bit_string_is_decoded_in_its_own_code_page() {
+    // 0x84E3 is code page 1251.
+    let cyrillic = property(0x0037_84E3, &counted(&[0xCF, 0xF0, 0xE8, 0]));
+    assert_eq!(cyrillic.code_page(), Some(1251));
+    assert_eq!(
+        cyrillic.value(),
+        &PropertyValue::String8(TableString::from("\u{41F}\u{440}\u{438}"))
+    );
+
+    // Windows-1252 by default, which has the euro sign where Latin-1 has a control character.
+    assert_eq!(
+        property(0x0037_001E, &counted(&[0x80, 0])).value(),
+        &PropertyValue::String8(TableString::from("\u{20AC}"))
+    );
+
+    let mut lexer = Lexer::new(CodePage::new(932).unwrap());
+    let mut bytes = 0x0037_001E_u32.to_le_bytes().to_vec();
+    bytes.extend_from_slice(&counted(&[0x93, 0xFA, 0]));
+    lexer.feed(&bytes);
+    let Some(Element::Property(japanese)) = lexer.next_element().unwrap() else {
+        panic!("a property")
+    };
+    assert_eq!(
+        japanese.value(),
+        &PropertyValue::String8(TableString::from("\u{65E5}"))
+    );
+}
+
+/// A string that cannot be read is stepped past: the error names it and its code page, and the
+/// element after it reads as though nothing had happened. A list is consumed whole, whichever of
+/// its values fails.
+#[test]
+fn an_undecodable_string_is_stepped_past() {
+    let mut bytes = Vec::new();
+    // Code page 437, which has no decoder.
+    bytes.extend_from_slice(&0x0037_81B5_u32.to_le_bytes());
+    bytes.extend_from_slice(&counted(b"x\0"));
+    // Two Shift_JIS values, the first a lead byte with no trail byte.
+    bytes.extend_from_slice(&0x6700_101E_u32.to_le_bytes());
+    bytes.extend_from_slice(&2_u32.to_le_bytes());
+    bytes.extend_from_slice(&counted(&[0x93, 0]));
+    bytes.extend_from_slice(&counted(b"a\0"));
+    bytes.extend_from_slice(&0x0E07_0003_u32.to_le_bytes());
+    bytes.extend_from_slice(&9_u32.to_le_bytes());
+
+    let mut lexer = Lexer::new(CodePage::new(932).unwrap());
+    lexer.feed(&bytes);
+    assert!(matches!(
+        lexer.next_element(),
+        Err(Error::UndecodableString { tag, code_page: 437, .. })
+            if tag == PropertyTag::new(0x0037_001E)
+    ));
+    assert!(matches!(
+        lexer.next_element(),
+        Err(Error::UndecodableString { tag, code_page: 932, .. })
+            if tag == PropertyTag::new(0x6700_101E)
+    ));
+    let Some(Element::Property(next)) = lexer.next_element().unwrap() else {
+        panic!("the element after them")
+    };
+    assert_eq!(next.value(), &PropertyValue::Integer32(9));
+    assert_eq!(lexer.pending(), 0);
 }

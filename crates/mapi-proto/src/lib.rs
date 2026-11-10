@@ -89,9 +89,9 @@ pub use crate::ics::{
 pub use crate::oxcdata::{
     APPOINTMENT_COLUMNS, APPOINTMENT_PROPERTIES, ATTACHMENT_COLUMNS, ATTACHMENT_PROPERTIES,
     AttachMethod, AttachmentNumber, COMPLETE_FLAG_PROPERTIES, CONTACT_COLUMNS, CONTACT_PROPERTIES,
-    CONTENTS_COLUMNS, Cell, ContainerClass, Currency, FOLDER_PROPERTIES, FOLLOW_UP_PROPERTIES,
-    FileTime, FlagStatus, Floating32, Floating64, FolderEntryId, FolderId, FollowupIcon,
-    FuzzyLevel, Guid, HIERARCHY_COLUMNS, LegacyDn, LongTermId, MAILBOX_PROPERTIES,
+    CONTENTS_COLUMNS, Cell, CodePage, ContainerClass, Currency, FOLDER_PROPERTIES,
+    FOLLOW_UP_PROPERTIES, FileTime, FlagStatus, Floating32, Floating64, FolderEntryId, FolderId,
+    FollowupIcon, FuzzyLevel, Guid, HIERARCHY_COLUMNS, LegacyDn, LongTermId, MAILBOX_PROPERTIES,
     MESSAGE_PROPERTIES, MessageClass, MessageFlags, MessageId, NEW_APPOINTMENT_PROPERTIES,
     NEW_CONTACT_PROPERTIES, NamedProperty, NamedPropertyId, OneOffEntryId, PropertyName,
     PropertyNameKind, PropertyProblem, PropertyRow, PropertySet, PropertySetId, PropertySetIter,

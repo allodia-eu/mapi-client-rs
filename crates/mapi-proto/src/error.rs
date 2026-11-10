@@ -85,6 +85,35 @@ pub enum Error {
         at: usize,
     },
 
+    /// A code page this crate has no decoder for.
+    ///
+    /// Refused when a [`CodePage`](crate::CodePage) is made, so that nothing can be configured to
+    /// read strings it could not then decode.
+    ///
+    /// [MS-OXCDATA] §2.11.1.2 — string property values
+    #[error("code page {code_page} is not one this crate can decode")]
+    UnsupportedCodePage {
+        /// The Windows code page identifier.
+        code_page: u16,
+    },
+
+    /// An 8-bit string value whose bytes could not be read as text.
+    ///
+    /// Either its code page is one this crate has no decoder for, or its bytes are not text in
+    /// that code page. Refused rather than decoded with replacement characters, which a caller
+    /// could not tell from a value that really holds them.
+    ///
+    /// [MS-OXCDATA] §2.11.1.2 — string property values
+    #[error("{tag} is not readable as {code_page}: {reason}")]
+    UndecodableString {
+        /// The property the value belongs to.
+        tag: PropertyTag,
+        /// The code page it was written in.
+        code_page: u16,
+        /// Which of the two it was.
+        reason: &'static str,
+    },
+
     /// A property fetch answered with a `PtypObject`, which is not a value.
     ///
     /// Its content is another Server object, reached with `RopOpenStream` or

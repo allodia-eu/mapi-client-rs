@@ -10,7 +10,7 @@ fn utf16_z(text: &str) -> Vec<u8> {
 }
 
 fn read(bytes: &[u8], property_type: PropertyType) -> Result<PropertyValue, Error> {
-    PropertyValue::read(&mut Reader::new(bytes), property_type, ValueContext::Object)
+    PropertyValue::read_as(&mut Reader::new(bytes), property_type, ValueContext::Object)
 }
 
 fn write(value: &PropertyValue) -> Result<Vec<u8>, Error> {
@@ -72,7 +72,7 @@ fn each_fixed_width_type_reads_exactly_its_own_width() {
     for (property_type, bytes, expected) in cases {
         let mut r = Reader::new(bytes);
         assert_eq!(
-            PropertyValue::read(&mut r, property_type, ValueContext::Object).unwrap(),
+            PropertyValue::read_as(&mut r, property_type, ValueContext::Object).unwrap(),
             expected
         );
         assert!(r.is_empty(), "{property_type} left bytes behind");
@@ -89,7 +89,7 @@ fn each_fixed_width_type_reads_exactly_its_own_width() {
 fn a_binary_value_is_a_sixteen_bit_count_then_that_many_bytes() {
     let bytes = [0x03, 0x00, 0xAA, 0xBB, 0xCC];
     let mut r = Reader::new(&bytes);
-    let value = PropertyValue::read(&mut r, PropertyType::Binary, ValueContext::Object).unwrap();
+    let value = PropertyValue::read_as(&mut r, PropertyType::Binary, ValueContext::Object).unwrap();
 
     assert_eq!(value.as_binary(), Some(&[0xAA, 0xBB, 0xCC][..]));
     assert!(r.is_empty());
@@ -113,7 +113,7 @@ fn a_multivalued_count_is_thirty_two_bits_in_the_same_buffer() {
         0x02, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x02, 0, 0, 0,
     ];
     let mut r = Reader::new(&bytes);
-    let value = PropertyValue::read(
+    let value = PropertyValue::read_as(
         &mut r,
         PropertyType::MultipleInteger32,
         ValueContext::Object,
@@ -216,7 +216,7 @@ fn an_integer32_reads_as_signed_or_unsigned() {
 #[test]
 fn a_short_string_is_complete() {
     let bytes = utf16_z("Inbox");
-    let value = PropertyValue::read(
+    let value = PropertyValue::read_as(
         &mut Reader::new(&bytes),
         PropertyType::String,
         ValueContext::TableRow,
@@ -237,7 +237,7 @@ fn a_string_at_the_table_limit_is_reported_as_truncated() {
     assert_eq!(long.chars().count(), 255);
 
     let bytes = utf16_z(&long);
-    let value = PropertyValue::read(
+    let value = PropertyValue::read_as(
         &mut Reader::new(&bytes),
         PropertyType::String,
         ValueContext::TableRow,
@@ -363,7 +363,7 @@ fn round_trips_every_value_a_client_may_send() {
         let property_type = value.property_type().unwrap();
         let bytes = write(&value).unwrap_or_else(|e| panic!("{property_type} did not encode: {e}"));
         let mut r = Reader::new(&bytes);
-        let back = PropertyValue::read(&mut r, property_type, ValueContext::Object).unwrap();
+        let back = PropertyValue::read_as(&mut r, property_type, ValueContext::Object).unwrap();
         assert_eq!(back, value, "{property_type} did not round-trip");
         assert!(r.is_empty(), "{property_type} left bytes behind");
     }
@@ -409,7 +409,7 @@ fn truncated_buffers_never_panic() {
             &[0xFF, 0xFF, 0xFF, 0xFF, 0x00][..],
         ] {
             for context in [ValueContext::TableRow, ValueContext::Object] {
-                let _ = PropertyValue::read(&mut Reader::new(bytes), property_type, context);
+                let _ = PropertyValue::read_as(&mut Reader::new(bytes), property_type, context);
             }
         }
     }
@@ -459,4 +459,5 @@ fn values_render_for_humans() {
     );
 }
 
+mod strings;
 mod types;

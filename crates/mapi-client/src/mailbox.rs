@@ -331,6 +331,7 @@ impl MapiClient {
             identity: Arc::clone(&self.identity),
             user_dn,
             locale: self.locale,
+            code_page: self.code_page,
             client_application: self.client_application.clone(),
         })
     }

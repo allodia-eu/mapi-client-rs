@@ -49,6 +49,16 @@ mailbox as it was first provisioned.
   text naming the distinguished name sent. Nothing reads it, and capture already removes it.
 - **`RetryDelay` ranged from 11690 to 17560 ms** across eight connects in half an hour, which is
   what it means for it to be per-connection advice.
+- **Exchange answers an 8-bit string in the session's code page, converting what it stores.** A
+  subject written as `Café € ž Привет 日本` and read as `PtypString8` came back as
+  `Café € ž ?????? ??` in a session connected with 1252, `Cafe € z Привет ??` with 1251 and
+  `Cafe ? ? Привет 日本` with 932 — whatever the code page lacks becomes `?` or its nearest letter.
+  A content synchronization download configured without `Unicode` did not do the same: a subject
+  `Café € ž При 日本` arrived as `Caf? ? ? ??? ??` under 1252 and 1251 alike, where [MS-OXCFXICS] §3.2.5.9.1.1 says it writes
+  "in the code page set on connection". Downloads here always set `Unicode` and `ForceUnicode`.
+  A contents table cut a long `PtypString8` column at 255 whole characters, the last three a
+  literal `...`, under 1252, 1251, 932 and 65001 alike — never part way through a multibyte
+  character, though [MS-OXCTABL] §3.2.5.1 allows a cut at 510 bytes.
 
 ### Added
 
@@ -139,6 +149,17 @@ mailbox as it was first provisioned.
   wait for `ServerBusy` or a buffer for anything else. On Exchange Server SE `15.02.2562.056`, a
   refusal with `ecNotSupported` carried the nine bytes of the transfer fields and an empty buffer.
   Reading any of them as a bare failure would desynchronise the rest of the buffer.
+- **`CodePage`, and `SessionBuilder::code_page` and `MapiClientBuilder::code_page` to choose the
+  one a session connects with** — `Connect`'s `DefaultCodePage`, which was fixed at 1252. Only a
+  code page this crate can decode can be constructed — the Windows ANSI pages among them, the
+  Japanese, Chinese and Korean multibyte ones included — through the Encoding Standard's decoders in
+  `encoding_rs`; the list is on `CodePage`. `CodePage::decode` refuses bytes that are not text in
+  the code page rather than handing back replacement characters, and `decode_property` turns that
+  into the error naming the property.
+- **`Lexer::new` and `ContentsSync::new` take the session's code page**, which a plain
+  `PtypString8` in the stream is written in, and neither has a `Default` any more: a parser that
+  assumed Windows-1252 would read a session connected with another code page as the wrong text.
+  `Logon::download` passes its session's.
 
 ### Changed
 
@@ -152,6 +173,11 @@ mailbox as it was first provisioned.
   disconnect then reconnects with the old cookies and disconnects the new context. Measured against
   `15.02.2562.056` with the server's `MSExchange MapiHttp Emsmdb\Connection Count`: with the
   reconnect it went back to zero after three refusals; without it, it stayed at three.
+- **An 8-bit string that is not text in its code page fails with `Error::UndecodableString`**,
+  naming the property, the code page and why. In a `FastTransfer` stream the lexer steps past it,
+  since its length is known: the change it was in is reported as `SyncEvent::Unreadable` with its
+  header, and the rest of the download reads as usual. A code-page string type whose code page has
+  no decoder is treated the same way.
 
 ### Fixed
 
@@ -165,6 +191,12 @@ mailbox as it was first provisioned.
   `Resolve-Path -Relative`, as `Verify-Fixtures.ps1` already did for the same reason. Only the
   scratch manifest was ever wrong: the comparison skips `MANIFEST.toml`, and the committed one is
   built from a long path.
+- **Every `PtypString8` value was decoded as UTF-8.** In a table row, a property fetch and a
+  `FastTransfer` stream alike, so any byte above `0x7F` — `é` and `€` among them, in the
+  Windows-1252 the session connects with — came back as `U+FFFD`; so did an 8-bit `TypedString`
+  in a `RopOpenMessage` response. `StreamValue::text` read them as Latin-1 instead, which is wrong
+  for `0x80`–`0x9F`: `0x80` is `€` in 1252 and a control character in Latin-1. Each of these now
+  decodes in the session's code page, and a code-page string type in its own.
 
 ## [0.4.0] - 2026-10-17
 

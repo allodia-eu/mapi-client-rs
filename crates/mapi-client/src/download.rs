@@ -79,6 +79,7 @@ impl<'a> Download<'a> {
         state: IcsState,
     ) -> Result<Self> {
         let upload = upload_steps(&state)?;
+        let parser = ContentsSync::new(connection.code_page());
         Ok(Self {
             connection,
             logon,
@@ -89,7 +90,7 @@ impl<'a> Download<'a> {
             uploaded: 0,
             context: None,
             left_open: None,
-            parser: ContentsSync::new(),
+            parser,
             transferred: false,
         })
     }

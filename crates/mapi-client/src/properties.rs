@@ -76,7 +76,8 @@ impl<'a> Properties<'a> {
     ///
     /// [`Error::Rop`] if the server refused the fetch, plus whatever the round trip failed with.
     /// [`Error::Protocol`] carrying `UnsupportedPropertyType` if the object holds a property of a
-    /// type this crate does not model — a decode that stopped rather than guessing at a length.
+    /// type this crate does not model — a decode that stopped rather than guessing at a length —
+    /// or `UndecodableString` if a `PtypString8` value is not text in the session's code page.
     ///
     /// [MS-OXCROPS] §2.2.8.4 — `RopGetPropertiesAll`
     pub async fn read_all(self) -> Result<PropertySet> {

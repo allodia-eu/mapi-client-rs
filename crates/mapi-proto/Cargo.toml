@@ -13,6 +13,7 @@ keywords.workspace = true
 categories.workspace = true
 
 [dependencies]
+encoding_rs.workspace = true
 thiserror.workspace = true
 
 [lints]

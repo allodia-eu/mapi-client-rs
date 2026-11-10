@@ -20,6 +20,7 @@ fn row(folder: u64, last_commit: Option<u64>, deleted: Option<u32>) -> PropertyR
         &mut Reader::new(&bytes),
         &FolderStamp::COLUMNS,
         ValueContext::TableRow,
+        crate::CodePage::WINDOWS_1252,
     )
     .unwrap()
 }

@@ -16,14 +16,29 @@
 //! property set and LID or name inline, and a string may arrive under a code-page type,
 //! `0x8000 | cpid`. So values are decoded here rather than by the row codec.
 //!
+//! **An 8-bit string is decoded in the code page it was written in**: the one its code-page type
+//! names, or, for a plain `PtypString8`, "the code page set on connection" (§3.2.5.9.1.1), which
+//! the lexer is given. Neither reaches a download this crate configures, because `ForceUnicode` has
+//! every string sent as `PtypString` — and code-page types come only with `UseCpid`, which
+//! §2.2.3.1.1.1.1 reserves for server-to-client-to-server uploads.
+//!
+//! Measured on Exchange Server SE `15.02.2562.056`, which does not do what §3.2.5.9.1.1 says: a
+//! content synchronization download configured without `Unicode` sent the subject `Café € ž При`
+//! as `PtypString8` bytes reading `Caf? ? ? ???`, under a session connected with 1252 and with 1251
+//! alike — every character outside ASCII lost, though 1252 holds the first three and 1251 the
+//! last. A property fetch in the same sessions returned each in its code page. So a
+//! non-Unicode download is lossy whatever the session asked for, which is one more reason this
+//! crate never configures one. `UseCpid` set for a download was refused with `InvalidParameter`
+//! by `RopFastTransferSourceGetBuffer`.
+//!
 //! [MS-OXCFXICS] §2.2.4.1 — lexical structure
 //! [MS-OXCFXICS] §2.2.4.1.3 — serialization of simple types
 
 use crate::error::{Error, Result};
 use crate::fasttransfer::Marker;
 use crate::oxcdata::{
-    Currency, FileTime, Floating32, Floating64, Guid, PropertyName, PropertySetId, PropertyTag,
-    PropertyType, PropertyValue, ServerEntryId, TableString,
+    CodePage, Currency, FileTime, Floating32, Floating64, Guid, PropertyName, PropertySetId,
+    PropertyTag, PropertyType, PropertyValue, ServerEntryId, TableString,
 };
 use crate::wire::Reader;
 
@@ -95,23 +110,34 @@ impl StreamProperty {
 }
 
 /// Turns the bytes of a stream into [`Element`]s, as they arrive.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct Lexer {
     buffer: Vec<u8>,
     /// Where the next element starts in `buffer`.
     start: usize,
     /// The buffer length the last short read needed before it is worth trying again.
     wanted: usize,
+    /// The connection's code page, which a plain `PtypString8` is written in.
+    code_page: CodePage,
 }
 
 impl Lexer {
-    /// A lexer that has seen nothing.
+    /// A lexer that has seen nothing, for a stream from a session connected with `code_page` —
+    /// [`Session::code_page`](crate::Session::code_page) — which a plain `PtypString8` is then
+    /// written in.
+    ///
+    /// Required rather than defaulted, and there is no `Default`: a stream does not say which code
+    /// page its plain 8-bit strings are in, so a lexer that assumed one would decode a session
+    /// connected with another into the wrong text without a word.
+    ///
+    /// [MS-OXCFXICS] §3.2.5.9.1.1 — "in the code page set on connection"
     #[must_use]
-    pub const fn new() -> Self {
+    pub const fn new(code_page: CodePage) -> Self {
         Self {
             buffer: Vec::new(),
             start: 0,
             wanted: 0,
+            code_page,
         }
     }
 
@@ -140,6 +166,11 @@ impl Lexer {
     ///
     /// A decoding error for an element whose bytes cannot be one: an unsupported property type, a
     /// named property of an unknown kind, a string that is not UTF-16. A short read is never one.
+    ///
+    /// [`Error::UndecodableString`] is the one error the lexer **steps past**: an 8-bit string in a
+    /// code page with no decoder, or whose bytes are not text in it, still has a length, so the
+    /// element is consumed and the next call carries on with the one after it. Whoever reads the
+    /// object it belonged to decides what losing that value costs.
     pub fn next_element(&mut self) -> Result<Option<Element>> {
         if self.buffer.len() < self.wanted {
             return Ok(None);
@@ -149,11 +180,16 @@ impl Lexer {
             return Ok(None);
         }
         let mut r = Reader::new(rest);
-        match read_element(&mut r) {
+        match read_element(&mut r, self.code_page) {
             Ok(element) => {
                 self.start = self.start.saturating_add(r.position());
                 self.wanted = 0;
                 Ok(Some(element))
+            }
+            Err(error @ Error::UndecodableString { .. }) => {
+                self.start = self.start.saturating_add(r.position());
+                self.wanted = 0;
+                Err(error)
             }
             Err(Error::Truncated { at, need, .. }) => {
                 self.wanted = self.start.saturating_add(at).saturating_add(need);
@@ -172,7 +208,7 @@ impl Lexer {
 }
 
 /// Reads one element: a marker, or a property's tag, name and value.
-fn read_element(r: &mut Reader<'_>) -> Result<Element> {
+fn read_element(r: &mut Reader<'_>, connection: CodePage) -> Result<Element> {
     let raw = r.u32()?;
     if let Some(marker) = Marker::from_u32(raw) {
         return Ok(Element::Marker(marker));
@@ -183,7 +219,7 @@ fn read_element(r: &mut Reader<'_>) -> Result<Element> {
     } else {
         None
     };
-    let (tag, code_page, value) = read_value(r, tag)?;
+    let (tag, code_page, value) = read_value(r, tag, connection)?;
     Ok(Element::Property(StreamProperty {
         tag,
         name,
@@ -207,9 +243,13 @@ fn read_name(r: &mut Reader<'_>) -> Result<PropertyName> {
 }
 
 /// One property's value, and the tag to report it under.
+///
+/// An undecodable 8-bit string fails only after its bytes are consumed, so that the lexer can step
+/// past it; see [`Lexer::next_element`].
 fn read_value(
     r: &mut Reader<'_>,
     tag: PropertyTag,
+    connection: CodePage,
 ) -> Result<(PropertyTag, Option<u16>, PropertyValue)> {
     // [MS-OXCFXICS] §3.2.5.2.1: tagged PtypInteger32, carried and handled as PtypBinary.
     if tag == PropertyTag::META_TAG_IDSET_GIVEN {
@@ -220,27 +260,30 @@ fn read_value(
     if raw & CODE_PAGE_BIT != 0 {
         let code_page = raw & !CODE_PAGE_BIT;
         let bytes = var(r)?;
-        let (property_type, value) = if code_page == UNICODE_CODE_PAGE {
-            (
-                PropertyType::String,
+        if code_page == UNICODE_CODE_PAGE {
+            let tag = PropertyTag::from_parts(tag.id(), PropertyType::String);
+            return Ok((
+                tag,
+                Some(code_page),
                 PropertyValue::String(utf16(bytes, r)?),
-            )
-        } else {
-            (
-                PropertyType::String8,
-                PropertyValue::String8(eight_bit(bytes)),
-            )
-        };
-        let tag = PropertyTag::from_parts(tag.id(), property_type);
+            ));
+        }
+        let tag = PropertyTag::from_parts(tag.id(), PropertyType::String8);
+        let page = CodePage::new(code_page).map_err(|_| Error::UndecodableString {
+            tag,
+            code_page,
+            reason: "this crate has no decoder for that code page",
+        })?;
+        let value = PropertyValue::String8(eight_bit(bytes, tag, page)?);
         return Ok((tag, Some(code_page), value));
     }
 
-    Ok((tag, None, read_typed(r, tag.property_type())?))
+    Ok((tag, None, read_typed(r, tag, connection)?))
 }
 
 /// A value of one of the types [MS-OXCDATA] §2.11.1 names, in the stream's encoding.
-fn read_typed(r: &mut Reader<'_>, property_type: PropertyType) -> Result<PropertyValue> {
-    Ok(match property_type {
+fn read_typed(r: &mut Reader<'_>, tag: PropertyTag, connection: CodePage) -> Result<PropertyValue> {
+    Ok(match tag.property_type() {
         PropertyType::Integer16 => PropertyValue::Integer16(r.u16()?),
         PropertyType::Integer32 => PropertyValue::Integer32(r.u32()?),
         PropertyType::Integer64 => PropertyValue::Integer64(r.u64()?),
@@ -254,7 +297,7 @@ fn read_typed(r: &mut Reader<'_>, property_type: PropertyType) -> Result<Propert
         PropertyType::Time => PropertyValue::Time(FileTime::new(r.u64()?)),
         PropertyType::Guid => PropertyValue::Guid(Guid::from_bytes(r.array::<16>()?)),
         PropertyType::String => PropertyValue::String(utf16(var(r)?, r)?),
-        PropertyType::String8 => PropertyValue::String8(eight_bit(var(r)?)),
+        PropertyType::String8 => PropertyValue::String8(eight_bit(var(r)?, tag, connection)?),
         PropertyType::Binary => PropertyValue::Binary(var(r)?.to_vec()),
         PropertyType::Object => PropertyValue::Object(var(r)?.to_vec()),
         PropertyType::ServerId => PropertyValue::ServerId(ServerEntryId::from_bytes(var(r)?)),
@@ -280,9 +323,14 @@ fn read_typed(r: &mut Reader<'_>, property_type: PropertyType) -> Result<Propert
         PropertyType::MultipleString => {
             PropertyValue::MultipleString(list(r, |r| utf16(var(r)?, r))?)
         }
-        PropertyType::MultipleString8 => {
-            PropertyValue::MultipleString8(list(r, |r| Ok(eight_bit(var(r)?)))?)
-        }
+        // Every value is read before any is decoded, so that one which is not text fails with the
+        // whole list consumed and the lexer still in step.
+        PropertyType::MultipleString8 => PropertyValue::MultipleString8(
+            list(r, var)?
+                .into_iter()
+                .map(|bytes| eight_bit(bytes, tag, connection))
+                .collect::<Result<_>>()?,
+        ),
         PropertyType::MultipleBinary => {
             PropertyValue::MultipleBinary(list(r, |r| Ok(var(r)?.to_vec()))?)
         }
@@ -346,16 +394,15 @@ pub(crate) fn utf16_text(bytes: &[u8]) -> Option<String> {
     String::from_utf16(&units).ok()
 }
 
-/// An 8-bit string with its length given, its terminator optional, decoded as the row codec decodes
-/// one.
+/// An 8-bit string with its length given, its terminator optional, decoded in `code_page`.
 ///
-/// Not by its code page, which a code-page type names and [`StreamProperty::code_page`] keeps:
-/// decoding 8-bit strings by code page is a separate piece of work, for the row codec and the
-/// stream alike. A download configured with `ForceUnicode` is answered in `PtypString` throughout
-/// ([MS-OXCFXICS] §3.2.5.8.1.1), so one that is configured that way never reaches this.
-fn eight_bit(bytes: &[u8]) -> TableString {
+/// [MS-OXCFXICS] §2.2.4.1.3: readers "MUST check that the last 1 (for `PtypString8`) [...] bytes
+/// of a stream are indeed zeros before truncating them".
+fn eight_bit(bytes: &[u8], tag: PropertyTag, code_page: CodePage) -> Result<TableString> {
     let text = bytes.strip_suffix(&[0]).unwrap_or(bytes);
-    TableString::Complete(String::from_utf8_lossy(text).into_owned())
+    code_page
+        .decode_property(tag, text)
+        .map(TableString::Complete)
 }
 
 #[cfg(test)]

@@ -158,9 +158,20 @@ impl OneOffEntryId {
     /// Reads one back.
     ///
     /// Both string widths are handled, because the `U` bit says which and a client does not choose
-    /// what a server sent. What this does *not* do is guess a code page: an 8-bit one-off is
-    /// decoded byte-for-codepoint, which is Latin-1 and is said here rather than presented as a
-    /// decode.
+    /// what a server sent.
+    ///
+    /// **An 8-bit one-off is decoded byte for codepoint, by rule.** [MS-OXCDATA] §2.2.5.1 says
+    /// only that with `U` clear "the string fields following are multibyte character set (MBCS)
+    /// characters terminated by a single 0 byte", and names no code page — where the same
+    /// document puts a recipient row's 8-bit strings "in the code page sent to the server in
+    /// [...] the Connect request type" (§2.8.3.1). A one-off is a stored value, written by
+    /// whichever client made it in whichever code page that client ran, so the session's code
+    /// page is no better a guess than any other, and a [`CodePage`](crate::CodePage) is not
+    /// applied. Byte for codepoint loses nothing: every character is below `U+0100`, so
+    /// `u8::try_from(c)` gives the bytes back to a caller who knows the writer's code page and
+    /// can hand them to [`CodePage::decode`](crate::CodePage::decode). An address type and an
+    /// SMTP address, which are ASCII, read exactly. Every one-off Exchange Server SE
+    /// `15.02.2562.045` was measured writing had `U` set.
     ///
     /// # Errors
     ///

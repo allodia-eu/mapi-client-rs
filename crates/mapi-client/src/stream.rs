@@ -28,7 +28,8 @@
 //! [MS-OXCPRPT] §2.2.14 — semantics
 
 use mapi_proto::{
-    ObjectHandle, PropertyTag, PropertyType, ReadStreamResponse, RopBatch, RopResponse, StreamMode,
+    CodePage, ObjectHandle, PropertyTag, PropertyType, ReadStreamResponse, RopBatch, RopResponse,
+    StreamMode,
 };
 
 use crate::connection::Connection;
@@ -165,6 +166,7 @@ impl<'a> StreamRead<'a> {
             bytes,
             reported,
             complete,
+            code_page: connection.code_page(),
         })
     }
 }
@@ -251,6 +253,9 @@ pub struct StreamValue {
     bytes: Vec<u8>,
     reported: Option<u32>,
     complete: bool,
+    /// The session's, which a `PtypString8` stream is in: this crate opens every object with the
+    /// Logon object's code page.
+    code_page: CodePage,
 }
 
 impl StreamValue {
@@ -305,24 +310,27 @@ impl StreamValue {
     /// The value as text, if the property is one whose bytes are characters.
     ///
     /// Decoded by the **tag's own type**, because a stream carries no encoding of its own:
-    /// `PtypString` is UTF-16LE and `PtypString8` is the session's code page, which this crate does
-    /// not track — so the second is decoded as Latin-1 and said so here rather than guessed at
-    /// silently. `PidTagHtml` is `PtypBinary` and is deliberately **not** decoded: its character
-    /// set is named by `PidTagInternetCodepage`, which is a different property.
+    /// `PtypString` is UTF-16LE and `PtypString8` is in the code page of the object it was read
+    /// from — the session's, since this crate opens every object with the Logon object's
+    /// ([MS-OXCMSG] §2.2.3.1.1 `CodePageId` `0x0FFF`). `PidTagHtml` is `PtypBinary` and is
+    /// deliberately **not** decoded: its character set is named by `PidTagInternetCodepage`, which
+    /// is a different property.
     ///
     /// # Errors
     ///
     /// [`Error::Unexpected`] if the tag is not a string type, or if a `PtypString` value did not
-    /// decode as UTF-16 — an odd byte count, or an unpaired surrogate.
+    /// decode as UTF-16 — an odd byte count, or an unpaired surrogate. [`Error::Protocol`]
+    /// carrying `UndecodableString` if a `PtypString8` value is not text in the session's code
+    /// page.
     ///
     /// [MS-OXCDATA] §2.11.1 — `PtypString`, `PtypString8`
     pub fn text(&self) -> Result<String> {
         match self.tag.property_type() {
             PropertyType::String => decode_utf16(&self.bytes),
-            // Latin-1 is the identity mapping from bytes to codepoints. It is right for the
-            // Windows-1252 lab and wrong for a code page that is not, which is why this is
-            // documented rather than presented as a decode.
-            PropertyType::String8 => Ok(self.bytes.iter().copied().map(char::from).collect()),
+            PropertyType::String8 => {
+                let text = self.bytes.strip_suffix(&[0]).unwrap_or(&self.bytes);
+                Ok(self.code_page.decode_property(self.tag, text)?)
+            }
             _ => Err(Error::Unexpected {
                 expected: "a string property",
                 found: "a property whose type is not PtypString or PtypString8",
@@ -371,6 +379,7 @@ mod tests {
             bytes,
             reported: None,
             complete: true,
+            code_page: CodePage::WINDOWS_1252,
         }
     }
 
@@ -427,17 +436,30 @@ mod tests {
         assert!(value(PropertyTag::BODY, vec![0x00, 0xD8]).text().is_err());
     }
 
-    /// `PtypString8`'s code page is the session's, which this crate never negotiates — so the
-    /// mapping is stated rather than inferred.
+    /// `PtypString8` is in the session's code page: `0x80` is `€` in Windows-1252, where Latin-1
+    /// would have made it a control character. A terminator is dropped, and bytes that are not
+    /// text in the code page are refused rather than patched.
     #[test]
-    fn an_eight_bit_string_maps_each_byte_to_a_codepoint() {
+    fn an_eight_bit_string_is_decoded_in_the_sessions_code_page() {
         let tag = PropertyTag::BODY.with_type(PropertyType::String8);
         assert_eq!(
-            value(tag, vec![b'c', b'a', b'f', 0xE9])
+            value(tag, vec![b'c', b'a', b'f', 0xE9, b' ', 0x80, 0])
                 .text()
-                .expect("bytes"),
-            "caf\u{E9}"
+                .expect("Windows-1252"),
+            "caf\u{E9} \u{20AC}"
         );
+
+        let mut japanese = value(tag, vec![0x93, 0xFA]);
+        japanese.code_page = CodePage::new(932).unwrap();
+        assert_eq!(japanese.text().expect("Shift_JIS"), "\u{65E5}");
+        japanese.bytes.truncate(1);
+        assert!(matches!(
+            japanese.text(),
+            Err(Error::Protocol(mapi_proto::Error::UndecodableString {
+                code_page: 932,
+                ..
+            }))
+        ));
     }
 
     #[test]

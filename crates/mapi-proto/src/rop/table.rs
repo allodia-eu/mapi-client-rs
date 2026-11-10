@@ -7,7 +7,9 @@
 //! [MS-OXCTABL] §2.2.2 — table semantics
 
 use crate::error::{Error, Result};
-use crate::oxcdata::{PropertyRow, PropertyTag, Restriction, RowForm, SortOrderSet, ValueContext};
+use crate::oxcdata::{
+    CodePage, PropertyRow, PropertyTag, Restriction, RowForm, SortOrderSet, ValueContext,
+};
 use crate::rop::RopId;
 use crate::rop::batch::LOGON_ID;
 use crate::wire::{Reader, Writer};
@@ -270,12 +272,21 @@ impl QueryRowsResponse {
     }
 
     /// Reads the response body, after `RopId`, `InputHandleIndex` and a zero `ReturnValue`.
-    pub(crate) fn read(r: &mut Reader<'_>, columns: &[PropertyTag]) -> Result<Self> {
+    pub(crate) fn read(
+        r: &mut Reader<'_>,
+        columns: &[PropertyTag],
+        code_page: CodePage,
+    ) -> Result<Self> {
         let bookmark = Bookmark::new(r.u8()?);
         let row_count = r.u16()?;
         let mut rows = Vec::new();
         for _ in 0..row_count {
-            rows.push(PropertyRow::read(r, columns, ValueContext::TableRow)?);
+            rows.push(PropertyRow::read(
+                r,
+                columns,
+                ValueContext::TableRow,
+                code_page,
+            )?);
         }
         Ok(Self { bookmark, rows })
     }
