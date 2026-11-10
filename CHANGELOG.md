@@ -36,8 +36,36 @@ mailbox as it was first provisioned.
 - **`RetryDelay` ranged from 11690 to 17560 ms** across eight connects in half an hour, which is
   what it means for it to be per-connection advice.
 
+### Added
+
+- **`Session::abandon`**, for a request whose response will never be handed back: a deadline fired,
+  a `select!` took another branch. Before, the session waited for that answer forever and refused
+  every later request, `Disconnect` included. After abandoning, only `Disconnect` is allowed, since
+  the abandoned `Execute` may have changed the handle table in ways the session cannot know;
+  `Session::is_abandoned` reports the state.
+- **`Session::begin_reconnect`**, [MS-OXCMAPIHTTP] §3.1.5.7's `Connect` that passes the old Session
+  Context's cookies so the server can clean it up.
+- **`Test-Live.ps1 -Filter`**, to run only the live tests whose names contain a string.
+
+### Changed
+
+- **Every `mapi-client` request can be dropped part way without wedging anything.** The connection
+  is marked poisoned before each request goes out and cleared once the answer is in hand, so a
+  dropped future leaves `Error::Poisoned` naming the abandonment, never a session stuck waiting.
+- **`Connection::disconnect` and `Logon::disconnect` work on a poisoned connection.** Before, they
+  returned `Poisoned` and left the server's context, and every handle in it, until it timed out.
+  When the abandoned request finished on the server, Exchange refuses the `Disconnect` as
+  `X-ResponseCode` 15, because its sequence cookie advanced in a response nobody read. The
+  disconnect then reconnects with the old cookies and disconnects the new context. Measured against
+  `15.02.2562.056` with the server's `MSExchange MapiHttp Emsmdb\Connection Count`: with the
+  reconnect it went back to zero after three refusals; without it, it stayed at three.
+
 ### Fixed
 
+- **A table read abandoned during its first round trip reported an empty table.** `Rows` took the
+  unopened table out before the request and put it back only on failure, so a future dropped
+  mid-open lost it, and the next `try_next` found nothing to do and answered `None`. It is now
+  forgotten only once the open succeeds.
 - **`Write-FixtureManifest.ps1` named every scenario after its scratch directory** —
   `18596/exchange-se/acts-en-us` — when `-Root` was an 8.3 short path, which `$env:TEMP` routinely
   is and `Verify-Fixtures.ps1` always passes. It trimmed the root off by length; it now asks

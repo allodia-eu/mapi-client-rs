@@ -540,3 +540,5 @@ fn a_session_can_be_built_with_its_own_identity() {
     assert!(!session.is_connected());
     assert!(Session::default().cookies().is_empty());
 }
+
+mod abandon;
