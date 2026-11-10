@@ -140,11 +140,11 @@ fn buffer_and_type_errors_name_the_limit_they_hit() {
     );
     assert_eq!(
         Error::UnsupportedPropertyType {
-            property_type: 0x0006,
+            tag: PropertyTag::new(0x0FF9_0099),
             at: 9
         }
         .to_string(),
-        "unsupported property type 0x0006 at 9"
+        "0x0FF90099 has property type 0x0099, which this crate cannot read, at 9"
     );
     assert_eq!(
         Error::ObfuscatedRopBuffer { flags: 0x0005 }.to_string(),

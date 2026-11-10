@@ -77,10 +77,17 @@ pub enum Error {
     /// unknown and every later column in the row would decode against the wrong bytes.
     ///
     /// [MS-OXCDATA] §2.11.1 — property data types
-    #[error("unsupported property type 0x{property_type:04X} at {at}")]
+    ///
+    /// Four types [`PropertyType`] names land here too, each for its own reason:
+    /// `PtypUnspecified` anywhere but a column that asked for it, `PtypNull`, `PtypRestriction`
+    /// and `PtypRuleAction`. See their variants.
+    #[error(
+        "{tag} has property type 0x{:04X}, which this crate cannot read, at {at}",
+        .tag.property_type().as_u16()
+    )]
     UnsupportedPropertyType {
-        /// The `PropertyType` half of the tag.
-        property_type: u16,
+        /// The property whose value could not be read, its type half the one that stopped it.
+        tag: PropertyTag,
         /// Byte offset of the value.
         at: usize,
     },

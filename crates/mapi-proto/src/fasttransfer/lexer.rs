@@ -336,9 +336,14 @@ fn read_typed(r: &mut Reader<'_>, tag: PropertyTag, connection: CodePage) -> Res
         }
         // A type whose length is unknown cannot be stepped over, and stepping over it wrongly would
         // read every element after it from the middle of a value.
-        PropertyType::Unsupported(raw) => {
+        // None of the four named here is a type a stream carries ([MS-OXCFXICS] §2.2.4.1.1).
+        PropertyType::Unspecified
+        | PropertyType::Null
+        | PropertyType::Restriction
+        | PropertyType::RuleAction
+        | PropertyType::Unsupported(_) => {
             return Err(Error::UnsupportedPropertyType {
-                property_type: raw,
+                tag,
                 at: r.position(),
             });
         }

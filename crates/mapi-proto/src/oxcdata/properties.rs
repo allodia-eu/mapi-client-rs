@@ -64,18 +64,12 @@ impl PropertySet {
     ///
     /// The fallback is deliberately confined to errors: one property id can carry two real
     /// properties of different types — `PidTagMessageSize` and `PidTagMessageSizeExtended` share
-    /// `0x0E08` — and matching on the id alone would hand back the wrong one of those.
+    /// `0x0E08` — and matching on the id alone would hand back the wrong one of those. A property
+    /// asked for as [`PropertyType::Unspecified`](crate::PropertyType::Unspecified) is found by
+    /// that tag too, whatever type it arrived in.
     #[must_use]
     pub fn get(&self, tag: PropertyTag) -> Option<&PropertyValue> {
-        self.cells
-            .iter()
-            .find(|cell| cell.tag() == tag)
-            .or_else(|| {
-                self.cells
-                    .iter()
-                    .find(|cell| cell.tag().id() == tag.id() && cell.value().as_error().is_some())
-            })
-            .map(Cell::value)
+        crate::oxcdata::row::find(&self.cells, tag)
     }
 
     /// A string property, of either width, or `None` if it is absent or came back as an error.
