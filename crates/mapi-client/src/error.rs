@@ -117,7 +117,8 @@ pub enum Error {
         url: String,
         /// The authentication schemes the server named in `WWW-Authenticate`, in the order given.
         offered: Vec<String>,
-        /// What this client sent.
+        /// What this client sent: its credentials, or — where the server did not offer their
+        /// scheme, and so was never sent them — a sentence saying so.
         sent: &'static str,
     },
 
@@ -264,6 +265,35 @@ pub enum Error {
         /// The address that was looked up.
         address: String,
         /// Every URL that was tried, in order.
+        tried: Vec<String>,
+    },
+
+    /// Autodiscover found nothing at its candidates, and the plain-HTTP probe redirects somewhere
+    /// that only the user can agree to.
+    ///
+    /// [MS-OXDISCO] §3.1.5.4: "If this URI results in an HTTP 302 redirect, prompt the user to
+    /// warn them of the redirection. If the user accepts, the new location is added to the list of
+    /// possible Autodiscover server URIs." The probe goes over plain HTTP, so anyone on the path
+    /// can write that `Location` — and following it would send the credentials wherever it
+    /// pointed. So the search stops here and hands the decision back. To follow it, pass
+    /// `location` to [`discover_at`](crate::MapiClientBuilder::discover_at),
+    /// [`lookup_at`](crate::MapiClientBuilder::lookup_at) or
+    /// [`mailboxes_at`](crate::MapiClientBuilder::mailboxes_at); not following it is
+    /// [`NoEndpoint`](Self::NoEndpoint) by another name.
+    #[cfg(feature = "autodiscover")]
+    #[error(
+        "Autodiscover found nothing for {address} at {}, and {from} redirects to {location}: \
+         follow it only if the user agrees, by looking up at that URL",
+        schemes(.tried)
+    )]
+    RedirectNeedsConsent {
+        /// The address that was looked up.
+        address: String,
+        /// The plain-HTTP probe URL that answered with the redirect.
+        from: String,
+        /// Where it redirects to, absolute and already checked to be a URL this crate would ask.
+        location: String,
+        /// Every URL that was tried before the probe, in order.
         tried: Vec<String>,
     },
 

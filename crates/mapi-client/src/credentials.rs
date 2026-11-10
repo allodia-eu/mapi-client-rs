@@ -45,7 +45,18 @@ pub enum Credentials {
     /// reverse proxy, a service mesh — and for finding out what a server offers.
     None,
 
-    /// HTTP Basic, sent preemptively rather than after a 401.
+    /// HTTP Basic.
+    ///
+    /// To the MAPI endpoint it goes preemptively, on every request: that URL is the caller's own,
+    /// or the one Autodiscover named. To an Autodiscover candidate it goes only in answer to a 401
+    /// offering Basic. A candidate is a guess built from the address's domain — the first is
+    /// usually the organisation's website — and a credential sent to a guess is sent to whoever
+    /// runs it. The same holds for [`Credentials::Bearer`], and for the opening message of NTLM and
+    /// `Negotiate`.
+    ///
+    /// Withholding is not proof against a hostile candidate, which can answer 401 offering Basic,
+    /// or name a MAPI endpoint of its choosing in its settings. What it prevents is credentials
+    /// reaching a server that never asked for them.
     ///
     /// The username may be `user`, `user@domain` or `DOMAIN\user`; Exchange accepts all three,
     /// measured against Exchange Server SE `15.02.2562.056`.
@@ -65,8 +76,15 @@ pub enum Credentials {
     /// and never talks to an authorisation server. A token that expires mid-session surfaces as
     /// [`Error::Unauthorized`](crate::Error::Unauthorized) on the next request.
     ///
-    /// Unlike [`Credentials::Basic`], this path has not been exercised against a live Exchange by
-    /// this crate's authors — only that the header goes out in the documented form.
+    /// An Autodiscover candidate is asked with `Authorization: Bearer` and no token first, and
+    /// sent the token only if its 401 then offers `Bearer`. Measured against Exchange Server SE
+    /// `15.02.2562.056`, which has OAuth enabled on its virtual directories: a request with no
+    /// `Authorization` is offered `Negotiate`, `NTLM` and Basic, and one with a bare `Bearer` is
+    /// offered `Bearer` too, so naming the scheme is the only way to be asked for a token.
+    ///
+    /// Unlike [`Credentials::Basic`], no request with a real token has been made against a live
+    /// Exchange by this crate's authors. The lab has no authorisation server to issue one, so only
+    /// the challenge above and the header's documented form are tested.
     Bearer {
         /// The token, without the `Bearer ` prefix.
         token: String,
@@ -162,6 +180,32 @@ impl Credentials {
             Self::Ntlm { .. } => "NTLM credentials",
             #[cfg(feature = "ntlm")]
             Self::Negotiate { .. } => "Negotiate credentials",
+        }
+    }
+
+    /// What to report as sent when the server's 401 did not offer these credentials' scheme, and
+    /// so was never sent them.
+    #[cfg(feature = "autodiscover")]
+    pub(crate) const fn withheld(&self) -> &'static str {
+        match self {
+            Self::None => "no credentials",
+            Self::Basic { .. } => "nothing, since it does not offer Basic",
+            Self::Bearer { .. } => "nothing, since it does not offer Bearer",
+            #[cfg(feature = "ntlm")]
+            Self::Ntlm { .. } => "nothing, since it does not offer NTLM",
+            #[cfg(feature = "ntlm")]
+            Self::Negotiate { .. } => "nothing, since it does not offer Negotiate",
+        }
+    }
+
+    /// The `WWW-Authenticate` scheme a 401 has to name for a header scheme's credentials to be
+    /// sent in answer, or `None` for [`Credentials::None`] and the handshake schemes.
+    #[cfg(feature = "autodiscover")]
+    pub(crate) const fn header_scheme(&self) -> Option<&'static str> {
+        match self {
+            Self::Basic { .. } => Some("Basic"),
+            Self::Bearer { .. } => Some("Bearer"),
+            _ => None,
         }
     }
 

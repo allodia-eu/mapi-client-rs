@@ -6,6 +6,7 @@
 //!
 //! [MS-OXCMAPIHTTP] §2.2.2.1 — common request format
 
+mod challenge;
 #[cfg(feature = "ntlm")]
 mod negotiated;
 #[cfg(feature = "ntlm")]
@@ -14,6 +15,7 @@ pub(crate) mod pool;
 use core::time::Duration;
 use std::sync::Arc;
 
+pub(crate) use challenge::{challenges, scheme_names};
 use mapi_proto::{Headers, Request};
 use reqwest::{Client, Response, StatusCode, Url};
 
@@ -339,26 +341,6 @@ impl Transport {
             source: Box::new(error),
         }
     }
-}
-
-/// The `WWW-Authenticate` values, whole.
-pub(crate) fn challenges(response: &Response) -> Vec<String> {
-    response
-        .headers()
-        .get_all("WWW-Authenticate")
-        .iter()
-        .filter_map(|value| value.to_str().ok())
-        .map(str::to_owned)
-        .collect()
-}
-
-/// The scheme each challenge names, which is what an error message quotes.
-pub(crate) fn scheme_names(challenges: &[String]) -> Vec<String> {
-    challenges
-        .iter()
-        .filter_map(|value| value.split_whitespace().next())
-        .map(str::to_owned)
-        .collect()
 }
 
 /// The end-entity certificate the TLS handshake presented, in DER.

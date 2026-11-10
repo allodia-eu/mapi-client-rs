@@ -201,6 +201,8 @@ pub use crate::mailbox::Mailbox;
 pub use crate::message::{Attachment, EmbeddedMessage, Message, MessageUpdate};
 pub use crate::named::{NamedProperties, NamedPropertiesIter, NamedPropertyEntry};
 pub use crate::observer::{Exchange, Observer};
+#[cfg(feature = "autodiscover")]
+pub use crate::observer::{Redirect, RedirectKind};
 pub use crate::properties::Properties;
 pub use crate::special::{
     SpecialFolderEntry, SpecialFolderState, SpecialFolders, SpecialFoldersIter,
