@@ -19,6 +19,7 @@ mod property;
 mod response;
 mod send;
 mod stream;
+mod sync;
 mod table;
 
 pub use batch::{HandleSlot, ObjectHandle, RopBatch};
@@ -39,6 +40,7 @@ pub use send::{
     MoveCopyMessagesResponse, ProgressResponse, ReadFlags, SetReadFlagsResponse, SubmitFlags,
 };
 pub use stream::{ReadStreamResponse, StreamMode, StreamSizeResponse, WriteStreamResponse};
+pub use sync::{ContentsDownload, GetBufferResponse, MessageKinds, PropertyFilter, TransferStatus};
 pub use table::{
     Bookmark, FolderDepth, GetTableResponse, QueryRowsResponse, SetColumnsResponse, TableStatus,
     TableStatusResponse,

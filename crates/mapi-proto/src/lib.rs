@@ -98,13 +98,14 @@ pub use crate::oxcdata::{
     SpecialFolder, StoreObjectType, TableString, TaggedValue, one_off_provider,
 };
 pub use crate::rop::{
-    Bookmark, CreateAttachmentResponse, CreateMessageResponse, DeleteMessagesResponse, FolderDepth,
-    GetPropertiesResponse, HandleSlot, IdFromLongTermIdResponse, LogonResponse,
-    LongTermIdFromIdResponse, MessageMode, MoveCopyMessagesResponse, NameRegistration,
-    ObjectHandle, OpenMessageResponse, OpenRecipient, ProgressResponse, PropertyIdsResponse,
-    PropertyNamesResponse, PropertyProblemsResponse, QueryRowsResponse, ReadFlags,
-    ReadStreamResponse, RopBatch, RopId, RopResponse, SaveChangesResponse, SetReadFlagsResponse,
-    StreamMode, StreamSizeResponse, SubmitFlags, TableStatus, TableStatusResponse, WellKnownFolder,
+    Bookmark, ContentsDownload, CreateAttachmentResponse, CreateMessageResponse,
+    DeleteMessagesResponse, FolderDepth, GetBufferResponse, GetPropertiesResponse, HandleSlot,
+    IdFromLongTermIdResponse, LogonResponse, LongTermIdFromIdResponse, MessageKinds, MessageMode,
+    MoveCopyMessagesResponse, NameRegistration, ObjectHandle, OpenMessageResponse, OpenRecipient,
+    ProgressResponse, PropertyFilter, PropertyIdsResponse, PropertyNamesResponse,
+    PropertyProblemsResponse, QueryRowsResponse, ReadFlags, ReadStreamResponse, RopBatch, RopId,
+    RopResponse, SaveChangesResponse, SetReadFlagsResponse, StreamMode, StreamSizeResponse,
+    SubmitFlags, TableStatus, TableStatusResponse, TransferStatus, WellKnownFolder,
     WriteStreamResponse,
 };
 pub use crate::session::{Connected, Execution, Outcome, Session, SessionBuilder};
