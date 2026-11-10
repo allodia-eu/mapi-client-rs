@@ -37,7 +37,8 @@ without an address book. And then acting on what is there: `RopSubmitMessage`,
 so that a server which answers one unasked does not desynchronise the rest of the buffer. And
 incremental synchronization: the ICS ROPs, the IDSET and GLOBSET encodings an ICS state is made
 of, an `IcsState` bound to the scope it was obtained for, and a parser that reads a content
-download's `FastTransfer` stream as events, however the server split it. Every property type a
+download's `FastTransfer` stream as events, however the server split it, with the
+`FolderStamp` that says whether a folder has anything to download. Every property type a
 stream can carry is modelled, and six of the twelve restriction formats. No notifications and no
 address book endpoint.
 
