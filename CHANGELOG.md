@@ -210,6 +210,15 @@ mailbox as it was first provisioned.
   its own, and a second one takes the first one's named-property ids rather than resolving them a
   round trip at a time. Only mapped ids are taken, and only for the same mailbox.
 
+- **`scripts\Test-Soak.ps1` and `tests/soak.rs`: one logon kept for hours.** Cycle after cycle, a
+  busy stretch of reads in one Session Context — enough that leaking one server object per
+  iteration would hit the 500-object cap — an idle stretch kept alive twice by `PING`, and one idled
+  past the context's lifetime that the next request recovers from; the server's count of Session
+  Contexts is read before and after. A run across a suspended machine stops and says so: the
+  server's idle timer runs on wall-clock time, and the soak's sleeps on the monotonic clock.
+  `-Auth negotiate` runs it over Kerberos, refuses to go on if Negotiate falls back to NTLM, and
+  reports every TGT and service ticket the KDC issued to the account during the run.
+
 ### Changed
 
 - **A response silent for a minute now fails, whatever the total budget.** The default stall bound

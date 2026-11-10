@@ -151,6 +151,9 @@ identifies a deployment is either derived from the Exchange snapin or passed in 
 variables (`MAPI_LIVE_ENDPOINT`, `MAPI_LIVE_USER_DN`, `MAPI_LIVE_USERNAME`, `MAPI_LIVE_PASSWORD`),
 so no lab's details are ever committed. The script's comment-based help explains each one.
 
+A change to how a session lasts — expiry, keep-alives, reconnecting, handle hygiene — is also run
+through `scripts\Test-Soak.ps1`, which keeps one logon going for as long as it is told to.
+
 **Use two mailboxes in two languages.** Folder names are localised to the language a mailbox was
 provisioned with, so a client that is subtly wrong about names passes against an English mailbox
 and fails against a Dutch one — the most misleading way for a test to be wrong. Folders are
