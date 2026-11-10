@@ -66,6 +66,7 @@
 //! [`mapi-autodiscover`]: https://docs.rs/mapi-autodiscover
 
 pub mod error;
+pub mod fasttransfer;
 pub mod http;
 pub mod ics;
 pub mod oxcdata;

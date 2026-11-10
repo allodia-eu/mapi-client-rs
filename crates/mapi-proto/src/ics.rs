@@ -20,4 +20,5 @@ mod state;
 
 pub use globset::{GlobCnt, GlobSet, GlobSetRanges};
 pub use idset::{IdSet, IdSetReplicas, MessageIds, ReplicaKey};
+pub(crate) use idset::{WireKey, read as read_idset};
 pub use state::{ChangeNumber, IcsState, SyncKind, SyncScope};

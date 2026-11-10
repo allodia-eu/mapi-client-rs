@@ -381,6 +381,17 @@ pub enum Error {
         reason: &'static str,
     },
 
+    /// A `FastTransfer` stream held elements in an order its grammar does not allow.
+    ///
+    /// [MS-OXCFXICS] §2.2.4.2 — syntactical structure
+    #[error("malformed FastTransfer stream in {within}: {reason}")]
+    MalformedFastTransfer {
+        /// The element being read.
+        within: &'static str,
+        /// What did not fit.
+        reason: &'static str,
+    },
+
     /// An ICS state was offered for a synchronization scope other than the one it was obtained
     /// for.
     ///

@@ -64,7 +64,32 @@ pub(super) const fn name(tag: PropertyTag) -> Option<&'static str> {
         PropertyTag::META_TAG_IDSET_GIVEN => "MetaTagIdsetGiven",
         PropertyTag::META_TAG_IDSET_NO_LONGER_IN_SCOPE => "MetaTagIdsetNoLongerInScope",
         PropertyTag::META_TAG_IDSET_READ => "MetaTagIdsetRead",
+        _ => return rest(tag),
+    })
+}
+
+/// The second half of [`name`]'s table, split so that neither function outgrows what a reader can
+/// check by eye.
+const fn rest(tag: PropertyTag) -> Option<&'static str> {
+    Some(match tag {
         PropertyTag::META_TAG_IDSET_UNREAD => "MetaTagIdsetUnread",
+        PropertyTag::ASSOCIATED => "PidTagAssociated",
+        PropertyTag::CHANGE_KEY => "PidTagChangeKey",
+        PropertyTag::CHANGE_NUMBER => "PidTagChangeNumber",
+        PropertyTag::MESSAGE_ATTACHMENTS => "PidTagMessageAttachments",
+        PropertyTag::MESSAGE_RECIPIENTS => "PidTagMessageRecipients",
+        PropertyTag::PARENT_SOURCE_KEY => "PidTagParentSourceKey",
+        PropertyTag::PREDECESSOR_CHANGE_LIST => "PidTagPredecessorChangeList",
+        PropertyTag::ROW_ID => "PidTagRowid",
+        PropertyTag::SOURCE_KEY => "PidTagSourceKey",
+        PropertyTag::META_TAG_DN_PREFIX => "MetaTagDnPrefix",
+        PropertyTag::META_TAG_EC_WARNING => "MetaTagEcWarning",
+        PropertyTag::META_TAG_FX_DEL_PROP => "MetaTagFXDelProp",
+        PropertyTag::META_TAG_INCREMENTAL_SYNC_MESSAGE_PARTIAL => {
+            "MetaTagIncrementalSyncMessagePartial"
+        }
+        PropertyTag::META_TAG_INCR_SYNC_GROUP_ID => "MetaTagIncrSyncGroupId",
+        PropertyTag::META_TAG_NEW_FX_FOLDER => "MetaTagNewFXFolder",
         PropertyTag::MESSAGE_CLASS => "PidTagMessageClass",
         PropertyTag::MESSAGE_DELIVERY_TIME => "PidTagMessageDeliveryTime",
         PropertyTag::MESSAGE_FLAGS => "PidTagMessageFlags",
