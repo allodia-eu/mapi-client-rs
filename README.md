@@ -231,7 +231,7 @@ The Microsoft Open Specification documents are authoritative — over this repos
 any blog post, over any other implementation, and over any inference from an observed transcript.
 Every protocol item cites its section: `[MS-OXCROPS] §2.2.4.1.1`, never just "the spec".
 
-Twenty documents — fifteen pinned at `v20250520`, `[MS-OXDSCLI]` and `[MS-OXOCAL]` at
+Twenty-two documents — seventeen pinned at `v20250520`, `[MS-OXDSCLI]` and `[MS-OXOCAL]` at
 `v20250819`, and the three authentication documents `[MS-NLMP]`, `[MS-SPNG]` and `[MS-KILE]` on
 their own schedule — and the fifteen RFCs Kerberos rests on. They are **never committed**;
 [`SPEC.md`](SPEC.md) carries the URLs and one command fetches them into a gitignored `spec/`:

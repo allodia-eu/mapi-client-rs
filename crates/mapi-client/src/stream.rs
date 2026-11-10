@@ -48,7 +48,9 @@ use crate::target::Target;
 ///   `MaxRopOut` 40,000, and a 24,675-byte one is refused at 20,000 and succeeds at 65,536.
 /// * The ceiling is about 32 KiB and `MaxRopOut` does not move it. At 65,536 a read of **32,662**
 ///   bytes succeeds and 32,663 does not; **32,663 is refused identically at `0x00040000`**, the
-///   maximum [MS-OXCRPC] §3.1.4.2 allows. So the effective size is `min(MaxRopOut, ~32 KiB)`.
+///   maximum [MS-OXCRPC] §3.1.4.2 allows. So the effective size is `min(MaxRopOut, ~32 KiB)` —
+///   which is what [MS-OXCRPC] §3.1.4.2.1.2.2 says: the server "MUST NOT produce more than 32 KB
+///   worth of response data for all ROP requests".
 /// * Every refusal reports a `SizeNeeded` of 32,767, whatever was asked for and whatever
 ///   `MaxRopOut` was — including where the sizes actually required differ by eight kilobytes.
 ///
