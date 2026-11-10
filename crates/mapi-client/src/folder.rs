@@ -125,6 +125,14 @@ impl<'a> Folder<'a> {
     /// whether the deletion was complete, and a caller that ignores it can believe a message it
     /// still has is gone.
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await, as every request here is — but a future dropped while its request
+    /// is in flight leaves it unknown whether the change was made, as an error's
+    /// [`Delivery::Unknown`](crate::Delivery::Unknown) does. The connection is
+    /// [poisoned](crate::Connection#cancellation) until
+    /// [`reconnect`](crate::Connection::reconnect); read the item back before trying again.
+    ///
     /// # Errors
     ///
     /// [`Error::Rop`] if the server refused the delete — `ecAccessDenied` for a folder this account
@@ -171,6 +179,14 @@ impl<'a> Folder<'a> {
     /// [`RopProgress`](mapi_proto::RopResponse::Progress) instead of a result, and that is
     /// reported as [`Error::Unexpected`] rather than read as success.
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await, as every request here is — but a future dropped while its request
+    /// is in flight leaves it unknown whether the change was made, as an error's
+    /// [`Delivery::Unknown`](crate::Delivery::Unknown) does. The connection is
+    /// [poisoned](crate::Connection#cancellation) until
+    /// [`reconnect`](crate::Connection::reconnect); read the item back before trying again.
+    ///
     /// # Errors
     ///
     /// [`Error::Rop`] if the server refused the move — `ecAccessDenied` for a destination this
@@ -187,6 +203,14 @@ impl<'a> Folder<'a> {
     ///
     /// One byte of the request apart from [`move_messages`](Self::move_messages), and the same
     /// caveats.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await, as every request here is — but a future dropped while its request
+    /// is in flight leaves it unknown whether the change was made, as an error's
+    /// [`Delivery::Unknown`](crate::Delivery::Unknown) does. The connection is
+    /// [poisoned](crate::Connection#cancellation) until
+    /// [`reconnect`](crate::Connection::reconnect); read the item back before trying again.
     ///
     /// # Errors
     ///
@@ -245,6 +269,14 @@ impl<'a> Folder<'a> {
     /// # Ok(())
     /// # }
     /// ```
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await, as every request here is — but a future dropped while its request
+    /// is in flight leaves it unknown whether the change was made, as an error's
+    /// [`Delivery::Unknown`](crate::Delivery::Unknown) does. The connection is
+    /// [poisoned](crate::Connection#cancellation) until
+    /// [`reconnect`](crate::Connection::reconnect); read the item back before trying again.
     ///
     /// # Errors
     ///

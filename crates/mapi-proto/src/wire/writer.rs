@@ -57,6 +57,11 @@ impl Writer {
         self.u16(0)
     }
 
+    /// How many bytes have been written.
+    pub(crate) const fn len(&self) -> usize {
+        self.buf.len()
+    }
+
     /// The bytes written so far.
     pub(crate) fn finish(self) -> Vec<u8> {
         self.buf

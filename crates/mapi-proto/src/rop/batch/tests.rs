@@ -551,3 +551,5 @@ fn a_write_refuses_a_slot_from_another_batch() {
         );
     }
 }
+
+mod size;

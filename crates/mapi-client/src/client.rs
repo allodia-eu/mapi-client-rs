@@ -125,6 +125,11 @@ impl MapiClient {
     /// One round trip. The [`Connection`] that comes back owns the session's cookies and its
     /// sequencing, and is the only thing that can run ROPs.
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A Session Context the server created for an answer nobody read
+    /// times out on its own.
+    ///
     /// # Errors
     ///
     /// [`Error::Unauthorized`] if the credentials were refused, [`Error::Connect`] or
@@ -158,6 +163,10 @@ impl MapiClient {
     ///
     /// The cheapest possible check that the URL is right, that the credentials work and that
     /// whatever answers speaks MAPI/HTTP.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await: it holds no Session Context.
     ///
     /// # Errors
     ///

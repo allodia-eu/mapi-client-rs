@@ -54,6 +54,13 @@ impl Logon {
     /// # }
     /// ```
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
+    ///
     /// # Errors
     ///
     /// [`Error::Rop`] if the server refused the lookup — `ecAccessDenied` for a user who may not
@@ -88,6 +95,14 @@ impl Logon {
     /// Names the store *does* already have cost nothing here: they are answered from the same
     /// cache [`resolve_names`](Self::resolve_names) fills, and only the unregistered ones are
     /// asked about.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await, as every request here is — but a future dropped while its request
+    /// is in flight leaves it unknown whether the change was made, as an error's
+    /// [`Delivery::Unknown`](crate::Delivery::Unknown) does. The connection is
+    /// [poisoned](crate::Connection#cancellation) until
+    /// [`reconnect`](crate::Connection::reconnect); read the item back before trying again.
     ///
     /// # Errors
     ///
@@ -171,6 +186,13 @@ impl Logon {
     /// An id below `0x8000` is answered from the `PS_MAPI` set rather than refused, and one this
     /// store has never registered comes back as `None` rather than being left out — so the answers
     /// stay positional against the ids asked about.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
     ///
     /// # Errors
     ///

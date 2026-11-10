@@ -18,7 +18,7 @@ use std::borrow::Cow;
 use std::time::Instant;
 
 use mapi_proto::{
-    Connected, Execution, LegacyDn, Outcome, Request, ResponseCode, RopBatch, RopResponse, Session,
+    Connected, Execution, LegacyDn, Outcome, Request, ResponseCode, RopBatch, Session,
 };
 
 use crate::describe;
@@ -26,11 +26,17 @@ use crate::error::{Delivery, Error, Result};
 use crate::logon::Logon;
 use crate::transport::Transport;
 
+/// Giving back the handles of objects dropped before they were closed.
+mod hygiene;
 /// Re-establishing a Session Context the server has lost, and the handles that do not survive it.
 mod recover;
+/// What a refused ROP means, as an error.
+mod refusal;
 
+pub(crate) use hygiene::{Lease, may_have_released};
 pub(crate) use recover::Held;
 use recover::{LogonState, Lost};
+pub(crate) use refusal::refusal;
 
 /// Why a connection stopped, when the future driving its request was dropped before the answer.
 ///
@@ -87,6 +93,8 @@ pub struct Connection {
     epoch: u64,
     /// Why the server is known to have lost the Session Context, until it is re-established.
     lost: Option<Lost>,
+    /// Handles of objects dropped before they were closed, for the next request to release.
+    releases: hygiene::Releases,
 }
 
 impl Connection {
@@ -110,6 +118,7 @@ impl Connection {
             logon: None,
             epoch: 0,
             lost: None,
+            releases: hygiene::Releases::default(),
         }
     }
 
@@ -206,6 +215,11 @@ impl Connection {
     /// Session Context, so nothing is lost, and it means the logon handle cannot outlive the
     /// session it belongs to.
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. The connection goes with the future, and the Session Context the
+    /// server holds times out on its own.
+    ///
     /// # Errors
     ///
     /// [`Error::Rop`] if the server refused the logon — `LoginPermission` for an account without
@@ -253,6 +267,10 @@ impl Connection {
     /// new context it creates is disconnected in turn. Measured on the same build by the server's
     /// own `MSExchange MapiHttp Emsmdb\Connection Count`: back to zero after three refused
     /// disconnects with the reconnect, and left at three without it.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A Session Context left behind times out on its own.
     ///
     /// # Errors
     ///
@@ -387,8 +405,18 @@ impl Connection {
         if let Some(logon) = &self.logon {
             batch.rebind_logon(logon.handle());
         }
+        let riding = self.add_releases(&mut batch);
         let request = self.session.execute(batch)?;
-        let outcome = self.round_trip(request).await?;
+        let outcome = self.round_trip(request).await;
+        // Kept for the next request only when the server never saw this one. Otherwise it may have
+        // released them, and releasing a value twice could free whatever it was handed to next.
+        if !outcome
+            .as_ref()
+            .is_err_and(|error| matches!(error.delivery(), Delivery::NotSent | Delivery::Refused))
+        {
+            self.released(&riding);
+        }
+        let outcome = outcome?;
 
         let Outcome::Executed(execution) = outcome else {
             return Err(Error::Unexpected {
@@ -463,70 +491,5 @@ impl Connection {
             }),
             None => Ok(()),
         }
-    }
-}
-
-/// Turns a refused ROP response into the error that says what to do about it.
-///
-/// `None` for every response that is not a refusal, including the successful ones and the
-/// `RopRelease` that produces no response at all.
-pub(crate) fn refusal(response: &RopResponse, during: &'static str) -> Option<Error> {
-    match response {
-        RopResponse::LogonRedirect { server_name } => Some(Error::WrongServer {
-            server_name: server_name.clone(),
-        }),
-        RopResponse::Failed { code, .. } => Some(Error::Rop {
-            during,
-            code: *code,
-        }),
-        RopResponse::BufferTooSmall { size_needed } => Some(Error::ResponseTooLarge {
-            size_needed: *size_needed,
-        }),
-        RopResponse::Backoff { duration_ms } => Some(Error::Backoff {
-            duration_ms: *duration_ms,
-        }),
-        _ => None,
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use mapi_proto::{ErrorCode, RopId};
-
-    use super::*;
-
-    #[test]
-    fn every_kind_of_refusal_becomes_an_actionable_error() {
-        let refused = RopResponse::Failed {
-            rop: RopId::LOGON,
-            code: ErrorCode::LOGIN_PERMISSION,
-        };
-        assert!(matches!(
-            refusal(&refused, "the logon"),
-            Some(Error::Rop {
-                during: "the logon",
-                code: ErrorCode::LOGIN_PERMISSION
-            })
-        ));
-
-        let moved = RopResponse::LogonRedirect {
-            server_name: "/o=Example/cn=other".to_owned(),
-        };
-        assert!(matches!(
-            refusal(&moved, "x"),
-            Some(Error::WrongServer { .. })
-        ));
-
-        let too_big = RopResponse::BufferTooSmall { size_needed: 4096 };
-        assert!(matches!(
-            refusal(&too_big, "x"),
-            Some(Error::ResponseTooLarge { size_needed: 4096 })
-        ));
-
-        let busy = RopResponse::Backoff { duration_ms: 5000 };
-        assert!(matches!(
-            refusal(&busy, "x"),
-            Some(Error::Backoff { duration_ms: 5000 })
-        ));
     }
 }

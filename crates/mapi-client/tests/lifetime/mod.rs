@@ -16,3 +16,6 @@ mod keepalive;
 
 /// Replacing a Session Context: what a reconnect costs and what it keeps.
 mod reconnect;
+
+/// Handles given back when the object holding them is dropped rather than closed.
+mod hygiene;

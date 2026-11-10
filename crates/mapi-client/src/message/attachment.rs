@@ -121,6 +121,13 @@ pub struct EmbeddedMessage<'a> {
 impl<'a> EmbeddedMessage<'a> {
     /// Opens it, and reports its subject, its recipient count and the id it turned out to have.
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
+    ///
     /// # Errors
     ///
     /// [`Error::Rop`] if the server refused any step of the chain. An attachment whose

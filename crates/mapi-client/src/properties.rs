@@ -72,6 +72,13 @@ impl<'a> Properties<'a> {
     /// [`PropertySet::error`]. It is reported per property, so one oversized value does not cost
     /// the rest of the answer.
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
+    ///
     /// # Errors
     ///
     /// [`Error::Rop`] if the server refused the fetch, plus whatever the round trip failed with.
@@ -90,6 +97,13 @@ impl<'a> Properties<'a> {
     ///
     /// A property the object does not hold comes back as [`PropertyValue::Absent`] rather than
     /// being missing from the answer, so "not set" and "not asked for" stay distinguishable.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
     ///
     /// # Errors
     ///
@@ -120,6 +134,14 @@ impl<'a> Properties<'a> {
     /// disregard one that is read-only for the client and say nothing at all about it
     /// ([MS-OXCPRPT] §3.2.5.4). Read the value back if it has to be certain.
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await, as every request here is — but a future dropped while its request
+    /// is in flight leaves it unknown whether the change was made, as an error's
+    /// [`Delivery::Unknown`](crate::Delivery::Unknown) does. The connection is
+    /// [poisoned](crate::Connection#cancellation) until
+    /// [`reconnect`](crate::Connection::reconnect); read the item back before trying again.
+    ///
     /// # Errors
     ///
     /// [`Error::Rop`] if the server refused the ROP outright, and [`Error::Protocol`] if a value
@@ -139,6 +161,14 @@ impl<'a> Properties<'a> {
     /// A server that succeeds here must afterwards answer `NotFound` when asked for the value,
     /// rather than an empty one. As with [`write`](Self::write), the returned list is what the
     /// server chose to report.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await, as every request here is — but a future dropped while its request
+    /// is in flight leaves it unknown whether the change was made, as an error's
+    /// [`Delivery::Unknown`](crate::Delivery::Unknown) does. The connection is
+    /// [poisoned](crate::Connection#cancellation) until
+    /// [`reconnect`](crate::Connection::reconnect); read the item back before trying again.
     ///
     /// # Errors
     ///
