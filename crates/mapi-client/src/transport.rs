@@ -6,6 +6,8 @@
 //!
 //! [MS-OXCMAPIHTTP] §2.2.2.1 — common request format
 
+/// Reading a response as it arrives.
+mod body;
 #[cfg(feature = "ntlm")]
 mod negotiated;
 #[cfg(feature = "ntlm")]
@@ -13,6 +15,7 @@ pub(crate) mod pool;
 
 use core::time::Duration;
 use std::sync::Arc;
+use std::time::Instant;
 
 use mapi_proto::{Headers, Request};
 use reqwest::{Client, Response, StatusCode, Url};
@@ -30,7 +33,8 @@ pub(crate) struct Transport {
     pub(crate) http: Client,
     pub(crate) endpoint: Url,
     pub(crate) credentials: Credentials,
-    pub(crate) timeout: Duration,
+    pub(crate) timeout: Option<Duration>,
+    pub(crate) stall_timeout: Duration,
     /// How long to wait for each KDC: the connect timeout. See
     /// [`Context::kdc_timeout`](crate::handshake::Context::kdc_timeout).
     #[cfg(feature = "ntlm")]
@@ -73,7 +77,11 @@ pub(crate) struct Reply {
 /// of authenticated connections builds a client per connection, as it needs one.
 #[derive(Clone, Debug)]
 pub(crate) struct HttpSettings {
-    pub(crate) timeout: Duration,
+    /// The bound on a whole exchange, if there is one.
+    pub(crate) timeout: Option<Duration>,
+    /// The bound on silence: see
+    /// [`MapiClientBuilder::stall_timeout`](crate::MapiClientBuilder::stall_timeout).
+    pub(crate) stall_timeout: Duration,
     pub(crate) connect_timeout: Duration,
     /// Parsed once, by [`parse_certificates`], rather than by every client built from these.
     pub(crate) root_certificates: Arc<[reqwest::Certificate]>,
@@ -102,10 +110,13 @@ impl HttpSettings {
                 env!("CARGO_PKG_VERSION")
             ))
             .redirect(reqwest::redirect::Policy::none())
-            .timeout(self.timeout)
+            .read_timeout(self.stall_timeout)
             .connect_timeout(self.connect_timeout)
             .danger_accept_invalid_certs(self.accept_invalid_certificates);
 
+        if let Some(timeout) = self.timeout {
+            builder = builder.timeout(timeout);
+        }
         if self.connection_oriented {
             builder = builder
                 .http1_only()
@@ -169,6 +180,7 @@ impl Transport {
             endpoint,
             credentials,
             timeout: settings.timeout,
+            stall_timeout: settings.stall_timeout,
             #[cfg(feature = "ntlm")]
             kdc_timeout: settings.connect_timeout,
             observer,
@@ -237,11 +249,12 @@ impl Transport {
             builder = builder.header(reqwest::header::CONTENT_LENGTH, "0");
         }
 
-        let response = builder
+        let started = Instant::now();
+        let mut response = builder
             .body(body)
             .send()
             .await
-            .map_err(|error| self.classify(error))?;
+            .map_err(|error| self.classify(error, started))?;
 
         let status = response.status();
         let challenges = challenges(&response);
@@ -254,11 +267,7 @@ impl Transport {
         // hundred bytes of error page costs nothing. It is also what returns the connection to the
         // pool, which a handshake depends on: an unread body means the next leg opens a second
         // connection and the server has no challenge outstanding on it.
-        let body = response
-            .bytes()
-            .await
-            .map_err(|error| self.classify(error))?
-            .to_vec();
+        let body = self.read_body(&mut response, request, started).await?;
 
         Ok(Reply {
             status,
@@ -320,7 +329,10 @@ impl Transport {
     /// true, and calling that a request timeout would attach the wrong duration to it — the whole
     /// 90-second request budget rather than the connect timeout that actually elapsed — and send
     /// the reader looking at a slow server rather than at an unreachable one.
-    fn classify(&self, error: reqwest::Error) -> Error {
+    ///
+    /// A timeout names the bound that elapsed: the whole exchange's, if that much time has passed,
+    /// and otherwise the one on silence.
+    fn classify(&self, error: reqwest::Error, started: Instant) -> Error {
         let url = self.endpoint.to_string();
         if error.is_connect() {
             return Error::Connect {
@@ -329,10 +341,11 @@ impl Transport {
             };
         }
         if error.is_timeout() {
-            return Error::Timeout {
-                url,
-                after: self.timeout,
+            let after = match self.timeout {
+                Some(total) if started.elapsed() >= total => total,
+                _ => self.stall_timeout,
             };
+            return Error::Timeout { url, after };
         }
         Error::Request {
             url,

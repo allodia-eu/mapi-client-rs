@@ -5,7 +5,7 @@
 
 use core::fmt::Debug;
 
-use mapi_proto::{Headers, Request, RequestType};
+use mapi_proto::{Headers, MetaTag, Request, RequestType};
 
 /// One request and the response it produced.
 ///
@@ -142,6 +142,21 @@ impl<'a> Exchange<'a> {
 pub trait Observer: Debug + Send + Sync {
     /// Reports one completed exchange.
     fn observe(&self, exchange: &Exchange<'_>);
+
+    /// Reports a meta-tag the moment it arrives, while the rest of the response is still on its
+    /// way. Does nothing unless implemented.
+    ///
+    /// `PROCESSING` once the server has queued the request, `PENDING` each time it says it is
+    /// still working on it, and `DONE` when the answer follows ([MS-OXCMAPIHTTP] §2.2.7) — the
+    /// same tags [`Exchange::response_body`] holds at the end, but told as they happen, which is
+    /// what a caller watching a long request needs. Measured against Exchange Server SE
+    /// `15.02.2562.056`: a request held open for five and a half minutes sent `PENDING` every 18
+    /// seconds, though its `X-PendingPeriod` said 30.
+    ///
+    /// [MS-OXCMAPIHTTP] §3.1.5.6 — handling a chunked response
+    fn meta_tag(&self, request: RequestType, tag: MetaTag) {
+        let _ = (request, tag);
+    }
 }
 
 #[cfg(test)]

@@ -6,7 +6,8 @@ use super::*;
 
 fn pool(size: usize) -> Pool {
     let settings = HttpSettings {
-        timeout: Duration::from_secs(5),
+        timeout: Some(Duration::from_secs(5)),
+        stall_timeout: Duration::from_secs(5),
         connect_timeout: Duration::from_secs(5),
         root_certificates: Arc::from([]),
         accept_invalid_certificates: false,

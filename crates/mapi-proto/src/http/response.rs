@@ -108,6 +108,18 @@ pub enum MetaTag {
 }
 
 impl MetaTag {
+    /// Reads one line of a response preamble, without its CRLF, as the meta-tag it names.
+    ///
+    /// For a caller reading a response as it arrives, which sees each meta-tag on its own line
+    /// long before the body: a `PENDING` is the server saying it is still working, which is what a
+    /// bound on silence has to hear. `None` for any line that is not one.
+    ///
+    /// [MS-OXCMAPIHTTP] §3.1.5.6 — handling a chunked response
+    #[must_use]
+    pub fn from_line(line: &[u8]) -> Option<Self> {
+        Self::parse(String::from_utf8_lossy(line).trim())
+    }
+
     fn parse(line: &str) -> Option<Self> {
         match line.to_ascii_uppercase().as_str() {
             "PROCESSING" => Some(Self::Processing),
@@ -270,6 +282,18 @@ mod tests {
         }
         assert!(Payload::parse(b"DONE\r\n").body().is_empty());
         assert_eq!(Payload::parse(b"PROCESSING\r\n").body(), b"PROCESSING\r\n");
+    }
+
+    #[test]
+    fn a_line_on_its_own_reads_as_its_meta_tag() {
+        assert_eq!(MetaTag::from_line(b"PENDING"), Some(MetaTag::Pending));
+        assert_eq!(
+            MetaTag::from_line(b"processing "),
+            Some(MetaTag::Processing)
+        );
+        assert_eq!(MetaTag::from_line(b"DONE"), Some(MetaTag::Done));
+        assert_eq!(MetaTag::from_line(b"X-ElapsedTime: 4"), None);
+        assert_eq!(MetaTag::from_line(&[0xFF, 0x00]), None);
     }
 
     #[test]
