@@ -6,6 +6,7 @@
 //! [`MARKER`] and is swept away before it starts and before it asserts — because the counts the
 //! `items` suite asserts are exact.
 
+mod rollback;
 mod stamps;
 
 use std::sync::{Arc, Mutex};

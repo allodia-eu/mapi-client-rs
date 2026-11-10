@@ -25,8 +25,9 @@ use crate::oxcdata::{FileTime, FolderId, PropertyRow, PropertyTag};
 /// Three rules make the comparison sound, and the type can enforce only the first:
 ///
 /// * **Any difference is a change, earlier as much as later.** A stamp that went *backwards* is a
-///   server restored from a backup, and that folder has to be downloaded for anything to notice. So
-///   there is [`is_unchanged_since`](Self::is_unchanged_since) and no ordering.
+///   server restored from a backup, and that folder has to be downloaded for
+///   [`IcsState::check_not_ahead_of`](crate::IcsState::check_not_ahead_of) to notice. So there is
+///   [`is_unchanged_since`](Self::is_unchanged_since) and no ordering.
 /// * **Read the stamps before the downloads, and keep each with the state its download produced.**
 ///   A stamp read after a download also covers whatever changed while it ran, and that change would
 ///   never be downloaded.
