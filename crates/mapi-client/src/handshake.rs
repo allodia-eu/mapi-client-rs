@@ -84,9 +84,9 @@ pub(crate) struct Negotiation {
     scheme: Scheme,
     /// NTLM's, until a ticket is had — and NTLM's for good when none is.
     handshake: Handshake,
-    /// The account and the service a Kerberos ticket is still to be asked for: on the first 401
-    /// that offers `Negotiate`, so that a server that never answers, or offers something else,
-    /// costs no trip to a KDC.
+    /// The account and service a ticket is still to be asked for, on the first 401 that offers
+    /// `Negotiate`. Taken before the KDC is asked, and a drop then loses nothing: a `Negotiation`
+    /// lives for one attempt. `tests/negotiate.rs` drops one part way and the next gets Kerberos.
     pending: Option<(Identity, String)>,
     /// The service the handshake offers a Kerberos ticket for, once it offers one — whose ticket
     /// is forgotten if the server refuses it.

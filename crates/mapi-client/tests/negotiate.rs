@@ -19,14 +19,14 @@ mod support;
 
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use mapi_client::{Credentials, Error, KdcLocator, SrvLookup, SrvRecord, SrvResolver};
 use negotiate_auth::Mechanism;
 use negotiate_auth::testing::TestKdc;
 use support::{MapiServer, connect_ok};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
-use tokio::net::TcpListener;
+use tokio::net::{TcpListener, TcpStream};
 use wiremock::matchers::method;
 use wiremock::{Mock, MockServer, Request, Respond, ResponseTemplate};
 
@@ -45,23 +45,28 @@ async fn kdc_on_a_socket(kdc: Arc<TestKdc>) -> (String, Arc<AtomicUsize>) {
     let answered = Arc::new(AtomicUsize::new(0));
     let count = Arc::clone(&answered);
     tokio::spawn(async move {
-        while let Ok((mut stream, _)) = listener.accept().await {
+        while let Ok((stream, _)) = listener.accept().await {
             let kdc = Arc::clone(&kdc);
             let count = Arc::clone(&count);
             tokio::spawn(async move {
-                let mut prefix = [0u8; 4];
-                stream.read_exact(&mut prefix).await.unwrap();
-                let mut request = vec![0u8; usize::try_from(u32::from_be_bytes(prefix)).unwrap()];
-                stream.read_exact(&mut request).await.unwrap();
+                answer(stream, &kdc).await;
                 count.fetch_add(1, Ordering::SeqCst);
-                let reply = kdc.answer(&request);
-                let mut framed = u32::try_from(reply.len()).unwrap().to_be_bytes().to_vec();
-                framed.extend_from_slice(&reply);
-                stream.write_all(&framed).await.unwrap();
             });
         }
     });
     (address, answered)
+}
+
+/// Reads one framed request off `stream` and writes the test KDC's framed reply.
+async fn answer(mut stream: TcpStream, kdc: &TestKdc) {
+    let mut prefix = [0u8; 4];
+    stream.read_exact(&mut prefix).await.unwrap();
+    let mut request = vec![0u8; usize::try_from(u32::from_be_bytes(prefix)).unwrap()];
+    stream.read_exact(&mut request).await.unwrap();
+    let reply = kdc.answer(&request);
+    let mut framed = u32::try_from(reply.len()).unwrap().to_be_bytes().to_vec();
+    framed.extend_from_slice(&reply);
+    stream.write_all(&framed).await.unwrap();
 }
 
 /// The MAPI endpoint as a Kerberos service: a 401 offering `Negotiate` to anything it cannot
@@ -275,6 +280,62 @@ async fn a_kdc_that_does_not_answer_is_not_waited_for_twice() {
     assert_eq!(
         (0..6).map(authorization).collect::<Vec<_>>(),
         [false, true, true, false, true, true]
+    );
+}
+
+/// A handshake dropped while it waits on the KDC leaves nothing behind it: the next one, on the
+/// same client, is not kept waiting and still authenticates with Kerberos.
+///
+/// What a handshake shares with the others is its turn at the origin's gate, the lock on asking
+/// the KDCs, the ticket cache and what is known of the realm. The first two are guards that a
+/// drop releases. The others are written only once an exchange has finished, so a handshake
+/// cancelled part way through writes nothing: no realm is marked unreachable because one
+/// caller stopped waiting for it.
+#[tokio::test]
+async fn a_handshake_dropped_while_the_kdc_is_asked_leaves_nothing_behind() {
+    let kdc = test_kdc("hunter2");
+    let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap().to_string();
+    let dialled = Arc::new(AtomicUsize::new(0));
+    let count = Arc::clone(&dialled);
+    let answering = Arc::clone(&kdc);
+    tokio::spawn(async move {
+        while let Ok((stream, _)) = listener.accept().await {
+            let kdc = Arc::clone(&answering);
+            if count.fetch_add(1, Ordering::SeqCst) == 0 {
+                // The first exchange is accepted and never answered.
+                tokio::spawn(async move {
+                    let _held = stream;
+                    tokio::time::sleep(Duration::from_hours(1)).await;
+                });
+            } else {
+                tokio::spawn(async move { answer(stream, &kdc).await });
+            }
+        }
+    });
+    let server = service(kdc, connected).await;
+    let client = MapiServer::builder_for(endpoint(&server))
+        .credentials(Credentials::negotiate("alice@example.test", "hunter2"))
+        .kdc_locator(KdcLocator::new().kdc("EXAMPLE.TEST", address))
+        .build()
+        .unwrap();
+
+    let cut_short = tokio::time::timeout(Duration::from_millis(500), client.connect()).await;
+    assert!(
+        cut_short.is_err(),
+        "the Connect was dropped while the KDC was silent"
+    );
+    assert_eq!(dialled.load(Ordering::SeqCst), 1, "dropped mid-exchange");
+
+    tokio::time::timeout(Duration::from_secs(10), client.connect())
+        .await
+        .expect("the next handshake was not kept waiting")
+        .expect("Connect, over Kerberos");
+    let authentication = client.authentication().unwrap();
+    assert_eq!(authentication.mechanism, Mechanism::Kerberos);
+    assert_eq!(
+        authentication.kerberos_unavailable, None,
+        "the realm was not marked unreachable"
     );
 }
 
