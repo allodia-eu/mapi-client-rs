@@ -242,16 +242,16 @@ fn an_unknown_value_flag_is_an_error_rather_than_a_guess() {
     );
 }
 
-/// `PtypCurrency` is eight bytes and this crate could skip it — but "could" is not "knows", and a
-/// type whose width is not modelled has to stop the row rather than be stepped over.
+/// `PtypRestriction` has a width only its own parser knows, and a type whose width is not
+/// modelled has to stop the row rather than be stepped over.
 #[test]
 fn a_column_of_an_unmodelled_type_stops_the_row() {
-    let currency = PropertyTag::from_parts(0x0FF9, PropertyType::new(0x0006));
+    let restriction = PropertyTag::from_parts(0x0FF9, PropertyType::new(0x00FD));
     let buf = [0x00, 0x01, 0x02, 0x03, 0x04];
     assert!(matches!(
-        read(&buf, &[currency]),
+        read(&buf, &[restriction]),
         Err(Error::UnsupportedPropertyType {
-            property_type: 0x0006,
+            property_type: 0x00FD,
             ..
         })
     ));
