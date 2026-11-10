@@ -472,3 +472,52 @@ async fn named_properties_survive_a_reconnect_only_to_the_same_mailbox() {
         "asked again of the new store"
     );
 }
+
+/// A second Session Context to the same mailbox takes the first one's ids and asks for nothing it
+/// already has; ids from another mailbox are refused, and change nothing.
+#[tokio::test]
+async fn a_second_session_takes_the_first_ones_named_properties() {
+    let server = MapiServer::start().await;
+    server.reply(connect_ok("Alice Example"));
+    server.reply_ok(execute_body(&logon_response(0), &[LOGON_HANDLE]));
+    server.reply_ok(execute_body(&property_ids(0x8001), &[LOGON_HANDLE]));
+    server.reply(reconnected());
+    server.reply_ok(execute_body(&logon_response(0), &[NEW_LOGON_HANDLE]));
+    server.reply(reconnected());
+    server.reply_ok(execute_body(
+        &logon_of_another_mailbox(),
+        &[NEW_LOGON_HANDLE],
+    ));
+
+    let client = server.client();
+    let wanted = [NamedProperty::AppointmentStartWhole];
+    let mut first = client.connect().await.unwrap().logon().await.unwrap();
+    let resolved = first.resolve_names(wanted).await.unwrap().clone();
+
+    let mut second = client
+        .clone()
+        .connect()
+        .await
+        .unwrap()
+        .logon()
+        .await
+        .unwrap();
+    assert!(second.seed_names(&resolved));
+    let seeded = second.resolve_names(wanted).await.unwrap();
+    assert_eq!(
+        seeded.tag_of(NamedProperty::AppointmentStartWhole),
+        resolved.tag_of(NamedProperty::AppointmentStartWhole)
+    );
+    assert_eq!(
+        server.requests().await.len(),
+        5,
+        "the second session asked nothing"
+    );
+
+    let mut elsewhere = client.connect().await.unwrap().logon().await.unwrap();
+    assert!(
+        !elsewhere.seed_names(&resolved),
+        "another mailbox's ids are not taken"
+    );
+    assert!(elsewhere.names().is_empty());
+}

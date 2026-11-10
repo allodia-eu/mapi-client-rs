@@ -205,6 +205,11 @@ mailbox as it was first provisioned.
   `# Cancellation` section of its own: a read can simply be made again, a write leaves its outcome
   unknown, and an object part way through is done with.
 
+- **`Logon::seed_names`, and a documented pattern for more than one session.** Clones of a
+  `MapiClient` share connections and one identity; a logon through each is a Session Context of
+  its own, and a second one takes the first one's named-property ids rather than resolving them a
+  round trip at a time. Only mapped ids are taken, and only for the same mailbox.
+
 ### Changed
 
 - **A response silent for a minute now fails, whatever the total budget.** The default stall bound

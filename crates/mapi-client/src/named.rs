@@ -201,6 +201,28 @@ impl NamedProperties {
         self.entries.retain(|entry| !names.contains(entry.name()));
     }
 
+    /// Takes every id `other` holds for this same store that this has not mapped, and says
+    /// whether `other` was for this store at all.
+    ///
+    /// Only the mapped ones. An id, once a store has allocated it, is never taken back — it has
+    /// 32,767 to give out and reclaims none ([MS-OXCPRPT] §2.2.12.1) — so a mapped answer is as
+    /// good from another session as from this one, and better than a "no id" this one cached:
+    /// that may have been answered before somebody registered the name. An unmapped answer is
+    /// taken from neither side for the same reason.
+    pub(crate) fn seed(&mut self, other: &Self) -> bool {
+        if other.store != self.store {
+            return false;
+        }
+        for entry in other.entries.iter().filter(|entry| entry.id.is_some()) {
+            match self.entries.iter_mut().find(|mine| mine.name == entry.name) {
+                Some(mine) if mine.id.is_none() => mine.id = entry.id,
+                Some(_) => {}
+                None => self.entries.push(entry.clone()),
+            }
+        }
+        true
+    }
+
     /// Records what the store answered, pairing each id with the name it was asked in place of.
     ///
     /// The pairing is positional, because a `RopGetPropertyIdsFromNames` response carries nothing
@@ -277,6 +299,23 @@ mod tests {
             &[0x8206, 0x0000],
         );
         map
+    }
+
+    /// A mapped id from another session beats a "no id" cached here, which may predate the name
+    /// being registered; an unmapped answer from the other side is not taken.
+    #[test]
+    fn seeding_maps_what_was_cached_unmapped_and_never_unmaps() {
+        let mapped = PropertyName::from(NamedProperty::AppointmentStartWhole);
+        let other = PropertyName::from(NamedProperty::AppointmentEndWhole);
+        let mut here = NamedProperties::new(store());
+        here.absorb(vec![mapped.clone(), other.clone()], &[0, 0x8002]);
+        let mut there = NamedProperties::new(store());
+        there.absorb(vec![mapped.clone(), other.clone()], &[0x8001, 0]);
+
+        assert!(here.seed(&there));
+        assert_eq!(here.get(&mapped).map(NamedPropertyId::as_u16), Some(0x8001));
+        assert_eq!(here.get(&other).map(NamedPropertyId::as_u16), Some(0x8002));
+        assert_eq!(here.len(), 2);
     }
 
     #[test]

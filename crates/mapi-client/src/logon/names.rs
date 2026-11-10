@@ -171,6 +171,23 @@ impl Logon {
         &mut self.named
     }
 
+    /// Takes the named properties another logon to the same mailbox has resolved, so that this one
+    /// does not ask for them again.
+    ///
+    /// For a second Session Context to a mailbox — see
+    /// [`MapiClient`](crate::MapiClient#more-than-one-session) — which would otherwise resolve
+    /// every name a round trip at a time, as the first did. A named-property id is a fact about
+    /// the store, not the session ([MS-OXCPRPT] §3.1.2), so the first session's answers are good
+    /// in the second. Only the ids the store had mapped are taken, and they replace a "no id"
+    /// this logon had cached; a name the other had no id for is asked again, because another
+    /// session may have registered it since.
+    ///
+    /// Returns whether they were taken: `false`, with nothing changed, when `names` belongs to
+    /// another mailbox — whose ids would name different properties here.
+    pub fn seed_names(&mut self, names: &NamedProperties) -> bool {
+        self.current_names().seed(names)
+    }
+
     /// The named properties resolved so far, without sending anything.
     #[must_use]
     pub const fn names(&self) -> &NamedProperties {
