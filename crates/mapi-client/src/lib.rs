@@ -122,6 +122,7 @@ mod builder;
 mod client;
 mod connection;
 mod credentials;
+mod download;
 mod draft;
 mod folder;
 #[cfg(feature = "ntlm")]
@@ -161,17 +162,18 @@ pub use mapi_proto;
 pub use mapi_proto::{
     APPOINTMENT_COLUMNS, APPOINTMENT_PROPERTIES, ATTACHMENT_COLUMNS, ATTACHMENT_PROPERTIES,
     AttachMethod, AttachmentNumber, Bookmark, COMPLETE_FLAG_PROPERTIES, CONTACT_COLUMNS,
-    CONTACT_PROPERTIES, CONTENTS_COLUMNS, Cell, Connected, ContainerClass, ErrorCode,
-    FOLDER_PROPERTIES, FOLLOW_UP_PROPERTIES, FileTime, FlagStatus, Floating64, FolderDepth,
-    FolderEntryId, FolderId, FollowupIcon, FuzzyLevel, Guid, HIERARCHY_COLUMNS, Headers, Lcid,
-    LegacyDn, LogonResponse, LongTermId, MAILBOX_PROPERTIES, MESSAGE_PROPERTIES, MessageClass,
-    MessageFlags, MessageId, MessageMode, MoveCopyMessagesResponse, NEW_APPOINTMENT_PROPERTIES,
-    NEW_CONTACT_PROPERTIES, NamedProperty, NamedPropertyId, OneOffEntryId, OpenMessageResponse,
-    OpenRecipient, ProgressResponse, PropertyName, PropertyNameKind, PropertyProblem, PropertyRow,
+    CONTACT_PROPERTIES, CONTENTS_COLUMNS, Cell, ChangeNumber, Connected, ContainerClass,
+    ContentsDownload, ErrorCode, FOLDER_PROPERTIES, FOLLOW_UP_PROPERTIES, FileTime, FlagStatus,
+    Floating64, FolderDepth, FolderEntryId, FolderId, FollowupIcon, FuzzyLevel, GlobCnt, Guid,
+    HIERARCHY_COLUMNS, Headers, IcsState, IdSet, Lcid, LegacyDn, LogonResponse, LongTermId,
+    MAILBOX_PROPERTIES, MESSAGE_PROPERTIES, MessageClass, MessageFlags, MessageId, MessageKinds,
+    MessageMode, MoveCopyMessagesResponse, NEW_APPOINTMENT_PROPERTIES, NEW_CONTACT_PROPERTIES,
+    NamedProperty, NamedPropertyId, OneOffEntryId, OpenMessageResponse, OpenRecipient,
+    ProgressResponse, PropertyFilter, PropertyName, PropertyNameKind, PropertyProblem, PropertyRow,
     PropertySet, PropertySetId, PropertySetIter, PropertyTag, PropertyType, PropertyValue,
     ReadFlags, Recipient, RecipientType, RelationalOperator, ReplicaId, RequestType, Restriction,
     RowForm, SMTP_ADDRESS_TYPE, STATE_PROPERTIES, ServerEntryId, SetReadFlagsResponse, ShortTermId,
-    SortDirection, SortOrder, SortOrderSet, SpecialFolder, StoreObjectType, SubmitFlags,
+    SortDirection, SortOrder, SortOrderSet, SpecialFolder, StoreObjectType, SubmitFlags, SyncScope,
     TableStatus, TableString, TaggedValue, WellKnownFolder, one_off_provider,
 };
 /// The sans-io NTLM and SPNEGO handshakes this crate drives, for
@@ -184,6 +186,7 @@ pub use crate::builder::MapiClientBuilder;
 pub use crate::client::MapiClient;
 pub use crate::connection::Connection;
 pub use crate::credentials::Credentials;
+pub use crate::download::Download;
 pub use crate::draft::{NewAttachment, NewMessage, SavedMessage};
 pub use crate::error::{Error, Result};
 pub use crate::folder::Folder;

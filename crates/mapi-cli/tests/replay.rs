@@ -35,6 +35,7 @@ mod acts;
 mod corpus;
 mod items;
 mod replayed;
+mod sync;
 mod writes;
 
 use std::sync::{Arc, Mutex};
@@ -438,6 +439,8 @@ fn every_committed_fixture_is_in_the_manifest() {
         "writes-nl-nl",
         "acts-en-us",
         "acts-nl-nl",
+        "sync-en-us",
+        "sync-nl-nl",
         "connect-refused",
         "wrong-server",
     ] {
@@ -466,6 +469,7 @@ fn every_committed_fixture_is_in_the_manifest() {
             + ITEM_EXCHANGES * 2
             + WRITE_EXCHANGES * 2
             + ACT_EXCHANGES * 2
+            + sync::SYNC_EXCHANGES * 2
             + REFUSED_EXCHANGES
             + WRONG_SERVER_EXCHANGES)
             * 3

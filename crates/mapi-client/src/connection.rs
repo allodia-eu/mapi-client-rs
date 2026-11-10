@@ -271,7 +271,7 @@ impl Connection {
 ///
 /// `None` for every response that is not a refusal, including the successful ones and the
 /// `RopRelease` that produces no response at all.
-fn refusal(response: &RopResponse, during: &'static str) -> Option<Error> {
+pub(crate) fn refusal(response: &RopResponse, during: &'static str) -> Option<Error> {
     match response {
         RopResponse::LogonRedirect { server_name } => Some(Error::WrongServer {
             server_name: server_name.clone(),

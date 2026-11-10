@@ -197,6 +197,7 @@ foreach ($identity in $Mailbox) {
         Items     = "items-$($language.ToLowerInvariant())"
         Writes    = "writes-$($language.ToLowerInvariant())"
         Acts      = "acts-$($language.ToLowerInvariant())"
+        Sync      = "sync-$($language.ToLowerInvariant())"
     })
 
     Write-Host "    $identity  $language (LCID 0x$('{0:x4}' -f $lcid))  ->  session-$($language.ToLowerInvariant())"
@@ -350,6 +351,14 @@ try {
         # corpus can hold; the successful send is in mapi-client's live suite instead.
         Write-Step "Capturing $($target.Acts) from $($target.Identity)"
         Invoke-Capture -Scenario 'acts' -Name $target.Acts -Environment $environment
+
+        # Two incremental downloads of the Inbox: a first synchronization across several buffers,
+        # and one resumed from its checkpoint. Read-only. Captured after the scenarios that write,
+        # on purpose: a final ICS state's MetaTagCnsetSeen runs up to the newest change number in
+        # the whole mailbox, so this is where a re-capture would differ if capture did not rewrite
+        # that bound - see crates\mapi-cli\src\normalise\state.rs.
+        Write-Step "Capturing $($target.Sync) from $($target.Identity)"
+        Invoke-Capture -Scenario 'sync' -Name $target.Sync -Environment $environment
     }
 
     if (-not $SkipRefused) {

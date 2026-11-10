@@ -203,7 +203,12 @@ Session Context, so two mailboxes opened by one program are one instance with tw
 takes the endpoint and the distinguished name together, because they are a matched pair — changing
 only the name is accepted by `Connect` and refused by the `RopLogon` after it.
 
-No notifications, no ICS, and no address book.
+Incremental synchronization is `Logon::download`: what changed in a folder since an ICS state, one
+event at a time, fetched only as the caller reads, and checkpointed as each message is handed over
+so that a download cut short resumes where it stopped. The state carries the scope it was obtained
+for and is refused for any other, because the server cannot tell.
+
+No notifications and no address book.
 
 ## Licence
 
