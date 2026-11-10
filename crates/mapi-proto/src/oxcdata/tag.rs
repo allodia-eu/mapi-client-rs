@@ -4,10 +4,10 @@
 //! half and the type the low half, and the little-endian encoding of that `u32` is exactly the wire
 //! form.
 //!
-//! The catalogue is split four ways so that none of the four outgrows the file limit: the type and
+//! The catalogue is split five ways so that none of the five outgrows the file limit: the type and
 //! most of the constants are here, the ones a message carries only because it is mail are in the
-//! `mail` submodule, the canonical names are in `names`, and the sets a caller asks for are in
-//! `columns`.
+//! `mail` submodule, the meta-properties incremental synchronization carries are in `sync`, the
+//! canonical names are in `names`, and the sets a caller asks for are in `columns`.
 //!
 //! [MS-OXCDATA] §2.9 — `PropertyTag` structure
 
@@ -15,6 +15,7 @@ use crate::oxcdata::PropertyType;
 
 mod mail;
 mod names;
+mod sync;
 
 /// A property id paired with the type of its value.
 ///

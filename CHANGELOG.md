@@ -29,6 +29,11 @@ mailbox as it was first provisioned.
 
 ### Measured, and worth knowing
 
+- **A GLOBCNT is six bytes, most significant first.** No sentence in the documents says so; the
+  worked example in [MS-OXCFXICS] §4.4 does, reading `01 00 00 00 00 00 00 05` as REPLID `0001` and
+  GLOBCNT `000000000005`. `FolderId::global_counter` and `LongTermId::global_counter` read the same
+  six bytes little-endian, as they always have; `GlobCnt` is what orders counters the way the
+  protocol does.
 - **The `Connect` response's auxiliary buffer has no fixed size.** 273 bytes on success and 1404 on
   an `ecUnknownUser` refusal, where `15.02.2562.045` measured 269 and 1438. Not the update: one
   `AUX_*` block is text carrying the connect time and a connection number, and a refusal adds error
@@ -46,6 +51,18 @@ mailbox as it was first provisioned.
 - **`Session::begin_reconnect`**, [MS-OXCMAPIHTTP] §3.1.5.7's `Connect` that passes the old Session
   Context's cookies so the server can clean it up.
 - **`Test-Live.ps1 -Filter`**, to run only the live tests whose names contain a string.
+- **`mapi_proto::ics`: the state incremental synchronization keeps.** `GlobSet` and `IdSet` with
+  the GLOBSET command encoding of [MS-OXCFXICS] §3.1.5.4, in both of an IDSET's wire forms —
+  REPLGUID-based for a state and REPLID-based for a download's differences, kept apart as
+  `IdSet<Guid>` and `IdSet<ReplicaId>` because nothing in the bytes says which one a buffer is.
+  `IcsState` binds the four state properties to the `SyncScope` they were obtained for: the folder,
+  the restriction exactly as encoded, the synchronization type and the mailbox instance GUID. A
+  state offered for any other scope is refused with `IcsScopeMismatch`, because §3.3.5.5 says the
+  server cannot tell. `IcsState::record_message` is client-side checkpointing, and `to_bytes` and
+  `from_bytes` are a versioned encoding carrying the scope with the state. Pinned to the document's
+  own bytes: §4.4's IDSET, §3.1.5.4.3.1.3's Bitmask (which the encoder reproduces), and §4.5's
+  final state.
+- **Nine meta-property tags**, `PropertyTag::META_TAG_*`, for the identifier sets ICS carries.
 
 ### Changed
 

@@ -367,6 +367,42 @@ pub enum Error {
         reason: &'static str,
     },
 
+    /// A serialized GLOBSET broke one of the rules its commands follow.
+    ///
+    /// Refused rather than repaired: an ICS state built from a misread set skips mail, or fetches
+    /// it again, and says nothing either way.
+    ///
+    /// [MS-OXCFXICS] §3.1.5.4.3.2 — decoding a GLOBSET
+    #[error("invalid GLOBSET at {at}: {reason}")]
+    InvalidGlobset {
+        /// Byte offset of the command that broke the rule.
+        at: usize,
+        /// Which rule.
+        reason: &'static str,
+    },
+
+    /// An ICS state was offered for a synchronization scope other than the one it was obtained
+    /// for.
+    ///
+    /// The server cannot catch this: "ICS state does not reflect the synchronization scope it
+    /// belongs to", so a mismatched state is answered as though it were right, and mail is skipped
+    /// or reported deleted.
+    ///
+    /// [MS-OXCFXICS] §3.3.5.5 — determining the synchronization scope
+    #[error("this ICS state belongs to another synchronization scope: {differs} differs")]
+    IcsScopeMismatch {
+        /// Which part of the scope differs.
+        differs: &'static str,
+    },
+
+    /// Bytes handed to [`IcsState::from_bytes`](crate::ics::IcsState::from_bytes) are not a state
+    /// it can read.
+    #[error("not a usable ICS state: {reason}")]
+    InvalidIcsState {
+        /// What is wrong with them.
+        reason: &'static str,
+    },
+
     /// The response stream held a ROP this crate does not model.
     ///
     /// ROP responses are variable-length and not self-describing, so decoding cannot continue

@@ -8,8 +8,10 @@
 use crate::oxcdata::{PropertyTag, PropertyType};
 
 mod mail;
+mod sync;
 
 pub(super) use mail::MAIL_CATALOGUE;
+pub(super) use sync::SYNC_CATALOGUE;
 
 pub(super) const CATALOGUE: [(PropertyTag, u16, PropertyType, &str); 66] = [
     (
