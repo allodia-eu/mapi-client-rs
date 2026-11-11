@@ -16,6 +16,11 @@ impl Logon {
     /// finds out. Named properties stay resolved unless the new logon names another mailbox — a
     /// restored or moved one — in which case they are asked for afresh.
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. The connection stays marked as lost, and its next request
+    /// re-establishes it.
+    ///
     /// # Errors
     ///
     /// As [`Connection::reconnect`](crate::Connection::reconnect).
@@ -41,6 +46,13 @@ impl Logon {
 
     /// Keeps the Session Context alive, and returns its new deadline. See
     /// [`Connection::keep_alive`](crate::Connection::keep_alive).
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
     ///
     /// # Errors
     ///

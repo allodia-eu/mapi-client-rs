@@ -190,6 +190,13 @@ impl Logon {
     /// # }
     /// ```
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
+    ///
     /// # Errors
     ///
     /// [`Error::MissingFolder`] if the logon named no Inbox, and whatever either round trip failed
@@ -212,6 +219,13 @@ impl Logon {
     ///
     /// Costs the same two round trips as [`special_folders`](Self::special_folders), which
     /// resolves every one of them — reach for that when more than one is wanted.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
     ///
     /// # Errors
     ///
@@ -239,6 +253,13 @@ impl Logon {
     /// **The answer is only meaningful in the store this logon named.** Converting an entry id
     /// issued by another mailbox yields a valid-looking id for the wrong folder, which
     /// [`FolderEntryId::belongs_to`](mapi_proto::FolderEntryId::belongs_to) is the check against.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
     ///
     /// # Errors
     ///
@@ -269,6 +290,13 @@ impl Logon {
     ///
     /// The inverse of [`short_term_id`](Self::short_term_id), and what writing an entry-id
     /// property needs.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
     ///
     /// # Errors
     ///
@@ -401,6 +429,13 @@ impl Logon {
     /// download. A stamp read after a download covers what changed while it ran as well, and that
     /// change would never be downloaded. See [`FolderStamp`] for the other two rules.
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
+    ///
     /// # Errors
     ///
     /// Whatever the table read failed with.
@@ -419,6 +454,10 @@ impl Logon {
     }
 
     /// Tears the Session Context down.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A Session Context left behind times out on its own.
     ///
     /// # Errors
     ///

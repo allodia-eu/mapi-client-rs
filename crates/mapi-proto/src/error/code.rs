@@ -95,6 +95,12 @@ impl ErrorCode {
     /// Routine rather than exceptional in a table: it is how a column too large for a row comes
     /// back. [MS-OXCDATA] §2.4.2
     pub const TOO_BIG: Self = Self(0x8004_0305);
+    /// `TooManyOpenObjects`, `0x000004DE` (`ecMaxObjsExceeded`) — "a client has opened too many
+    /// objects of a specific type". Measured against Exchange Server SE `15.02.2562.056` as the
+    /// refusal of the 501st object one Session Context holds.
+    ///
+    /// [MS-OXCDATA] §2.4.2
+    pub const TOO_MANY_OPEN_OBJECTS: Self = Self(0x0000_04DE);
     /// More recipients than the server allows. `0x00000505`, also written `ecTooManyRecips`.
     ///
     /// **None of them receive the message.** [MS-OXOMSG] §3.3.5.1 says so explicitly, which makes
@@ -140,6 +146,7 @@ impl ErrorCode {
             Self::UNKNOWN_USER => "UnknownUser",
             Self::WRONG_SERVER => "WrongServer",
             Self::SERVER_BUSY => "ServerBusy",
+            Self::TOO_MANY_OPEN_OBJECTS => "TooManyOpenObjects",
             Self::LOGIN_PERMISSION => "LoginPermission",
             Self::GENERAL_FAILURE => "GeneralFailure",
             Self::NOT_SUPPORTED => "NotSupported",

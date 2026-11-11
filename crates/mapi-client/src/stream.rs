@@ -109,6 +109,13 @@ impl<'a> StreamRead<'a> {
     /// chunk is one more. A property that fits in 32 KiB — which is most of them — therefore costs
     /// exactly one.
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
+    ///
     /// # Errors
     ///
     /// [`Error::Rop`] if the server refused any step. `NotFound` from the open means the object
@@ -249,7 +256,16 @@ async fn release(connection: &mut Connection, handles: &[Held]) {
     if batch.is_empty() {
         return;
     }
-    let _ = connection.execute(batch, "releasing a stream").await;
+    if let Err(error) = connection.execute(batch, "releasing a stream").await
+        && !crate::connection::may_have_released(&error)
+    {
+        // The value has been read; a release that never reached the server is queued for the next
+        // request rather than left for the Session Context to hold until it ends. One that may
+        // have run is not: releasing a value twice could free whatever it was handed to next.
+        for handle in handles {
+            connection.release_later(*handle);
+        }
+    }
 }
 
 /// A property read whole, and what is known about it.

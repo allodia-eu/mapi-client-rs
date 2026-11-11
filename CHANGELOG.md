@@ -199,6 +199,12 @@ mailbox as it was first provisioned.
   observers are unaffected. `MetaTag::from_line` reads one preamble line, and `MetaTag` is
   re-exported from `mapi-client`.
 
+- **`ErrorCode::TOO_MANY_OPEN_OBJECTS`** (`0x000004DE`, `ecMaxObjsExceeded`), and
+  `RopBatch::slots`, how much of a batch's handle table is used.
+- **Every public `async fn` in `mapi-client` says what dropping it part way leaves**, in a
+  `# Cancellation` section of its own: a read can simply be made again, a write leaves its outcome
+  unknown, and an object part way through is done with.
+
 ### Changed
 
 - **A response silent for a minute now fails, whatever the total budget.** The default stall bound
@@ -224,6 +230,13 @@ mailbox as it was first provisioned.
 
 ### Fixed
 
+- **A `Rows` or a `Download` dropped before it was closed no longer leaves its handle open for the
+  life of the Session Context.** The release is queued and travels at the end of the connection's
+  next request, at no extra round trip; a release whose request the server never saw is carried by
+  the one after, and one from a Session Context since replaced is never sent. A failed release after
+  a stream read or a refused draft is queued the same way. It mattered for a session that lasts: on
+  `15.02.2562.056` one Session Context holds at most 500 objects, and the next is refused with
+  `ecMaxObjsExceeded`. 600 tables read a page into and dropped now leave it holding none.
 - **A failure reported after `DONE` fails the request.** [MS-OXCMAPIHTTP] §3.2.5.2 lets a server
   send a second `X-ResponseCode` among the headers that follow `DONE`; it was ignored, and such a
   response decoded as a success. It is now `mapi_proto::Error::FailedAfterDone`, apart from

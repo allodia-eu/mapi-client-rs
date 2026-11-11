@@ -70,6 +70,13 @@ impl<'a> Message<'a> {
     /// last is worth having before a calendar read: a message with no named properties cannot be
     /// an appointment, and asking the store to resolve ten names for it is a wasted round trip.
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. A future dropped while its request is in flight leaves the
+    /// connection [poisoned](crate::Connection#cancellation), never wedged, and
+    /// [`reconnect`](crate::Connection::reconnect) makes it usable again. Nothing was changed, so
+    /// the call can simply be made again.
+    ///
     /// # Errors
     ///
     /// [`Error::Rop`] if the server refused the open — `NotFound` for a message that has been moved
@@ -180,6 +187,14 @@ impl<'a> Message<'a> {
     /// omission was: [`ecTooManyRecips`](mapi_proto::ErrorCode::TOO_MANY_RECIPIENTS) means **none**
     /// of the recipients got it, and [`ecAccessDenied`](mapi_proto::ErrorCode::ACCESS_DENIED) is
     /// what an FAI message is refused with, which reads like a permission problem and is not.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await, as every request here is — but a future dropped while its request
+    /// is in flight leaves it unknown whether the change was made, as an error's
+    /// [`Delivery::Unknown`](crate::Delivery::Unknown) does. The connection is
+    /// [poisoned](crate::Connection#cancellation) until
+    /// [`reconnect`](crate::Connection::reconnect); read the item back before trying again.
     ///
     /// # Errors
     ///
@@ -335,6 +350,14 @@ impl MessageUpdate<'_> {
     /// The returned list names the properties the server refused, as
     /// [`Properties::write`](crate::Properties::write) does — and with the same caveat: an empty
     /// list is what a server chose to report, not proof that everything landed.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await, as every request here is — but a future dropped while its request
+    /// is in flight leaves it unknown whether the change was made, as an error's
+    /// [`Delivery::Unknown`](crate::Delivery::Unknown) does. The connection is
+    /// [poisoned](crate::Connection#cancellation) until
+    /// [`reconnect`](crate::Connection::reconnect); read the item back before trying again.
     ///
     /// # Errors
     ///

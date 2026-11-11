@@ -91,6 +91,16 @@ pub(crate) struct Held {
     epoch: u64,
 }
 
+impl Held {
+    pub(super) const fn handle(self) -> ObjectHandle {
+        self.handle
+    }
+
+    pub(super) const fn epoch(self) -> u64 {
+        self.epoch
+    }
+}
+
 impl Connection {
     /// Replaces the Session Context with a new one, and logs on again if this one was.
     ///
@@ -109,6 +119,11 @@ impl Connection {
     /// Not needed for a context the server lost, which is re-established on the request that
     /// finds out. This is for one the caller wants replaced: a poisoned connection, which this
     /// makes usable again, or a mailbox suspected of having moved.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await. The connection stays marked as lost, and its next request
+    /// re-establishes it.
     ///
     /// # Errors
     ///
@@ -141,6 +156,10 @@ impl Connection {
             }
         }
         self.epoch = self.epoch.saturating_add(1);
+        // Every queued release named a handle of the context just replaced, which took them along.
+        if let Ok(mut queue) = self.releases.lock() {
+            queue.clear();
+        }
 
         if self.logon.is_some() {
             let mut batch = RopBatch::new();

@@ -200,6 +200,14 @@ impl<'a> NewMessage<'a> {
     /// makes a contact a contact. Exchange fills the sender properties in itself
     /// (§3.3.5.1.3.2), so a submit with none of them set is accepted and delivered.
     ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await, as every request here is — but a future dropped while its request
+    /// is in flight leaves it unknown whether the change was made, as an error's
+    /// [`Delivery::Unknown`](crate::Delivery::Unknown) does. The connection is
+    /// [poisoned](crate::Connection#cancellation) until
+    /// [`reconnect`](crate::Connection::reconnect); read the item back before trying again.
+    ///
     /// # Errors
     ///
     /// As [`save`](Self::save), plus whatever the submit is refused with —
@@ -224,6 +232,14 @@ impl<'a> NewMessage<'a> {
     /// The order is not an implementation detail: an attachment saved after its message is lost
     /// without anything failing ([MS-OXCPRPT] §3.1.4.16), and a message never saved leaves nothing
     /// behind at all.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop at any await, as every request here is — but a future dropped while its request
+    /// is in flight leaves it unknown whether the change was made, as an error's
+    /// [`Delivery::Unknown`](crate::Delivery::Unknown) does. The connection is
+    /// [poisoned](crate::Connection#cancellation) until
+    /// [`reconnect`](crate::Connection::reconnect); read the item back before trying again.
     ///
     /// # Errors
     ///
@@ -337,7 +353,11 @@ async fn abandon(connection: &mut Connection, handle: Held) {
         return;
     };
     batch.release(slot);
-    let _ = connection.execute(batch, "releasing a message").await;
+    if let Err(error) = connection.execute(batch, "releasing a message").await
+        && !crate::connection::may_have_released(&error)
+    {
+        connection.release_later(handle);
+    }
 }
 
 /// Saves the message, optionally submits it, and gives its handle back — all in one round trip.

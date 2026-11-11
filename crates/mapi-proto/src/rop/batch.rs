@@ -138,6 +138,12 @@ impl Default for RopBatch {
 }
 
 impl RopBatch {
+    /// The most a batch's ROP list and handle table may come to, [`size`](Self::size) included:
+    /// the 16-bit `Size` field of the `RPC_HEADER_EXT` that frames them.
+    ///
+    /// [MS-OXCRPC] §2.2.2.1 — `RPC_HEADER_EXT`
+    pub const MAX_SIZE: usize = 0xFFFF;
+
     /// An empty batch.
     #[must_use]
     pub const fn new() -> Self {
@@ -157,6 +163,26 @@ impl RopBatch {
     #[must_use]
     pub const fn len(&self) -> usize {
         self.count
+    }
+
+    /// How many bytes the batch comes to as it will be framed: the two-byte `RopSize`, the ROP
+    /// list, and four bytes for each slot of the handle table. Building a batch past
+    /// [`MAX_SIZE`](Self::MAX_SIZE) fails with [`Error::RopBufferTooLarge`].
+    ///
+    /// [MS-OXCROPS] §2.2.1 — ROP input buffer
+    #[must_use]
+    pub const fn size(&self) -> usize {
+        self.rops
+            .len()
+            .saturating_add(2)
+            .saturating_add(self.handles.len().saturating_mul(4))
+    }
+
+    /// How many slots of the handle table the batch has used, out of the 256 a one-byte index can
+    /// address.
+    #[must_use]
+    pub const fn slots(&self) -> usize {
+        self.handles.len()
     }
 
     /// Whether no ROP has been added yet.
