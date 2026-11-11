@@ -133,7 +133,7 @@ impl<'a> Folder<'a> {
     /// [MS-OXCROPS] §2.2.4.11 — `RopDeleteMessages`
     pub async fn delete_messages(self, messages: &[MessageId]) -> Result<bool> {
         let mut batch = RopBatch::new();
-        let logon = batch.bind(self.logon);
+        let logon = batch.bind_logon(self.logon);
         let folder = batch.open_folder(logon, self.id);
         batch.delete_messages(folder, messages).release(folder);
 
@@ -197,7 +197,7 @@ impl<'a> Folder<'a> {
 
     async fn move_or_copy(self, messages: &[MessageId], to: FolderId, copy: bool) -> Result<bool> {
         let mut batch = RopBatch::new();
-        let logon = batch.bind(self.logon);
+        let logon = batch.bind_logon(self.logon);
         let source = batch.open_folder(logon, self.id);
         let destination = batch.open_folder(logon, to);
         batch
@@ -253,7 +253,7 @@ impl<'a> Folder<'a> {
     /// [MS-OXCROPS] §2.2.6.10 — `RopSetReadFlags`
     pub async fn set_read(self, messages: &[MessageId], flags: ReadFlags) -> Result<bool> {
         let mut batch = RopBatch::new();
-        let logon = batch.bind(self.logon);
+        let logon = batch.bind_logon(self.logon);
         let folder = batch.open_folder(logon, self.id);
         batch
             .set_read_flags(folder, flags, messages)

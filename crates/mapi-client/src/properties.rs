@@ -37,7 +37,7 @@ impl<'a> Properties<'a> {
     pub(crate) fn new(connection: &'a mut Connection, object: ObjectHandle) -> Self {
         Self {
             connection,
-            target: Target::Open(object),
+            target: Target::Logon(object),
         }
     }
 

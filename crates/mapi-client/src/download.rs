@@ -27,7 +27,7 @@ use mapi_proto::{
     RopBatch, RopId, RopResponse, SyncScope, TransferStatus,
 };
 
-use crate::connection::{self, Connection};
+use crate::connection::{self, Connection, Held};
 use crate::error::{Error, Result};
 
 /// The most state bytes one request uploads.
@@ -58,13 +58,13 @@ pub struct Download<'a> {
     upload: Vec<Upload>,
     uploaded: usize,
     /// The download context, once the server has opened one.
-    context: Option<ObjectHandle>,
+    context: Option<Held>,
     /// The folder, when a refused opening left it open: opened, then refused at or before the
     /// configure, so the release after it never ran. The next opening uses it rather than opening
     /// it again, and closing releases it. A refusal after the configure always comes after the
     /// release too: [MS-OXCROPS] §3.2.4.2 substitutes a `RopBackoff` "in place of the response for
     /// the delayed ROP request", and a `RopRelease` has no response to substitute.
-    left_open: Option<ObjectHandle>,
+    left_open: Option<Held>,
     parser: ContentsSync,
     /// Whether the server has reported the stream `Done`.
     transferred: bool,
@@ -147,13 +147,18 @@ impl<'a> Download<'a> {
     ///
     /// [MS-OXCROPS] §2.2.15.3 — `RopRelease`
     pub async fn close(self) -> Result<IcsState> {
-        let held: Vec<ObjectHandle> = self.context.into_iter().chain(self.left_open).collect();
-        if !held.is_empty() {
-            let mut batch = RopBatch::new();
-            for handle in held {
-                let slot = batch.bind(handle);
+        // A context from a Session Context since replaced went with it, and is not released: the
+        // same value in the new one names something else.
+        let mut batch = RopBatch::new();
+        for held in self.context.into_iter().chain(self.left_open) {
+            if let Ok(slot) =
+                self.connection
+                    .bind(&mut batch, held, "releasing the download context")
+            {
                 batch.release(slot);
             }
+        }
+        if !batch.is_empty() {
             self.connection
                 .execute(batch, "releasing the download context")
                 .await?;
@@ -187,16 +192,23 @@ impl<'a> Download<'a> {
     async fn fetch(&mut self) -> Result<()> {
         let mut batch = RopBatch::new();
         let configuring = self.context.is_none();
-        let (context, opened) = if let Some(handle) = self.context {
-            (batch.bind(handle), None)
+        let (context, opened) = if let Some(held) = self.context {
+            let slot = self
+                .connection
+                .bind(&mut batch, held, "continuing a download")?;
+            (slot, None)
         } else {
-            let logon = batch.bind(self.logon);
+            let logon = batch.bind_logon(self.logon);
             // The folder's long-term id names the replica its messages are numbered in, which is
             // the mapping checkpointing needs; see `IcsState::map_replica`.
             batch.long_term_id_from_id(logon, self.folder.into());
             let folder = match self.left_open.take() {
-                Some(handle) => batch.bind(handle),
-                None => batch.open_folder(logon, self.folder),
+                Some(held) if self.connection.holds(held) => {
+                    self.connection
+                        .bind(&mut batch, held, "opening a download")?
+                }
+                // Left open in a Session Context since replaced, which took it along.
+                _ => batch.open_folder(logon, self.folder),
             };
             let context = batch.synchronization_configure(folder, &self.configuration);
             // The context is a Server object of its own, as a table is, so the folder handle is not
@@ -212,7 +224,11 @@ impl<'a> Download<'a> {
 
         let execution = self.connection.execute_allowing_refusals(batch).await?;
         if configuring {
-            self.context = execution.handle(context).filter(|handle| !handle.is_none());
+            let held = execution
+                .handle(context)
+                .filter(|handle| !handle.is_none())
+                .map(|handle| self.connection.hold(handle));
+            self.context = held;
             if let Some(long_term) = execution
                 .responses()
                 .iter()
@@ -225,10 +241,12 @@ impl<'a> Download<'a> {
                 matches!(response, RopResponse::Succeeded { rop } | RopResponse::Failed { rop, .. }
                     if *rop == RopId::SYNCHRONIZATION_CONFIGURE)
             });
-            self.left_open = opened
+            let left_open = opened
                 .filter(|_| !configured)
                 .and_then(|folder| execution.handle(folder))
-                .filter(|handle| !handle.is_none());
+                .filter(|handle| !handle.is_none())
+                .map(|handle| self.connection.hold(handle));
+            self.left_open = left_open;
         }
         // The upload moves on by exactly what the server carried out, refused batch or not. A busy
         // `GetBuffer` comes after the whole upload; a `RopBackoff` or `RopBufferTooSmall` can stop

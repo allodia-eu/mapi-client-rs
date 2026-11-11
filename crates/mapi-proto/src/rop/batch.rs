@@ -118,13 +118,15 @@ impl core::fmt::Display for HandleSlot {
 ///     .set_columns(table, &HIERARCHY_COLUMNS)
 ///     .query_rows(table, 50);
 /// ```
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct RopBatch {
     rops: Writer,
     handles: Vec<ObjectHandle>,
     columns: Vec<Option<Vec<PropertyTag>>>,
     property_tags: Vec<Vec<PropertyTag>>,
     released: Vec<u8>,
+    /// The slots [`bind_logon`](Self::bind_logon) filled.
+    logons: Vec<u8>,
     error: Option<Error>,
     count: usize,
 }
@@ -145,6 +147,7 @@ impl RopBatch {
             columns: Vec::new(),
             property_tags: Vec::new(),
             released: Vec::new(),
+            logons: Vec::new(),
             error: None,
             count: 0,
         }
@@ -167,6 +170,46 @@ impl RopBatch {
     /// This is how a logon obtained from one `Execute` is used by the next.
     pub fn bind(&mut self, handle: ObjectHandle) -> HandleSlot {
         self.allocate(handle)
+    }
+
+    /// Places the Logon object's handle into this batch's table, marked as the logon's.
+    ///
+    /// The same as [`bind`](Self::bind) on the wire. The mark is what lets the batch be pointed at
+    /// another Session Context's logon with [`rebind_logon`](Self::rebind_logon), because a
+    /// handle value alone cannot say what it was bound as: [MS-OXCROPS] §2.2.1 has a handle mean
+    /// something only to the server object table it came from, and the value one context gave its
+    /// logon, another may give a table.
+    pub fn bind_logon(&mut self, handle: ObjectHandle) -> HandleSlot {
+        let slot = self.allocate(handle);
+        self.logons.push(slot.index());
+        slot
+    }
+
+    /// Points every slot bound with [`bind_logon`](Self::bind_logon) at `logon`.
+    ///
+    /// For a batch built against one Session Context's logon and sent to its successor. Whether
+    /// that leaves a batch that means anything there is
+    /// [`binds_only_the_logon`](Self::binds_only_the_logon)'s question.
+    pub fn rebind_logon(&mut self, logon: ObjectHandle) -> &mut Self {
+        for index in &self.logons {
+            if let Some(handle) = self.handles.get_mut(usize::from(*index)) {
+                *handle = logon;
+            }
+        }
+        self
+    }
+
+    /// Whether the only handle this batch took from an earlier round trip is the logon's.
+    ///
+    /// Such a batch carries over to a new Session Context whole, once
+    /// [`rebind_logon`](Self::rebind_logon) has pointed it at the new logon. Any other handle it
+    /// bound — a table, a stream, a message being written — belonged to the old context and names
+    /// nothing in the new one, or worse, whatever the new one handed the same value to.
+    #[must_use]
+    pub fn binds_only_the_logon(&self) -> bool {
+        self.handles.iter().enumerate().all(|(index, handle)| {
+            handle.is_none() || u8::try_from(index).is_ok_and(|index| self.logons.contains(&index))
+        })
     }
 
     /// Logs on to a private mailbox, producing the handle every later ROP hangs off.

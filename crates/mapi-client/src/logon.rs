@@ -18,6 +18,9 @@ use crate::special::{SpecialFolderEntry, SpecialFolderState, SpecialFolders};
 /// Resolving named properties against this store, and registering ones it does not yet have.
 mod names;
 
+/// The Session Context under the logon: when it expires, keeping it alive, and replacing it.
+mod session;
+
 /// A mailbox, logged on and ready to be read.
 ///
 /// Owns the [`Connection`] it was made from: there is one logon per Session Context, so the two
@@ -48,33 +51,24 @@ impl Logon {
     /// Everything the logon reported: all thirteen special folder ids, the mailbox GUID and the
     /// replica identifiers.
     ///
+    /// The current Session Context's logon, which after a [reconnect](Self::reconnect) is the one
+    /// the new context ran.
+    ///
     /// [MS-OXCSTOR] §2.2.1.1.3 — success response buffer for a private mailbox
     #[must_use]
-    pub const fn mailbox(&self) -> &LogonResponse {
-        &self.response
+    pub fn mailbox(&self) -> &LogonResponse {
+        self.connection.logon_response().unwrap_or(&self.response)
+    }
+
+    /// The Logon object's handle in the current Session Context.
+    fn handle(&self) -> ObjectHandle {
+        self.connection.logon_handle().unwrap_or(self.handle)
     }
 
     /// What the server reported when the Session Context was established.
     #[must_use]
     pub const fn server(&self) -> &Connected {
         self.connection.server()
-    }
-
-    /// When the server will time this logon's Session Context out if nothing more is sent. See
-    /// [`Connection::expires_at`].
-    #[must_use]
-    pub const fn expires_at(&self) -> Option<std::time::Instant> {
-        self.connection.expires_at()
-    }
-
-    /// Keeps the Session Context alive, and returns its new deadline. See
-    /// [`Connection::keep_alive`].
-    ///
-    /// # Errors
-    ///
-    /// As [`Connection::keep_alive`].
-    pub async fn keep_alive(&mut self) -> Result<std::time::Instant> {
-        self.connection.keep_alive().await
     }
 
     /// The id of one of the thirteen special folders.
@@ -89,7 +83,7 @@ impl Logon {
     ///
     /// [MS-OXCSTOR] §2.2.1.1.3 — `FolderIds`
     pub fn folder_id(&self, folder: WellKnownFolder) -> Result<FolderId> {
-        self.response
+        self.mailbox()
             .folder(folder)
             .ok_or(Error::MissingFolder { folder })
     }
@@ -117,7 +111,8 @@ impl Logon {
     /// [MS-OXCSTOR] §2.2.2.1 — private mailbox logon properties
     #[must_use]
     pub fn store(&mut self) -> Properties<'_> {
-        Properties::new(&mut self.connection, self.handle)
+        let handle = self.handle();
+        Properties::new(&mut self.connection, handle)
     }
 
     /// A folder to read, by id.
@@ -126,7 +121,8 @@ impl Logon {
     /// in the same round trip as the read itself.
     #[must_use]
     pub fn folder(&mut self, id: FolderId) -> Folder<'_> {
-        Folder::new(&mut self.connection, self.handle, id)
+        let handle = self.handle();
+        Folder::new(&mut self.connection, handle, id)
     }
 
     /// One message, by the folder it lives in and its id.
@@ -138,7 +134,8 @@ impl Logon {
     /// in the same round trip as the read that follows it.
     #[must_use]
     pub fn message(&mut self, folder: FolderId, id: MessageId) -> Message<'_> {
-        Message::new(&mut self.connection, self.handle, folder, id)
+        let handle = self.handle();
+        Message::new(&mut self.connection, handle, folder, id)
     }
 
     /// One of the thirteen special folders, ready to read.
@@ -251,7 +248,7 @@ impl Logon {
     /// [MS-OXCROPS] §2.2.3.9 — `RopIdFromLongTermId`
     pub async fn short_term_id(&mut self, id: &LongTermId) -> Result<ShortTermId> {
         let mut batch = RopBatch::new();
-        let logon = batch.bind(self.handle);
+        let logon = batch.bind_logon(self.handle());
         batch.id_from_long_term_id(logon, id);
 
         let execution = self
@@ -280,7 +277,7 @@ impl Logon {
     /// [MS-OXCROPS] §2.2.3.8 — `RopLongTermIdFromId`
     pub async fn long_term_id(&mut self, id: ShortTermId) -> Result<LongTermId> {
         let mut batch = RopBatch::new();
-        let logon = batch.bind(self.handle);
+        let logon = batch.bind_logon(self.handle());
         batch.long_term_id_from_id(logon, id);
 
         let execution = self
@@ -306,7 +303,7 @@ impl Logon {
     /// conversion cannot shift the ones after it onto the wrong folder.
     async fn convert(&mut self, named: &PropertySet) -> Result<SpecialFolders> {
         let mut batch = RopBatch::new();
-        let logon = batch.bind(self.handle);
+        let logon = batch.bind_logon(self.handle());
 
         let slots: Vec<(SpecialFolder, Slot)> = SpecialFolder::ALL
             .into_iter()
@@ -379,7 +376,7 @@ impl Logon {
         configuration: ContentsDownload,
         state: Option<IcsState>,
     ) -> Result<Download<'_>> {
-        let scope = download::scope(self.response.mailbox_guid(), folder, &configuration)?;
+        let scope = download::scope(self.mailbox().mailbox_guid(), folder, &configuration)?;
         let state = match state {
             Some(state) => {
                 state.check_scope(&scope)?;
@@ -387,13 +384,8 @@ impl Logon {
             }
             None => IcsState::initial(scope),
         };
-        Download::new(
-            &mut self.connection,
-            self.handle,
-            folder,
-            configuration,
-            state,
-        )
+        let handle = self.handle();
+        Download::new(&mut self.connection, handle, folder, configuration, state)
     }
 
     /// The [`FolderStamp`] of every folder below the mailbox root, from one hierarchy-table read:

@@ -19,11 +19,11 @@ use std::vec;
 
 use mapi_proto::{
     ATTACHMENT_COLUMNS, Bookmark, CONTENTS_COLUMNS, Execution, FolderDepth, HIERARCHY_COLUMNS,
-    HandleSlot, ObjectHandle, PropertyRow, PropertyTag, Restriction, RopBatch, RopResponse,
-    SortOrderSet, TableStatus,
+    HandleSlot, PropertyRow, PropertyTag, Restriction, RopBatch, RopResponse, SortOrderSet,
+    TableStatus,
 };
 
-use crate::connection::Connection;
+use crate::connection::{Connection, Held};
 use crate::error::Result;
 use crate::target::{Opened, Target};
 
@@ -269,7 +269,7 @@ pub struct Rows<'a> {
     /// The unopened table, taken by the first fetch.
     start: Option<Start>,
     /// The table handle, once the server has given one.
-    table: Option<ObjectHandle>,
+    table: Option<Held>,
     page: vec::IntoIter<PropertyRow>,
     page_size: u16,
     row_count: Option<u32>,
@@ -354,8 +354,15 @@ impl Rows<'_> {
         let Some(table) = self.table.take() else {
             return Ok(());
         };
+        // A table from a Session Context since replaced went with it: there is nothing to release,
+        // and releasing the value would release whatever the new context gave the same number.
+        if !self.connection.holds(table) {
+            return Ok(());
+        }
         let mut batch = RopBatch::new();
-        let slot = batch.bind(table);
+        let slot = self
+            .connection
+            .bind(&mut batch, table, "releasing the table")?;
         batch.release(slot);
         self.connection
             .execute(batch, "releasing the table")
@@ -384,7 +391,9 @@ impl Rows<'_> {
         };
 
         let mut batch = RopBatch::new();
-        let slot = batch.bind(table);
+        let slot = self
+            .connection
+            .bind(&mut batch, table, "reading a page of rows")?;
         batch.query_rows(slot, self.page_size);
         let execution = self
             .connection
@@ -435,7 +444,11 @@ impl Rows<'_> {
 
     /// Takes the table handle and the first page out of the opening round trip.
     fn opened(&mut self, execution: &Execution, table: HandleSlot) {
-        self.table = execution.handle(table).filter(|handle| !handle.is_none());
+        let held = execution
+            .handle(table)
+            .filter(|handle| !handle.is_none())
+            .map(|handle| self.connection.hold(handle));
+        self.table = held;
         self.table_status = execution
             .responses()
             .iter()

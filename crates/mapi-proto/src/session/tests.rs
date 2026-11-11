@@ -6,7 +6,7 @@ use crate::testing::{
     query_rows_response, with_preamble,
 };
 use crate::wire::Writer;
-use crate::{ErrorCode, Headers, RopId};
+use crate::{ErrorCode, Headers, ResponseCode, RopId};
 
 fn dn() -> LegacyDn {
     LegacyDn::new("/o=First/ou=Exchange Administrative Group/cn=alice").unwrap()
@@ -543,3 +543,4 @@ fn a_session_can_be_built_with_its_own_identity() {
 
 mod abandon;
 mod expiry;
+mod reconnect;

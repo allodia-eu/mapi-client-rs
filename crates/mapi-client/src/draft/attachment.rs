@@ -10,11 +10,11 @@
 //! given back on the way out of a failure as well as a success.
 
 use mapi_proto::{
-    AttachMethod, AttachmentNumber, ObjectHandle, PropertyProblem, PropertyTag, PropertyValue,
-    RopBatch, RopResponse, StreamMode, TaggedValue,
+    AttachMethod, AttachmentNumber, PropertyProblem, PropertyTag, PropertyValue, RopBatch,
+    RopResponse, StreamMode, TaggedValue,
 };
 
-use crate::connection::Connection;
+use crate::connection::{Connection, Held};
 use crate::error::{Error, Result};
 
 /// Bytes per `RopWriteStream`.
@@ -110,13 +110,13 @@ impl NewAttachment {
     pub(super) async fn write(
         self,
         connection: &mut Connection,
-        message: ObjectHandle,
+        message: Held,
     ) -> Result<(AttachmentNumber, Vec<PropertyProblem>)> {
         let mut chunks = self.content.chunks(WRITE_CHUNK);
         let first = chunks.next().unwrap_or_default();
 
         let mut batch = RopBatch::new();
-        let message_slot = batch.bind(message);
+        let message_slot = connection.bind(&mut batch, message, "creating an attachment")?;
         let attachment = batch.create_attachment(message_slot);
         batch.set_properties(attachment, &self.properties);
         let stream = batch.open_stream(
@@ -131,8 +131,14 @@ impl NewAttachment {
         // The handles are taken before anything is checked, so that every path out from here can
         // give them back. A check that ran first would have nothing left to name.
         let (Some(stream_handle), Some(attachment_handle)) = (
-            execution.handle(stream).filter(|h| !h.is_none()),
-            execution.handle(attachment).filter(|h| !h.is_none()),
+            execution
+                .handle(stream)
+                .filter(|h| !h.is_none())
+                .map(|handle| connection.hold(handle)),
+            execution
+                .handle(attachment)
+                .filter(|h| !h.is_none())
+                .map(|handle| connection.hold(handle)),
         ) else {
             return Err(Error::Unexpected {
                 expected: "handles for the new attachment and its content stream",
@@ -170,14 +176,14 @@ impl NewAttachment {
 async fn fill(
     connection: &mut Connection,
     opening: &mapi_proto::Execution,
-    stream: ObjectHandle,
+    stream: Held,
     first: &[u8],
     chunks: core::slice::Chunks<'_, u8>,
 ) -> Result<()> {
     check_written(opening, first.len())?;
     for chunk in chunks {
         let mut batch = RopBatch::new();
-        let slot = batch.bind(stream);
+        let slot = connection.bind(&mut batch, stream, "writing an attachment's content")?;
         batch.write_stream(slot, chunk);
         let execution = connection
             .execute(batch, "writing an attachment's content")
@@ -200,13 +206,18 @@ async fn fill(
 /// stream, save the attachment, release it — and is what the captured corpus holds.
 async fn finish(
     connection: &mut Connection,
-    stream: ObjectHandle,
-    attachment: ObjectHandle,
+    stream: Held,
+    attachment: Held,
     commit: bool,
 ) -> Result<()> {
+    // Handles from a Session Context since replaced went with it, and the failure that replaced it
+    // is already being reported: there is nothing left to commit or to release.
+    if !connection.holds(stream) || !connection.holds(attachment) {
+        return Ok(());
+    }
     let mut batch = RopBatch::new();
-    let stream = batch.bind(stream);
-    let attachment = batch.bind(attachment);
+    let stream = connection.bind(&mut batch, stream, "saving an attachment")?;
+    let attachment = connection.bind(&mut batch, attachment, "saving an attachment")?;
     if commit {
         batch.commit_stream(stream);
     }

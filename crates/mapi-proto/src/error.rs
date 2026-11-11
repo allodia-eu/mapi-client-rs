@@ -317,6 +317,24 @@ pub enum Error {
         diagnostic: Option<String>,
     },
 
+    /// The transport accepted the request, and then failed it after `DONE`.
+    ///
+    /// [MS-OXCMAPIHTTP] §3.2.5.2: the server "will include a X-ResponseCode header ... if a failure
+    /// occurs after the initial response is sent", which "gives the server the ability to later
+    /// fail the request and return a different value". Unlike [`Error::Transport`], the request
+    /// got past the transport and the server was working on it, so how much of it ran is not
+    /// known.
+    #[error(
+        "the request was accepted and then failed: {code}, {}",
+        .diagnostic.as_deref().unwrap_or("no diagnostic")
+    )]
+    FailedAfterDone {
+        /// The `X-ResponseCode` value after `DONE`, reported as received.
+        code: ResponseCode,
+        /// Whatever diagnostic text the server put in the body, if any.
+        diagnostic: Option<String>,
+    },
+
     /// The server rejected the `Connect`.
     ///
     /// Names the distinguished name that was sent, because the common failure is a DN the server

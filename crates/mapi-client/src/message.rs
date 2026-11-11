@@ -189,7 +189,7 @@ impl<'a> Message<'a> {
     /// [MS-OXCROPS] §2.2.7.1 — `RopSubmitMessage`
     pub async fn send(self) -> Result<()> {
         let mut batch = RopBatch::new();
-        let logon = batch.bind(self.path.logon);
+        let logon = batch.bind_logon(self.path.logon);
         let message = batch.open_message(
             logon,
             self.path.folder,
@@ -342,7 +342,7 @@ impl MessageUpdate<'_> {
     /// read and not change — or the save, plus whatever the round trip failed with.
     pub async fn save(self) -> Result<Vec<PropertyProblem>> {
         let mut batch = RopBatch::new();
-        let logon = batch.bind(self.path.logon);
+        let logon = batch.bind_logon(self.path.logon);
         let message = batch.open_message(
             logon,
             self.path.folder,

@@ -16,7 +16,7 @@ use core::time::Duration;
 use crate::error::{Error, Result};
 use crate::http::{
     ConnectResponse, CookieJar, ExecuteResponse, Headers, Lcid, Payload, Request, RequestType,
-    ResponseCode, connect_body, disconnect_body, execute_body,
+    connect_body, disconnect_body, execute_body,
 };
 use crate::oxcdata::{LegacyDn, PropertyTag};
 use crate::rop::{Decoding, ObjectHandle, RopBatch, RopBuffer, decode_all};
@@ -370,31 +370,35 @@ impl Session {
         // A response ends the in-flight request whatever it says, so take it before any `?`.
         let pending = self.pending.take().ok_or(Error::NoRequestInFlight)?;
 
+        // A Connect starts a Session Context, and [MS-OXCMAPIHTTP] §3.2.5.6 has the client "store
+        // all returned cookies and MUST NOT comingle the new cookies with cookies from the
+        // previous Session Context" — so a reconnect's cookies replace the jar, once it has
+        // succeeded. Until then the old ones are kept: a reconnect that failed still has to pass
+        // them on the next attempt, for the server to clean their context up.
+        let mut fresh = CookieJar::new();
         for value in headers.get_all("Set-Cookie") {
+            fresh.absorb(value);
             self.cookies.absorb(value);
         }
 
-        // Read before anything can fail, so that a response that said nothing about the context's
-        // lifetime — one with no X-ResponseCode at all, say — clears the last one rather than
-        // leaving it to be taken for this response's.
         let payload = Payload::parse(payload);
         self.expiration = verdict::expiration(headers, &payload);
-
-        let code = headers
-            .get("X-ResponseCode")
-            .and_then(|value| value.trim().parse::<u32>().ok())
-            .map(ResponseCode::new)
-            .ok_or(Error::MissingResponseCode)?;
-
-        if !code.is_success() {
-            return Err(Error::Transport {
-                code,
-                diagnostic: verdict::diagnostic(payload.body()),
+        let verdict = verdict::response_code(headers, &payload)?;
+        if !verdict.code.is_success() {
+            let (code, diagnostic) = (verdict.code, verdict::diagnostic(payload.body()));
+            return Err(if verdict.after_done {
+                Error::FailedAfterDone { code, diagnostic }
+            } else {
+                Error::Transport { code, diagnostic }
             });
         }
 
         match pending {
-            Pending::Connect(user_dn) => self.on_connect(payload.body(), user_dn),
+            Pending::Connect(user_dn) => {
+                let outcome = self.on_connect(payload.body(), user_dn)?;
+                self.cookies = fresh;
+                Ok(outcome)
+            }
             Pending::Execute {
                 columns,
                 property_tags,

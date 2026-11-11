@@ -6,7 +6,50 @@
 
 use core::time::Duration;
 
-use crate::http::{Headers, Payload};
+use crate::error::{Error, Result};
+use crate::http::{Headers, Payload, ResponseCode};
+
+/// The transport's verdict on a request, and whether it was given only after `DONE`.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) struct Verdict {
+    pub(super) code: ResponseCode,
+    pub(super) after_done: bool,
+}
+
+/// The transport's verdict on a request: the `X-ResponseCode` header, unless the headers after
+/// `DONE` overturned it.
+///
+/// [MS-OXCMAPIHTTP] §3.2.5.2: the server "will include a X-ResponseCode header ... if a failure
+/// occurs after the initial response is sent", which "gives the server the ability to later fail
+/// the request and return a different value". The first verdict is given before the request has
+/// run, so a later failing one is the one that stands; a later `0` cannot undo an early failure,
+/// because a server that failed a request up front sends no `DONE` to put one after.
+///
+/// # Errors
+///
+/// [`Error::MissingResponseCode`] when the HTTP headers carry none at all.
+pub(super) fn response_code(headers: &Headers, payload: &Payload) -> Result<Verdict> {
+    let parse = |value: &str| value.trim().parse::<u32>().ok().map(ResponseCode::new);
+    let first = headers
+        .get("X-ResponseCode")
+        .and_then(parse)
+        .ok_or(Error::MissingResponseCode)?;
+    let later = payload
+        .headers()
+        .get_all("X-ResponseCode")
+        .filter_map(parse)
+        .find(|code| !code.is_success());
+    Ok(match later.filter(|_| first.is_success()) {
+        Some(code) => Verdict {
+            code,
+            after_done: true,
+        },
+        None => Verdict {
+            code: first,
+            after_done: false,
+        },
+    })
+}
 
 /// How long the server will keep the Session Context once nothing more is sent, if the response
 /// said.
@@ -50,6 +93,46 @@ mod tests {
 
     fn headers(pairs: &[(&str, &str)]) -> Headers {
         pairs.iter().map(|(name, value)| (*name, *value)).collect()
+    }
+
+    #[test]
+    fn a_failure_after_done_overturns_the_first_verdict() {
+        let ok = headers(&[("X-ResponseCode", "0")]);
+        let clean = Payload::parse(b"PROCESSING\r\nDONE\r\nX-ElapsedTime: 4\r\n\r\n");
+        let up_front = |code| {
+            Ok(Verdict {
+                code,
+                after_done: false,
+            })
+        };
+        assert_eq!(response_code(&ok, &clean), up_front(ResponseCode::SUCCESS));
+
+        let failed = Payload::parse(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 10\r\n\r\n");
+        assert_eq!(
+            response_code(&ok, &failed),
+            Ok(Verdict {
+                code: ResponseCode::CONTEXT_NOT_FOUND,
+                after_done: true
+            })
+        );
+
+        let restated = Payload::parse(b"PROCESSING\r\nDONE\r\nX-ResponseCode: 0\r\n\r\n");
+        assert_eq!(
+            response_code(&ok, &restated),
+            up_front(ResponseCode::SUCCESS)
+        );
+
+        let refused = headers(&[("X-ResponseCode", "7")]);
+        assert_eq!(
+            response_code(&refused, &restated),
+            up_front(ResponseCode::MISSING_HEADER),
+            "a later 0 cannot undo an early failure"
+        );
+        assert_eq!(
+            response_code(&headers(&[]), &failed),
+            Err(Error::MissingResponseCode),
+            "the HTTP header is required even when a later one is present"
+        );
     }
 
     #[test]

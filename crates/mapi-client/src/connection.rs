@@ -26,6 +26,12 @@ use crate::error::{Error, Result};
 use crate::logon::Logon;
 use crate::transport::Transport;
 
+/// Re-establishing a Session Context the server has lost, and the handles that do not survive it.
+mod recover;
+
+pub(crate) use recover::Held;
+use recover::{LogonState, Lost};
+
 /// Why a connection stopped, when the future driving its request was dropped before the answer.
 ///
 /// [MS-OXCMAPIHTTP] §3.1.7.2 — a response that never arrived means a new Session Context
@@ -34,11 +40,26 @@ const ABANDONED: &str = concat!(
     "so whether the server acted on it is unknown",
 );
 
-/// One established Session Context.
+/// One established Session Context — and, when the server loses it, the next one.
 ///
 /// Dropping this leaves the context for the server to time out. [`disconnect`](Self::disconnect)
 /// tears it down at once, which is the polite thing to do and the only way to free the server's
 /// handles before the timeout.
+///
+/// # A lost Session Context
+///
+/// A context expires once it has sat idle for its [lifetime](Self::expires_at), and the server
+/// then answers the next request with `X-ResponseCode` 10 without running it. 6 and 13, for a
+/// context cookie it cannot read or one that is missing, mean the same: the request named no
+/// context the server has. [MS-OXCMAPIHTTP] §3.2.5.6 has the client "reconnect and establish a new
+/// Session Context", and this does, by itself, on the request that found out: a `Connect` passing
+/// the old cookies (§3.1.5.7), the logon again if there was one, and then the request once more.
+///
+/// The request is sent again only when nothing in it belonged to the old context but the logon.
+/// A table being paged, a stream being read and a message being written each hold a handle the
+/// new context never issued, so such a request fails with [`Error::SessionLost`] — after which the
+/// object it came from refuses to go on, with [`Error::SessionReplaced`], and the connection
+/// re-establishes itself on its next request.
 ///
 /// # Cancellation
 ///
@@ -46,7 +67,8 @@ const ABANDONED: &str = concat!(
 /// anything. A future dropped before its request went out, or while the answer was on its way,
 /// leaves the connection [poisoned](Error::Poisoned), with a cause that says the request was
 /// abandoned: whether the server acted on it cannot be known, so nothing more is sent through
-/// this Session Context except a [`disconnect`](Self::disconnect), which still works.
+/// this Session Context except a [`disconnect`](Self::disconnect), which still works, or a
+/// [`reconnect`](Self::reconnect), which replaces it with one that has no such unknowns.
 #[derive(Debug)]
 pub struct Connection {
     transport: Transport,
@@ -58,6 +80,13 @@ pub struct Connection {
     /// When the server will time the Session Context out, by the last response that said. See
     /// [`expires_at`](Self::expires_at).
     expires_at: Option<Instant>,
+    /// What this Session Context is logged on as, once it is: what a reconnect logs on again as.
+    logon: Option<LogonState>,
+    /// How many times the Session Context has been replaced. A handle is only good in the one it
+    /// came from; see [`Held`].
+    epoch: u64,
+    /// Why the server is known to have lost the Session Context, until it is re-established.
+    lost: Option<Lost>,
 }
 
 impl Connection {
@@ -78,6 +107,9 @@ impl Connection {
             user_dn,
             poison: None,
             expires_at,
+            logon: None,
+            epoch: 0,
+            lost: None,
         }
     }
 
@@ -132,6 +164,9 @@ impl Connection {
     ///
     /// Safe to drop part way, like every request here: see [`Connection`].
     ///
+    /// A Session Context the server has already lost is [re-established](Self::reconnect)
+    /// instead, which starts a timer of its own.
+    ///
     /// # Errors
     ///
     /// [`Error::NotRefreshed`] for a successful `PING` that did not say the timer was
@@ -140,18 +175,29 @@ impl Connection {
     /// [MS-OXCMAPIHTTP] §3.1.5.3 — keeping a Session Context alive
     /// [MS-OXCMAPIHTTP] §2.2.6 — `PING`
     pub async fn keep_alive(&mut self) -> Result<Instant> {
-        self.usable()?;
-        let request = self.session.begin_ping()?;
-        match self.round_trip(request).await? {
-            Outcome::Pong => match (self.session.expiration(), self.expires_at) {
-                (Some(_), Some(deadline)) => Ok(deadline),
-                _ => Err(Error::NotRefreshed),
-            },
-            other => Err(Error::Unexpected {
-                expected: "a PING response",
-                found: describe(&other),
-            }),
+        if self.lost.is_none() {
+            self.usable()?;
+            let request = self.session.begin_ping()?;
+            match self.round_trip(request).await {
+                Ok(Outcome::Pong) => {
+                    return match (self.session.expiration(), self.expires_at) {
+                        (Some(_), Some(deadline)) => Ok(deadline),
+                        _ => Err(Error::NotRefreshed),
+                    };
+                }
+                Ok(other) => {
+                    return Err(Error::Unexpected {
+                        expected: "a PING response",
+                        found: describe(&other),
+                    });
+                }
+                Err(Error::SessionLost { .. }) => {}
+                Err(error) => return Err(error),
+            }
         }
+        // Gone already: a new Session Context starts its own timer, which is what was asked for.
+        self.reconnect().await?;
+        self.expires_at.ok_or(Error::NotRefreshed)
     }
 
     /// Logs on to the mailbox, which is what every later ROP hangs off.
@@ -188,6 +234,7 @@ impl Connection {
             });
         };
 
+        self.logon = Some(LogonState::new(handle, response.clone()));
         Ok(Logon::new(self, handle, response.clone()))
     }
 
@@ -234,6 +281,9 @@ impl Connection {
                     }),
                 }
             }
+            // Nothing to tear down: the server has no Session Context for these cookies, which is
+            // what a successful Disconnect would have left.
+            Err(Error::SessionLost { .. }) => Ok(()),
             other => other,
         }
     }
@@ -293,8 +343,50 @@ impl Connection {
     ///
     /// Everything below the ROP layer is still an error here: a refused `Execute`, a poisoned
     /// connection and a response that is not an `Execute` at all all come back as one.
-    pub(crate) async fn execute_allowing_refusals(&mut self, batch: RopBatch) -> Result<Execution> {
-        self.usable()?;
+    pub(crate) async fn execute_allowing_refusals(
+        &mut self,
+        mut batch: RopBatch,
+    ) -> Result<Execution> {
+        // A connection already known to be lost is replaced rather than refused, poisoned or not:
+        // the reconnect is what clears the poison, and a failed one leaves it to try again here.
+        if self.lost.is_none() {
+            self.usable()?;
+        }
+        let carries_over = batch.binds_only_the_logon();
+        let lost = if let Some(lost) = self.lost.clone() {
+            lost
+        } else {
+            // A copy only of a batch that could be sent again: one holding any other handle never
+            // is, and copying every page read and attachment chunk to throw it away costs for
+            // nothing.
+            let spare = carries_over.then(|| batch.clone());
+            match self.send(batch).await {
+                Err(Error::SessionLost { code, diagnostic }) => {
+                    let Some(spare) = spare else {
+                        self.reconnect().await?;
+                        return Err(Error::SessionLost { code, diagnostic });
+                    };
+                    batch = spare;
+                    Lost::new(code, diagnostic)
+                }
+                other => return other,
+            }
+        };
+
+        // The server ran none of it — every code that means "lost" refuses a request before it is
+        // processed — so it is safe to send again, a write included, if it still means anything.
+        self.reconnect().await?;
+        if !carries_over {
+            return Err(lost.into_error());
+        }
+        self.send(batch).await
+    }
+
+    /// One `Execute`, aimed at the current Session Context's logon.
+    async fn send(&mut self, mut batch: RopBatch) -> Result<Execution> {
+        if let Some(logon) = &self.logon {
+            batch.rebind_logon(logon.handle());
+        }
         let request = self.session.execute(batch)?;
         let outcome = self.round_trip(request).await?;
 
@@ -325,7 +417,7 @@ impl Connection {
                 if let Some(lifetime) = self.session.expiration() {
                     self.expires_at = sent.checked_add(lifetime);
                 }
-                Ok(outcome?)
+                outcome.map_err(|error| self.lose(error))
             }
             Err(error) => {
                 // The request went out and no answer came back, so whether the server acted on it
