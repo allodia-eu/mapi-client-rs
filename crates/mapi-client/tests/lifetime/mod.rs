@@ -3,7 +3,7 @@
 //! Part of `tests/live.rs`. Only the quick questions are here — what a response says about a
 //! context's lifetime, that a `PING` moves it, and what replacing a context keeps. Idling past that
 //! lifetime takes a quarter of an hour on Exchange, which is longer than this whole suite is worth
-//! waiting for.
+//! waiting for: `tests/soak.rs`, run by `scripts\Test-Soak.ps1`, does that.
 
 /// A request given up on part way, and the disconnect that has to work afterwards.
 mod cancellation;

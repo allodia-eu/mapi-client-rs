@@ -72,6 +72,18 @@ passes against the first and fails against the second, which is the most mislead
 to be wrong. The live test therefore finds the Inbox by the folder id the logon reported, never by
 name, and prints what that folder is called so a human can see the difference.
 
+**A session that lasts is a separate run.** The live suite proves each thing once, and idling past
+a Session Context's fifteen-minute lifetime is longer than it is worth waiting for. The soak keeps
+one logon going, cycle after cycle — a busy stretch, an idle one kept alive by `PING`, one idled past
+the lifetime — reading the server's count of Session Contexts before and after:
+
+```powershell
+powershell.exe -File scripts\Test-Soak.ps1 -Minutes 1440 -Password '<password>'
+```
+
+It opens the shared mailbox as `developer` and only reads, so it can run beside the live suite and
+hold no lab lock. A cycle takes about 42 minutes and is never cut short.
+
 For a lab reached some other way, the four `MAPI_LIVE_*` environment variables still work — see the
 comment-based help at the top of the script.
 
