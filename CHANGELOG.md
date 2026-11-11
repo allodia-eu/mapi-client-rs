@@ -65,6 +65,12 @@ mailbox as it was first provisioned.
   forbids. An absent property asked for that way came back typed `PtypErrorCode` in a flagged row,
   and one asked for as `PtypNull` — the type §3.2's example uses where it means `PtypUnspecified`
   — came back `NotFound`.
+- **An incremental download brings back every property type an item can hold.** A draft EWS wrote
+  with one extended property of each of the 23 types EWS can be asked for synchronized with every
+  value as EWS was given it, each in the type the store reports for it when asked without a type.
+  Two of those types are not what EWS was told: it stores a `Currency` as `PtypInteger64` and an
+  `ApplicationTime` as `PtypFloating64`, lists likewise. `PtypCurrency`, `PtypFloatingTime` and
+  their lists, written by this crate onto the same draft, came back as themselves.
 
 ### Added
 
@@ -174,6 +180,9 @@ mailbox as it was first provisioned.
   `RuleAction` — and documents why a value of any of them is still refused: `PtypUnspecified` is
   never a value's type, Exchange answers a `PtypNull` request with `NotFound`, and the other two
   belong to rules tables, which nothing here opens.
+- **`Currency` and `Floating32` are re-exported from `mapi-client`**, beside `Floating64`: values of
+  `PropertyValue::Currency` and `PropertyValue::Floating32` could be matched but their types not
+  named without reaching into `mapi_proto`.
 
 ### Changed
 
