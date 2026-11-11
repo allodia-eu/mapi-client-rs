@@ -11,6 +11,8 @@
 //! [MS-OXCMAPIHTTP] §3.1.4 — client higher-layer triggered events
 //! [MS-OXCMAPIHTTP] §2.2.3.3.3 — `X-ResponseCode` 15, one request at a time
 
+use core::time::Duration;
+
 use crate::error::{Error, Result};
 use crate::http::{
     ConnectResponse, CookieJar, ExecuteResponse, Headers, Lcid, Payload, Request, RequestType,
@@ -22,6 +24,7 @@ use crate::rop::{Decoding, ObjectHandle, RopBatch, RopBuffer, decode_all};
 mod builder;
 mod columns;
 mod outcome;
+mod verdict;
 
 pub use builder::SessionBuilder;
 pub use outcome::{Connected, Execution, Outcome};
@@ -96,6 +99,9 @@ pub struct Session {
     pending: Option<Pending>,
     /// Whether a request was given up on before its response arrived. See [`Session::abandon`].
     abandoned: bool,
+    /// What the last response said about the Session Context's lifetime. See
+    /// [`Session::expiration`].
+    expiration: Option<Duration>,
     connected: bool,
     table_columns: Vec<(ObjectHandle, Vec<PropertyTag>)>,
 }
@@ -174,6 +180,28 @@ impl Session {
             self.table_columns.clear();
         }
         abandoned
+    }
+
+    /// How long the server said it will keep this Session Context once nothing more is sent, as
+    /// the last response reported it — `None` when that response said nothing.
+    ///
+    /// [MS-OXCMAPIHTTP] §2.2.3.3.8 has the server return `X-ExpirationInfo` "in every response",
+    /// but it describes a Session Context, and a response about none carries none. Measured
+    /// against Exchange Server SE `15.02.2562.056`: a `PING` carrying no session's cookies, and
+    /// every response with a failing `X-ResponseCode`, came back without it. That absence is what
+    /// §3.1.5.3 turns into the difference between a `PING` that refreshed the idle-time timer and
+    /// one that merely reached the endpoint: only "a successful PING response containing the
+    /// X-ExpirationInfo header" verifies the refresh.
+    ///
+    /// **The value moves.** Measured on the same build: 300,000 ms in the `Connect` response, then
+    /// 900,000 ms in every response once a `RopLogon` had run — so a deadline is worth taking from
+    /// the most recent response, never from the first.
+    ///
+    /// A duration rather than a deadline: this crate has no clock. The caller adds it to the time
+    /// the request went out, which errs early by however long the request took.
+    #[must_use]
+    pub const fn expiration(&self) -> Option<Duration> {
+        self.expiration
     }
 
     /// The session cookies, which identify the Session Context to the server.
@@ -346,17 +374,22 @@ impl Session {
             self.cookies.absorb(value);
         }
 
+        // Read before anything can fail, so that a response that said nothing about the context's
+        // lifetime — one with no X-ResponseCode at all, say — clears the last one rather than
+        // leaving it to be taken for this response's.
+        let payload = Payload::parse(payload);
+        self.expiration = verdict::expiration(headers, &payload);
+
         let code = headers
             .get("X-ResponseCode")
             .and_then(|value| value.trim().parse::<u32>().ok())
             .map(ResponseCode::new)
             .ok_or(Error::MissingResponseCode)?;
 
-        let payload = Payload::parse(payload);
         if !code.is_success() {
             return Err(Error::Transport {
                 code,
-                diagnostic: diagnostic(payload.body()),
+                diagnostic: verdict::diagnostic(payload.body()),
             });
         }
 
@@ -486,27 +519,6 @@ impl Session {
 
         Request::new(request_type, headers, body)
     }
-}
-
-/// Extracts whatever diagnostic text a server put in a failure body.
-///
-/// Servers answer a rejected request with an HTML error page rather than a protocol body, and the
-/// one sentence in it is often the only statement of what was actually wrong.
-fn diagnostic(body: &[u8]) -> Option<String> {
-    // A binary body is a protocol response that arrived under a failing code, not a message; only
-    // something that is legible as text can be quoted back to a human.
-    let text = core::str::from_utf8(body).ok()?;
-    let paragraph = text
-        .split_once("<p>")
-        .and_then(|(_, tail)| tail.split_once("</p>"))
-        .map(|(inner, _)| inner);
-
-    let text = paragraph.unwrap_or(text).trim();
-    let legible = !text.is_empty()
-        && !text.contains('<')
-        && !text.chars().any(|c| c.is_control() && !c.is_whitespace());
-
-    legible.then(|| text.chars().take(200).collect())
 }
 
 #[cfg(test)]

@@ -20,7 +20,7 @@ const DEADLINES_MS: [u64; 9] = [0, 1, 2, 3, 5, 8, 13, 21, 34];
 #[tokio::test]
 #[ignore = "needs a live Exchange Server; run scripts\\Test-Live.ps1"]
 async fn a_request_given_up_on_still_lets_the_connection_disconnect() {
-    let client = super::client();
+    let client = crate::client();
     let mut abandoned = 0_usize;
 
     for deadline in DEADLINES_MS {

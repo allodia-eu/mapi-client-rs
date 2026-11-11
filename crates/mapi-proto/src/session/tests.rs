@@ -542,3 +542,4 @@ fn a_session_can_be_built_with_its_own_identity() {
 }
 
 mod abandon;
+mod expiry;

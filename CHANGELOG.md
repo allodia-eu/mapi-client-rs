@@ -29,6 +29,10 @@ mailbox as it was first provisioned.
 
 ### Measured, and worth knowing
 
+- **A Session Context's idle lifetime is five minutes until the logon, and fifteen after.** On
+  `15.02.2562.056`, the `Connect` response carries `X-ExpirationInfo: 300000`, and every response
+  once `RopLogon` has run carries `900000`. A `PING` with the session's cookies carries it too,
+  and one with none does not, which is what tells the refresh apart from a mere answer.
 - **The logon's `ReplId` is not the replica a mailbox's ids are numbered in.** [MS-OXCSTOR]
   §2.2.1.1.3 calls it "the replica ID for the logon". On `15.02.2562.056` it was 5, while every id
   in the mailbox carried REPLID 1 under a GUID only `RopLongTermIdFromId` returns. A checkpoint
@@ -139,6 +143,13 @@ mailbox as it was first provisioned.
   wait for `ServerBusy` or a buffer for anything else. On Exchange Server SE `15.02.2562.056`, a
   refusal with `ecNotSupported` carried the nine bytes of the transfer fields and an empty buffer.
   Reading any of them as a bare failure would desynchronise the rest of the buffer.
+
+- **`Connection::expires_at` and `keep_alive`, and the same on `Logon`.** Every response's
+  `X-ExpirationInfo` ([MS-OXCMAPIHTTP] §2.2.3.3.8) now sets a deadline, counted from when the
+  request left. `keep_alive` sends a `PING` carrying the session's cookies, and counts it as a
+  refresh only when the response carries `X-ExpirationInfo` (§3.1.5.3): one without it is
+  `Error::NotRefreshed`. `Session::expiration` is the sans-io half, reporting what the last
+  response said.
 
 ### Changed
 

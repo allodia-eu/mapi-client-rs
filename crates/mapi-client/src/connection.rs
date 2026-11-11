@@ -15,6 +15,7 @@
 //! [MS-OXCMAPIHTTP] §2.2.3.3.3 — `X-ResponseCode` 15
 
 use std::borrow::Cow;
+use std::time::Instant;
 
 use mapi_proto::{
     Connected, Execution, LegacyDn, Outcome, Request, ResponseCode, RopBatch, RopResponse, Session,
@@ -54,21 +55,29 @@ pub struct Connection {
     user_dn: LegacyDn,
     /// Why this connection stopped being usable, if it did. See [`Error::Poisoned`].
     poison: Option<Cow<'static, str>>,
+    /// When the server will time the Session Context out, by the last response that said. See
+    /// [`expires_at`](Self::expires_at).
+    expires_at: Option<Instant>,
 }
 
 impl Connection {
-    pub(crate) const fn new(
+    pub(crate) fn new(
         transport: Transport,
         session: Session,
         connected: Connected,
         user_dn: LegacyDn,
+        sent: Instant,
     ) -> Self {
+        let expires_at = session
+            .expiration()
+            .and_then(|lifetime| sent.checked_add(lifetime));
         Self {
             transport,
             session,
             connected,
             user_dn,
             poison: None,
+            expires_at,
         }
     }
 
@@ -79,6 +88,70 @@ impl Connection {
     #[must_use]
     pub const fn server(&self) -> &Connected {
         &self.connected
+    }
+
+    /// When the server will time this Session Context out if nothing more is sent, by the most
+    /// recent response that said — or `None` if none has.
+    ///
+    /// Every request that reaches the Session Context restarts the server's idle-time timer, and
+    /// the response says how long the new idle period is ([MS-OXCMAPIHTTP] §2.2.3.3.8). The
+    /// deadline is counted from when the request went out rather than from when the answer came
+    /// back, so it errs early, by however long the round trip took, and never late.
+    ///
+    /// **It is not fixed.** Measured against Exchange Server SE `15.02.2562.056`: the `Connect`
+    /// response gives five minutes, and every response once the logon has run gives fifteen.
+    ///
+    /// **It is on this machine's monotonic clock, and the server's timer is not.** A machine
+    /// suspended for a while — a laptop closed, a virtual machine paused — resumes with a deadline
+    /// that has not moved, for a Session Context the server has long since timed out. Measured on
+    /// the same build: a lab whose clock jumped nine hours across a suspend answered the next
+    /// `PING`, sent twelve minutes after the last request by the monotonic clock, with
+    /// `X-ResponseCode` 10, "Unable to find session context based on cookie".
+    ///
+    /// [`keep_alive`](Self::keep_alive) moves it without doing anything else.
+    ///
+    /// [MS-OXCMAPIHTTP] §3.1.2 — the idle-time timer
+    #[must_use]
+    pub const fn expires_at(&self) -> Option<Instant> {
+        self.expires_at
+    }
+
+    /// Keeps the Session Context alive: a `PING` carrying its cookies, which restarts the
+    /// server's idle-time timer and does nothing else.
+    ///
+    /// Returns the new [deadline](Self::expires_at). [MS-OXCMAPIHTTP] §3.1.5.3 has the client
+    /// "pass all of the session context cookies", and counts the PING as a refresh only when
+    /// "a successful PING response containing the X-ExpirationInfo header" comes back — success
+    /// alone proves nothing, because a `PING` naming no Session Context succeeds too. So a
+    /// response without that header is an error here, not a refresh.
+    ///
+    /// Send it well before the deadline: §3.1.5.3 says to "allow for network latency". Any other
+    /// request refreshes the timer just as well, so a session in use needs none.
+    ///
+    /// # Cancellation
+    ///
+    /// Safe to drop part way, like every request here: see [`Connection`].
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotRefreshed`] for a successful `PING` that did not say the timer was
+    /// refreshed, and whatever the round trip failed with.
+    ///
+    /// [MS-OXCMAPIHTTP] §3.1.5.3 — keeping a Session Context alive
+    /// [MS-OXCMAPIHTTP] §2.2.6 — `PING`
+    pub async fn keep_alive(&mut self) -> Result<Instant> {
+        self.usable()?;
+        let request = self.session.begin_ping()?;
+        match self.round_trip(request).await? {
+            Outcome::Pong => match (self.session.expiration(), self.expires_at) {
+                (Some(_), Some(deadline)) => Ok(deadline),
+                _ => Err(Error::NotRefreshed),
+            },
+            other => Err(Error::Unexpected {
+                expected: "a PING response",
+                found: describe(&other),
+            }),
+        }
     }
 
     /// Logs on to the mailbox, which is what every later ROP hangs off.
@@ -242,10 +315,17 @@ impl Connection {
     /// disconnect that frees the server's context.
     async fn round_trip(&mut self, request: Request) -> Result<Outcome> {
         self.poison = Some(Cow::Borrowed(ABANDONED));
+        let sent = Instant::now();
         match self.transport.send(&request).await {
             Ok((headers, body)) => {
                 self.poison = None;
-                Ok(self.session.on_response(&headers, &body)?)
+                let outcome = self.session.on_response(&headers, &body);
+                // Kept from the last response that said, rather than cleared by one that did not:
+                // a refusal carries no expiration, and says nothing about the deadline it lacks.
+                if let Some(lifetime) = self.session.expiration() {
+                    self.expires_at = sent.checked_add(lifetime);
+                }
+                Ok(outcome?)
             }
             Err(error) => {
                 // The request went out and no answer came back, so whether the server acted on it

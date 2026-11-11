@@ -136,6 +136,7 @@ impl MapiClient {
     pub async fn connect(&self) -> Result<Connection> {
         let mut session = self.session();
         let request = session.begin_connect(&self.user_dn)?;
+        let sent = std::time::Instant::now();
         let (headers, body) = self.transport.send(&request).await?;
 
         match session.on_response(&headers, &body)? {
@@ -144,6 +145,7 @@ impl MapiClient {
                 session,
                 connected,
                 self.user_dn.clone(),
+                sent,
             )),
             other => Err(Error::Unexpected {
                 expected: "a Connect response",

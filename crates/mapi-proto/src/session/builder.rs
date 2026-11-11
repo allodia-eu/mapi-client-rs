@@ -132,6 +132,7 @@ impl SessionBuilder {
             cookies: CookieJar::new(),
             pending: None,
             abandoned: false,
+            expiration: None,
             connected: false,
             table_columns: Vec::new(),
         }
