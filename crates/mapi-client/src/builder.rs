@@ -12,17 +12,10 @@ use crate::error::{Error, Result};
 use crate::observer::Observer;
 use crate::transport::{HttpSettings, Transport};
 
-/// How long to wait for a whole request/response exchange.
-///
-/// A server working on a request holds the connection open and emits a `PENDING` keep-alive every
-/// 30 seconds by default, so a timeout has to be a multiple of that to mean anything: this one
-/// allows three. Anything shorter measures the keep-alive interval rather than the server.
-///
-/// [MS-OXCMAPIHTTP] §2.2.3.3.5 — `X-PendingPeriod`, default 30000 ms
-const DEFAULT_TIMEOUT: Duration = Duration::from_secs(90);
+/// How long a request may take, and how long it may go quiet.
+mod timeouts;
 
-/// How long to wait for the TCP connection and TLS handshake alone.
-const DEFAULT_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
+use timeouts::{DEFAULT_CONNECT_TIMEOUT, DEFAULT_STALL_TIMEOUT, DEFAULT_TIMEOUT};
 
 /// `X-ClientApplication`'s documented format is `Outlook/15.xx.xxxx.xxxx`, and servers parse it as
 /// a version, so the default is a value in that shape rather than this crate's own name.
@@ -67,7 +60,8 @@ pub struct MapiClientBuilder {
     pub(crate) credentials: Credentials,
     client_application: String,
     locale: Lcid,
-    pub(crate) timeout: Duration,
+    pub(crate) timeout: Option<Duration>,
+    pub(crate) stall_timeout: Duration,
     pub(crate) connect_timeout: Duration,
     root_certificates: Vec<Vec<u8>>,
     accept_invalid_certificates: bool,
@@ -97,7 +91,8 @@ impl MapiClientBuilder {
             credentials: Credentials::None,
             client_application: DEFAULT_CLIENT_APPLICATION.to_owned(),
             locale: Lcid::EN_US,
-            timeout: DEFAULT_TIMEOUT,
+            timeout: Some(DEFAULT_TIMEOUT),
+            stall_timeout: DEFAULT_STALL_TIMEOUT,
             connect_timeout: DEFAULT_CONNECT_TIMEOUT,
             root_certificates: Vec::new(),
             accept_invalid_certificates: false,
@@ -192,10 +187,12 @@ impl MapiClientBuilder {
         self
     }
 
-    /// How long one request/response exchange may take. Defaults to 90 seconds.
+    /// How long one request/response exchange may take, all told. Defaults to 90 seconds; see
+    /// [`no_timeout`](Self::no_timeout) and [`stall_timeout`](Self::stall_timeout) for a request
+    /// that may legitimately take longer.
     #[must_use]
     pub const fn timeout(mut self, timeout: Duration) -> Self {
-        self.timeout = timeout;
+        self.timeout = Some(timeout);
         self
     }
 
@@ -299,6 +296,7 @@ impl MapiClientBuilder {
     fn settings(&self) -> Result<HttpSettings> {
         Ok(HttpSettings {
             timeout: self.timeout,
+            stall_timeout: self.stall_timeout,
             connect_timeout: self.connect_timeout,
             root_certificates: crate::transport::parse_certificates(&self.root_certificates)?,
             accept_invalid_certificates: self.accept_invalid_certificates,

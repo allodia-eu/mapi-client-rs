@@ -11,5 +11,8 @@ mod cancellation;
 /// What a context's lifetime is, and that a `PING` restarts it.
 mod expiry;
 
+/// A response read as it arrives: the meta-tags told as they come.
+mod keepalive;
+
 /// Replacing a Session Context: what a reconnect costs and what it keeps.
 mod reconnect;

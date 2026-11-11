@@ -22,6 +22,10 @@ pub(crate) enum Act {
     HangUp,
     /// Read all of it, write these bytes, then close: an answer cut off part way.
     Partial(Vec<u8>),
+    /// Answer it as Exchange answers a long request: a chunked body whose pieces are written one
+    /// at a time, each after its wait — `PROCESSING` first, `PENDING` while "working", then
+    /// the rest.
+    Stream(Vec<(core::time::Duration, Vec<u8>)>),
 }
 
 /// One request as the server read it.
@@ -133,9 +137,38 @@ async fn serve(mut stream: TcpStream, shared: Arc<Shared>) {
                 let _ = stream.flush().await;
                 return;
             }
+            Some(Act::Stream(pieces)) => {
+                if stream_chunked(&mut stream, &pieces).await.is_err() {
+                    return;
+                }
+            }
             Some(Act::HangUp) | None => return,
         }
     }
+}
+
+/// Writes a successful MAPI response in chunked pieces, each after its wait.
+async fn stream_chunked(
+    stream: &mut TcpStream,
+    pieces: &[(core::time::Duration, Vec<u8>)],
+) -> std::io::Result<()> {
+    stream
+        .write_all(
+            b"HTTP/1.1 200 OK\r\nContent-Type: application/mapi-http\r\nX-ResponseCode: 0\r\n\
+              Transfer-Encoding: chunked\r\n\r\n",
+        )
+        .await?;
+    for (wait, piece) in pieces {
+        tokio::time::sleep(*wait).await;
+        stream
+            .write_all(format!("{:x}\r\n", piece.len()).as_bytes())
+            .await?;
+        stream.write_all(piece).await?;
+        stream.write_all(b"\r\n").await?;
+        stream.flush().await?;
+    }
+    stream.write_all(b"0\r\n\r\n").await?;
+    stream.flush().await
 }
 
 /// One request: the head up to the blank line, then `Content-Length` bytes of body.

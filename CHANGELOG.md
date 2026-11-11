@@ -29,6 +29,17 @@ mailbox as it was first provisioned.
 
 ### Measured, and worth knowing
 
+- **Exchange's keep-alives are quicker than it says.** On `15.02.2562.056`, a request the server
+  held open for 329.6 seconds announced `X-PendingPeriod: 30000` and sent `PENDING` every 18
+  seconds, the first after 16.5. Every ordinary response arrives as `PROCESSING`, then `DONE`.
+- **Idle Session Contexts time out when they say they will.** A context with no logon answered at
+  280 seconds idle and was gone by 330; one with a logon answered at 880 and was gone by 960. A
+  `PING` at 800 seconds kept one alive to 1600. The context's expiry is reported as `X-ResponseCode`
+  10, "Unable to find session context based on cookie".
+- **`X-TunnelExpirationTime` is not a Session Context's lifetime.** The `Connect` response carries
+  `x-tunnelexpirationtime: 1800000`, and no other response does; no pinned document names it. A
+  context kept alive by nothing but a `PING` every two minutes was still usable after 40, so
+  whatever it bounds, it is not that.
 - **What Exchange answers for a Session Context it does not have.** On `15.02.2562.056`: 10 for one
   replaced by a reconnect, for one disconnected, and for the right cookies sent with another
   account's credentials; 13 with `MapiContext` or `MapiSequence` left out; 6 for a `MapiContext`
@@ -179,8 +190,20 @@ mailbox as it was first provisioned.
   Unlike `abandon`, the Session Context is untouched, and the request counter is put back so the
   same request built again is the same bytes.
 
+- **A bound on silence: `MapiClientBuilder::stall_timeout`, and `no_timeout` for none on the
+  whole exchange.** A response is read as it arrives, and each piece — `PROCESSING` at once,
+  `PENDING` while the server works — restarts the clock, so a request that is slow and alive never
+  trips it and one that has gone quiet does ([MS-OXCMAPIHTTP] §3.1.5.6). The bound on the whole
+  exchange still applies alongside it unless `no_timeout` removes it. `Error::Timeout`'s `after` names whichever bound elapsed.
+- **`Observer::meta_tag`**, told each meta-tag the moment it arrives. Provided, so existing
+  observers are unaffected. `MetaTag::from_line` reads one preamble line, and `MetaTag` is
+  re-exported from `mapi-client`.
+
 ### Changed
 
+- **A response silent for a minute now fails, whatever the total budget.** The default stall bound
+  is a minute, twice the `X-PendingPeriod` default; the default bound on the whole exchange stays
+  at 90 seconds.
 - **A request that never left is sent once more, and one the server refused unread no longer
   poisons the connection.** [MS-OXCMAPIHTTP] §3.1.7.1 has a request that failed "before streaming
   the request body or while streaming the request body" resubmitted as-is on a new HTTP connection;
