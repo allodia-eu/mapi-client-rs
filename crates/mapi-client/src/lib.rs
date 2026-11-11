@@ -189,7 +189,7 @@ pub use crate::connection::Connection;
 pub use crate::credentials::Credentials;
 pub use crate::download::Download;
 pub use crate::draft::{NewAttachment, NewMessage, SavedMessage};
-pub use crate::error::{Error, Result};
+pub use crate::error::{Delivery, Error, Result};
 pub use crate::folder::Folder;
 #[cfg(feature = "ntlm")]
 pub use crate::handshake::Authentication;

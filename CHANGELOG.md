@@ -171,8 +171,23 @@ mailbox as it was first provisioned.
   for one Session Context's logon be sent to its successor, and say when that is meaningless.
   `RopBatch` is now `Clone`, and `ResponseCode` is re-exported from `mapi-client`.
 
+- **`Error::delivery`, and the `Delivery` it returns: how far a failed request got.** `NotSent`,
+  `Refused`, `Unknown` or `Processed` — [MS-OXCMAPIHTTP] §3.1.7's two failure phases, and the two
+  ways a server can answer, for every error. A write can be retried after the first two and not
+  assumed either way after `Unknown`.
+- **`Session::retract`**, for a request whose transport failed before any of it reached the server.
+  Unlike `abandon`, the Session Context is untouched, and the request counter is put back so the
+  same request built again is the same bytes.
+
 ### Changed
 
+- **A request that never left is sent once more, and one the server refused unread no longer
+  poisons the connection.** [MS-OXCMAPIHTTP] §3.1.7.1 has a request that failed "before streaming
+  the request body or while streaming the request body" resubmitted as-is on a new HTTP connection;
+  a failed TCP or TLS connect is now resent once before it is reported, and leaves the connection
+  usable either way. A 401, any other 3xx or 4xx, and a failing `X-ResponseCode` given up front did
+  not reach the Session Context, so they leave it usable as well. A request sent whole and never
+  answered — a timeout, a reset, a 5xx — still poisons it (§3.1.7.2), and `reconnect` is the remedy.
 - **Every `mapi-client` request can be dropped part way without wedging anything.** The connection
   is marked poisoned before each request goes out and cleared once the answer is in hand, so a
   dropped future leaves `Error::Poisoned` naming the abandonment, never a session stuck waiting.

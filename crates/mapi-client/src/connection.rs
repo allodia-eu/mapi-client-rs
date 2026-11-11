@@ -22,7 +22,7 @@ use mapi_proto::{
 };
 
 use crate::describe;
-use crate::error::{Error, Result};
+use crate::error::{Delivery, Error, Result};
 use crate::logon::Logon;
 use crate::transport::Transport;
 
@@ -408,7 +408,17 @@ impl Connection {
     async fn round_trip(&mut self, request: Request) -> Result<Outcome> {
         self.poison = Some(Cow::Borrowed(ABANDONED));
         let sent = Instant::now();
-        match self.transport.send(&request).await {
+        let mut reply = self.transport.send(&request).await;
+        if reply
+            .as_ref()
+            .is_err_and(|error| error.delivery() == Delivery::NotSent)
+        {
+            // [MS-OXCMAPIHTTP] §3.1.7.1: nothing reached the server, so the client "establishes a
+            // new HTTP connection, passing all existing cookies for the Session Context, and then
+            // resubmits the request as-is". The failed connection is not reused; the request is.
+            reply = self.transport.send(&request).await;
+        }
+        match reply {
             Ok((headers, body)) => {
                 self.poison = None;
                 let outcome = self.session.on_response(&headers, &body);
@@ -417,13 +427,30 @@ impl Connection {
                 if let Some(lifetime) = self.session.expiration() {
                     self.expires_at = sent.checked_add(lifetime);
                 }
-                outcome.map_err(|error| self.lose(error))
+                outcome.map_err(|error| {
+                    let error = self.lose(error);
+                    // Accepted and then failed: what ran is unknown, and the session no longer
+                    // knows its own handle table, so nothing more goes into this Session Context.
+                    if error.delivery() == Delivery::Unknown {
+                        self.poison = Some(Cow::Owned(error.to_string()));
+                    }
+                    error
+                })
             }
             Err(error) => {
-                // The request went out and no answer came back, so whether the server acted on it
-                // is unknowable. Sending the next request regardless is how a client ends up
-                // reading the answer to the previous one.
-                self.poison = Some(Cow::Owned(error.to_string()));
+                match error.delivery() {
+                    // The server never had it, or refused it unread: the Session Context is as it
+                    // was, and the request is taken back so that sending it again is the same
+                    // request rather than the next one.
+                    Delivery::NotSent | Delivery::Refused => {
+                        self.session.retract();
+                        self.poison = None;
+                    }
+                    // The request went out and no answer came back, so whether the server acted on
+                    // it is unknowable ([MS-OXCMAPIHTTP] §3.1.7.2). Sending the next request
+                    // regardless is how a client ends up reading the answer to the previous one.
+                    _ => self.poison = Some(Cow::Owned(error.to_string())),
+                }
                 Err(error)
             }
         }

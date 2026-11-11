@@ -95,7 +95,9 @@ hickory-resolver = { version = "0.26", default-features = false, features = [
 # `negotiate-auth`'s test KDC, so that the Kerberos path runs end to end in CI, where no domain
 # controller is. Only the tests see the feature.
 negotiate-auth = { workspace = true, features = ["testing"] }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "time"] }
+# `net` and `io-util` for the fault-injecting server in `tests/support/fault.rs`, which has to be
+# able to stop listening and to hang up on a request it has read — neither of which wiremock does.
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "time", "net", "io-util"] }
 wiremock = "0.6"
 
 [lints]
