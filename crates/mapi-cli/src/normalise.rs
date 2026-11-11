@@ -85,10 +85,26 @@ const EXECUTE_ROP_BUFFER_SIZE: usize = 12;
 const LOGON_TIMES: usize = 146;
 const LOGON_TIMES_LEN: usize = 16;
 
-/// Normalises a response payload, reporting everything it changed.
+/// Normalises a scenario's response payloads, given in the order they were exchanged, reporting
+/// everything changed in each.
 ///
-/// The payload is the whole thing an HTTP client handed over: preamble first, then the body.
-pub(crate) fn response(request_type: RequestType, payload: &mut Vec<u8>) -> Vec<String> {
+/// Each payload is the whole thing an HTTP client handed over: preamble first, then the body. They
+/// are taken together because one thing here is not a property of one response: an incremental
+/// download's final state can begin in one and end in the next. See [`state`].
+pub(crate) fn responses(payloads: &mut [(RequestType, Vec<u8>)]) -> Vec<Vec<String>> {
+    // Before anything else, while every payload still has the length it arrived with. It changes
+    // none, and finds its own way into each.
+    let states = state::cnset_bounds(payloads);
+    payloads
+        .iter_mut()
+        .zip(states)
+        .map(|((request_type, payload), state)| response(*request_type, payload, state))
+        .collect()
+}
+
+/// Normalises one response payload, reporting everything it changed, with `state` what
+/// [`state::cnset_bounds`] already changed in it.
+fn response(request_type: RequestType, payload: &mut Vec<u8>, state: Vec<String>) -> Vec<String> {
     // First, because it can change the payload's length and therefore every offset below it.
     let mut changed = preamble(payload);
 
@@ -104,7 +120,7 @@ pub(crate) fn response(request_type: RequestType, payload: &mut Vec<u8>) -> Vec<
         }
         RequestType::Execute => {
             changed.extend(logon_times(payload, body));
-            changed.extend(state::cnset_bounds(payload, body));
+            changed.extend(state);
             let at = execute_auxiliary_size_at(payload, body);
             changed.extend(auxiliary(payload, at));
         }

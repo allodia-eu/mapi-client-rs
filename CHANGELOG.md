@@ -176,6 +176,13 @@ mailbox as it was first provisioned.
   `Resolve-Path -Relative`, as `Verify-Fixtures.ps1` already did for the same reason. Only the
   scratch manifest was ever wrong: the comparison skips `MANIFEST.toml`, and the committed one is
   built from a long path.
+- **A final ICS state split across two `RopFastTransferSourceGetBuffer` responses was not
+  normalised.** Capture rewrites the state's mailbox-wide `MetaTagCnsetSeen` bound one response at
+  a time, so a buffer ending inside the state left the bound as it arrived. `Verify-Fixtures.ps1`
+  would then have reported a difference on every run. No committed scenario splits one, so nothing
+  in the corpus moves. The normaliser now joins each download's buffers into one stream, and
+  rewrites a bound that straddles two responses in both of them. A test splits a state at every
+  offset, and another checks that every committed scenario normalises to itself.
 
 ### Security
 

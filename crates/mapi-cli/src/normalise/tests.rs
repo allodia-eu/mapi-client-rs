@@ -2,6 +2,15 @@ use mapi_proto::Payload;
 
 use super::*;
 
+/// One payload, normalised as a scenario of one.
+fn response(request_type: RequestType, payload: &mut Vec<u8>) -> Vec<String> {
+    let mut one = [(request_type, core::mem::take(payload))];
+    let changed = responses(&mut one).into_iter().next().unwrap_or_default();
+    let [(_, normalised)] = one;
+    *payload = normalised;
+    changed
+}
+
 /// A `Connect` success payload with a given retry delay, elapsed time and auxiliary buffer.
 fn connect_payload(retry_delay: u32, elapsed: &str, auxiliary: &[u8]) -> Vec<u8> {
     let mut payload = format!("PROCESSING\r\nDONE\r\nX-ElapsedTime: {elapsed}\r\n\r\n")
@@ -236,4 +245,56 @@ fn a_preamble_with_nothing_to_change_is_not_rewritten() {
     let before = payload.clone();
     assert!(response(RequestType::Ping, &mut payload).is_empty());
     assert_eq!(payload, before);
+}
+
+/// Every committed scenario is already normal: normalising its responses together, as capture
+/// does, changes nothing and reports nothing. This is the real corpus, so it is also the check that
+/// joining a download's responses into one stream finds nothing to rewrite in bytes that are not a
+/// state — nine scenarios of `RopFastTransferSourceGetBuffer` runs and everything around them.
+#[test]
+fn every_committed_scenario_normalises_to_itself() {
+    let corpus =
+        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../fixtures/exchange-se");
+    let mut scenarios = 0;
+    for scenario in std::fs::read_dir(&corpus).unwrap() {
+        let scenario = scenario.unwrap().path();
+        let mut files: Vec<_> = std::fs::read_dir(&scenario)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.to_string_lossy().ends_with(".response.bin"))
+            .collect();
+        files.sort();
+        let mut payloads: Vec<_> = files
+            .iter()
+            .map(|path| {
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                let kind = name.split(['-', '.']).nth(1).unwrap().to_owned();
+                let request_type = [
+                    RequestType::Connect,
+                    RequestType::Execute,
+                    RequestType::Disconnect,
+                    RequestType::Ping,
+                ]
+                .into_iter()
+                .find(|known| known.as_str().eq_ignore_ascii_case(&kind))
+                .unwrap_or_else(|| panic!("{name}: no request type {kind}"));
+                (request_type, std::fs::read(path).unwrap())
+            })
+            .collect();
+        let before = payloads.clone();
+
+        let changed = responses(&mut payloads);
+        assert!(
+            changed.iter().all(Vec::is_empty),
+            "{}: {changed:?}",
+            scenario.display()
+        );
+        assert!(payloads == before, "{}", scenario.display());
+        scenarios += 1;
+    }
+    assert!(
+        scenarios >= 9,
+        "found {scenarios} scenarios under {}",
+        corpus.display()
+    );
 }

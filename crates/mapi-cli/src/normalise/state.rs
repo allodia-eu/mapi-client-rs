@@ -14,8 +14,40 @@
 //! Anything else is left exactly as it arrived, so a server that one day encodes the state
 //! differently shows up as a difference rather than being silently reshaped.
 //!
+//! # A state split across two responses
+//!
+//! The stream is one stream however many `RopFastTransferSourceGetBuffer` responses carry it, and
+//! a buffer can end between any two atoms of it or anywhere inside a variable-size value — inside
+//! the state, inside the bound itself ([MS-OXCFXICS] §2.2.4.1). So the state is looked for in each
+//! download's buffers joined end to end, not in each response alone, and a bound that straddles
+//! two of them is rewritten in both.
+//!
+//! A run starts only at a response whose ROP list ends with a successful
+//! `RopFastTransferSourceGetBuffer` — a download's first response, which carries the configuration
+//! before it, or a later one. The `RopFastTransferSourceGetBuffer` is the last ROP a download
+//! sends, so it is found from the end of the list: the one whose `TransferBufferSize` accounts for
+//! every byte up to the end `RopSize` gives, with a zero `ReturnValue` and `Reserved`. What follows
+//! is the handle table, so that is where each response joined is cut.
+//!
+//! A response continues the run before it when its ROP list is that
+//! `RopFastTransferSourceGetBuffer` and nothing else, which is how every request after a
+//! download's first is answered. A refused one — `ServerBusy`, whose retry carries the buffer — is
+//! passed over without ending the run, and a `TransferStatus` of `Done` ends it. Any other response
+//! ends it too, a table read or a failed `Execute` among them, and is searched for a state on its
+//! own.
+//!
 //! [MS-OXCFXICS] §2.2.4.3.25 — `state` element
+//! [MS-OXCFXICS] §2.2.4.1 — where a stream may be split
+//! [MS-OXCFXICS] §2.2.3.1.1.5.2 — `TransferStatus`
 //! [MS-OXCFXICS] §2.2.2.6 — GLOBSET commands
+//! [MS-OXCROPS] §2.2.12.4.2 — `RopFastTransferSourceGetBuffer` response buffer
+//! [MS-OXCRPC] §3.1.4.2.1.1.1 — `rgbIn`: `RopSize`, then the ROP list, then the handle table
+
+use core::ops::Range;
+
+use mapi_proto::RequestType;
+
+use super::{EXECUTE_ROP_LIST, body_offset, succeeded};
 
 /// `IncrSyncStateBegin`, as the stream writes it. [MS-OXCFXICS] §2.2.4.1.4
 const STATE_BEGIN: [u8; 4] = [0x03, 0x00, 0x3A, 0x40];
@@ -30,19 +62,228 @@ const IDSET_GIVEN: u32 = 0x4017_0003;
 /// The bytes a rewritten bound's low-order part becomes.
 const CANONICAL: u8 = 0xFF;
 
-/// Rewrites the mailbox-wide bound of every final state in an `Execute` response, reporting each.
-pub(super) fn cnset_bounds(payload: &mut [u8], body: usize) -> Vec<String> {
+/// `RopFastTransferSourceGetBuffer`'s id. [MS-OXCROPS] §2.2.12.4.2
+const ROP_GET_BUFFER: u8 = 0x4E;
+/// Where `RopSize` sits in an `Execute` body: just before the ROP list.
+const EXECUTE_ROP_SIZE: usize = EXECUTE_ROP_LIST - 2;
+/// Where a `RopFastTransferSourceGetBuffer` response's `ReturnValue`, `TransferBufferSize` and
+/// `TransferBuffer` sit, from its `RopId`: `InputHandleIndex` (1), then after `ReturnValue` (4)
+/// `TransferStatus`, `InProgressCount` and `TotalStepCount` (2 each) and `Reserved` (1).
+const GET_BUFFER_RETURN_VALUE: usize = 2;
+const GET_BUFFER_STATUS: usize = 6;
+const GET_BUFFER_RESERVED: usize = 12;
+const GET_BUFFER_SIZE: usize = 13;
+const GET_BUFFER_BUFFER: usize = 15;
+/// `TransferStatus` `Done`: the last portion of the stream. [MS-OXCFXICS] §2.2.3.1.1.5.2
+const DONE: u16 = 0x0003;
+
+/// What an `Execute` response's ROP list is, as far as continuing a stream goes.
+enum Shape {
+    /// A ROP list that ends with a successful `RopFastTransferSourceGetBuffer`.
+    Buffer {
+        /// Where the `TransferBuffer` starts.
+        start: usize,
+        /// Whether its `TransferStatus` is `Done`.
+        done: bool,
+        /// Whether it is the only ROP in the list: a download's later responses, not its first.
+        alone: bool,
+    },
+    /// A `RopFastTransferSourceGetBuffer` refused, which carries no buffer.
+    Refused,
+    /// Anything else.
+    Other,
+}
+
+/// Rewrites the mailbox-wide bound of every final state in a scenario's responses, given in the
+/// order they were exchanged, and reports each change against every response whose bytes it
+/// touched.
+pub(super) fn cnset_bounds(responses: &mut [(RequestType, Vec<u8>)]) -> Vec<Vec<String>> {
+    let mut changed = vec![Vec::new(); responses.len()];
+    for run in runs(responses) {
+        let original: Vec<u8> = run
+            .iter()
+            .filter_map(|(index, bytes)| responses.get(*index)?.1.get(bytes.clone()))
+            .flatten()
+            .copied()
+            .collect();
+        if find(&original, 0, &STATE_BEGIN).is_none() {
+            continue;
+        }
+        let mut stream = original.clone();
+        // Where each response's bytes start in the joined stream.
+        let starts: Vec<usize> = run
+            .iter()
+            .scan(0_usize, |at, (_, bytes)| {
+                let start = *at;
+                *at = at.saturating_add(bytes.len());
+                Some(start)
+            })
+            .collect();
+        // The response, and the offset in it, that a byte of the joined stream came from.
+        let origin = |at: usize| -> Option<(usize, usize)> {
+            let segment = starts
+                .partition_point(|start| *start <= at)
+                .checked_sub(1)?;
+            let (index, bytes) = run.get(segment)?;
+            let offset = at.checked_sub(*starts.get(segment)?)?;
+            Some((*index, bytes.start.checked_add(offset)?))
+        };
+        for (tag, value) in rewrite(&mut stream) {
+            let mut touched: Vec<usize> = Vec::new();
+            for at in value.filter(|at| stream.get(*at) != original.get(*at)) {
+                let Some((index, offset)) = origin(at) else {
+                    continue;
+                };
+                if let (Some(slot), Some(byte)) = (
+                    responses
+                        .get_mut(index)
+                        .and_then(|(_, payload)| payload.get_mut(offset)),
+                    stream.get(at),
+                ) {
+                    *slot = *byte;
+                }
+                if touched.last() != Some(&index) {
+                    touched.push(index);
+                }
+            }
+            for index in &touched {
+                if let Some(changes) = changed.get_mut(*index) {
+                    changes.push(message(tag, touched.len() > 1));
+                }
+            }
+        }
+    }
+    changed
+}
+
+/// Each run of `Execute` responses a download's stream may continue through, as the byte range
+/// of each that the stream can occupy: from the body for the first, and from the
+/// `TransferBuffer` for each that continues it.
+fn runs(responses: &[(RequestType, Vec<u8>)]) -> Vec<Vec<(usize, Range<usize>)>> {
+    let mut runs: Vec<Vec<(usize, Range<usize>)>> = Vec::new();
+    let mut open = false;
+    for (index, (request_type, payload)) in responses.iter().enumerate() {
+        let Some((body, end)) =
+            rop_list_end(payload).filter(|_| *request_type == RequestType::Execute)
+        else {
+            open = false;
+            continue;
+        };
+        match (open, shape(payload, body, end)) {
+            (
+                true,
+                Shape::Buffer {
+                    start,
+                    done,
+                    alone: true,
+                },
+            ) => {
+                if let Some(run) = runs.last_mut() {
+                    run.push((index, start..end));
+                }
+                open = !done;
+            }
+            (true, Shape::Refused) => {}
+            (_, Shape::Buffer { done, .. }) => {
+                runs.push(vec![(index, body..end)]);
+                open = !done;
+            }
+            (_, Shape::Refused | Shape::Other) => {
+                runs.push(vec![(index, body..end)]);
+                open = false;
+            }
+        }
+    }
+    runs
+}
+
+/// Where a successful `Execute` response's body starts and its ROP list ends, if it has the shape
+/// of one.
+fn rop_list_end(payload: &[u8]) -> Option<(usize, usize)> {
+    let body = body_offset(payload).filter(|body| succeeded(payload, *body))?;
+    let at = body.checked_add(EXECUTE_ROP_SIZE)?;
+    let size = u16::from_le_bytes(payload.get(at..at.checked_add(2)?)?.try_into().ok()?);
+    let end = at.checked_add(usize::from(size))?;
+    (end <= payload.len()).then_some((body, end))
+}
+
+/// What this response's ROP list is: one `RopFastTransferSourceGetBuffer` and nothing else, the
+/// shape of a download's later responses, refused or with its buffer — or anything else.
+fn shape(payload: &[u8], body: usize, end: usize) -> Shape {
+    let Some(first) = body.checked_add(EXECUTE_ROP_LIST) else {
+        return Shape::Other;
+    };
+    if payload.get(first) == Some(&ROP_GET_BUFFER)
+        && first
+            .checked_add(GET_BUFFER_RETURN_VALUE)
+            .and_then(|at| u32_at(payload, at))
+            .is_some_and(|value| value != 0)
+    {
+        return Shape::Refused;
+    }
+    // The first offset that reads as the list's last ROP, a successful
+    // `RopFastTransferSourceGetBuffer`. Earlier ROPs in a download's first response are a handful
+    // of bytes each, so it is found before anything its own buffer holds could be read as one.
+    (first..end)
+        .find_map(|rop| last_get_buffer(payload, rop, end))
+        .map_or(Shape::Other, |(start, done)| Shape::Buffer {
+            start,
+            done,
+            alone: start == first.saturating_add(GET_BUFFER_BUFFER),
+        })
+}
+
+/// Where the `TransferBuffer` starts and whether the stream is done, if a successful
+/// `RopFastTransferSourceGetBuffer` response starts at `rop` and ends exactly at `end`.
+fn last_get_buffer(payload: &[u8], rop: usize, end: usize) -> Option<(usize, bool)> {
+    let u16_at = |offset: usize| -> Option<u16> {
+        let at = rop.checked_add(offset)?;
+        Some(u16::from_le_bytes(
+            payload.get(at..at.checked_add(2)?)?.try_into().ok()?,
+        ))
+    };
+    let start = rop.checked_add(GET_BUFFER_BUFFER)?;
+    let anchored = payload.get(rop) == Some(&ROP_GET_BUFFER)
+        && u32_at(payload, rop.checked_add(GET_BUFFER_RETURN_VALUE)?) == Some(0)
+        && payload.get(rop.checked_add(GET_BUFFER_RESERVED)?) == Some(&0)
+        && start.checked_add(usize::from(u16_at(GET_BUFFER_SIZE)?)) == Some(end);
+    anchored.then_some((start, u16_at(GET_BUFFER_STATUS)? == DONE))
+}
+
+/// What a rewritten bound is reported as, in each response that held some of it.
+fn message(tag: u32, split: bool) -> String {
+    format!(
+        "response body: the upper bound of a final state's `{}` rewritten to a constant, because \
+         it is the newest change number in the whole mailbox and moves whenever anything in it is \
+         written ([MS-OXCFXICS] §2.2.4.3.25){}",
+        if tag == BOUNDED[0] {
+            "MetaTagCnsetSeen"
+        } else {
+            "MetaTagCnsetSeenFAI"
+        },
+        if split {
+            "; the value straddles two `RopFastTransferSourceGetBuffer` responses, and this one \
+             holds part of it"
+        } else {
+            ""
+        }
+    )
+}
+
+/// Rewrites the bound of every final state in `stream`, handing back each rewritten property's
+/// tag and where its value lies.
+fn rewrite(stream: &mut [u8]) -> Vec<(u32, Range<usize>)> {
     let mut changed = Vec::new();
-    let mut from = body;
-    while let Some(found) = find(payload, from, &STATE_BEGIN) {
+    let mut from = 0;
+    while let Some(found) = find(stream, from, &STATE_BEGIN) {
         from = found.saturating_add(STATE_BEGIN.len());
-        changed.extend(state(payload, from));
+        changed.extend(state(stream, from));
     }
     changed
 }
 
 /// Walks one state's properties up to `IncrSyncStateEnd`, rewriting the two bounded ones.
-fn state(payload: &mut [u8], mut at: usize) -> Vec<String> {
+fn state(payload: &mut [u8], mut at: usize) -> Vec<(u32, Range<usize>)> {
     let mut changed = Vec::new();
     loop {
         let Some(tag) = u32_at(payload, at) else {
@@ -68,16 +309,7 @@ fn state(payload: &mut [u8], mut at: usize) -> Vec<String> {
             && let Some(value) = payload.get_mut(start..end)
             && bound(value)
         {
-            changed.push(format!(
-                "response body: the upper bound of a final state's `{}` rewritten to a constant, \
-                 because it is the newest change number in the whole mailbox and moves whenever \
-                 anything in it is written ([MS-OXCFXICS] §2.2.4.3.25)",
-                if tag == BOUNDED[0] {
-                    "MetaTagCnsetSeen"
-                } else {
-                    "MetaTagCnsetSeenFAI"
-                }
-            ));
+            changed.push((tag, start..end));
         }
         at = end;
     }
@@ -167,115 +399,4 @@ fn u32_at(payload: &[u8], at: usize) -> Option<u32> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    const GUID: [u8; 16] = [0x34; 16];
-
-    /// A state as Exchange encodes one: `CnsetSeen` and `CnsetSeenFAI` as "1 up to the newest",
-    /// `IdsetGiven` and `CnsetRead` as whatever they are.
-    fn state(seen_high: [u8; 4]) -> Vec<u8> {
-        // As Exchange encodes it: a bare Range, six bytes each side, then End.
-        let globset = |high: [u8; 4]| {
-            let mut out = GUID.to_vec();
-            out.extend_from_slice(&[0x52, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00]);
-            out.extend_from_slice(&high);
-            out.push(0x00);
-            out
-        };
-        let mut out = vec![0xEE, 0xEE];
-        out.extend_from_slice(&STATE_BEGIN);
-        for (tag, value) in [
-            (0x6796_0102_u32, globset(seen_high)),
-            (0x67DA_0102, globset([0x00, 0x00, 0x00, 0x09])),
-            (0x4017_0003, globset([0x00, 0x00, 0x00, 0x05])),
-            (0x67D2_0102, globset([0x18, 0x2A, 0xB3, 0xCB])),
-        ] {
-            out.extend_from_slice(&tag.to_le_bytes());
-            out.extend_from_slice(&u32::try_from(value.len()).unwrap().to_le_bytes());
-            out.extend_from_slice(&value);
-        }
-        out.extend_from_slice(&STATE_END.to_le_bytes());
-        out
-    }
-
-    /// Two captures that differ only in the mailbox's newest change number agree once normalised,
-    /// and nothing else in the state is touched.
-    #[test]
-    fn two_states_that_differ_only_in_the_mailbox_bound_normalise_to_the_same_bytes() {
-        let mut first = state([0x32, 0xB3, 0x77, 0xB6]);
-        let mut second = state([0x32, 0xB3, 0x77, 0xC2]);
-        let untouched = first.clone();
-        assert_eq!(cnset_bounds(&mut first, 0).len(), 2);
-        assert_eq!(cnset_bounds(&mut second, 0).len(), 2);
-        assert_eq!(first, second);
-        assert_eq!(first.len(), untouched.len(), "length-preserving");
-
-        let differing: Vec<usize> = (0..first.len())
-            .filter(|&i| first[i] != untouched[i])
-            .collect();
-        assert_eq!(
-            differing.len(),
-            12,
-            "six bytes in each of the two bounded properties"
-        );
-        assert!(cnset_bounds(&mut first, 0).is_empty(), "idempotent");
-    }
-
-    /// A shape other than the one observed is left alone: here a set with a gap in it.
-    #[test]
-    fn any_other_shape_is_left_exactly_as_it_arrived() {
-        let mut odd = state([0x32, 0xB3, 0x77, 0xB6]);
-        let at = odd
-            .windows(4)
-            .position(|window| window == 0x6796_0102_u32.to_le_bytes())
-            .unwrap();
-        // Turn the first Range's low value into 2: no longer "from 1".
-        odd[at + 8 + 16 + 6] = 0x02;
-        let before = odd.clone();
-        let changed = cnset_bounds(&mut odd, 0);
-        assert_eq!(changed.len(), 1, "only CnsetSeenFAI still has the shape");
-        assert_eq!(odd[..at + 40], before[..at + 40]);
-    }
-
-    #[test]
-    fn a_payload_with_no_state_is_not_touched() {
-        let mut payload = vec![0x4E, 0x00, 0x00, 0x00, 0x00, 0x00, 0x01, 0x00];
-        let before = payload.clone();
-        assert!(cnset_bounds(&mut payload, 0).is_empty());
-        assert_eq!(payload, before);
-
-        let mut cut = state([1, 2, 3, 4]);
-        cut.truncate(30);
-        let before = cut.clone();
-        assert!(
-            cnset_bounds(&mut cut, 0).is_empty(),
-            "a state cut off by its buffer"
-        );
-        assert_eq!(cut, before);
-    }
-
-    /// The pushed form, as [MS-OXCFXICS] §4.5 encodes "1 up to X", is rewritten the same way.
-    #[test]
-    fn the_documents_pushed_form_is_rewritten_too() {
-        let mut idset = GUID.to_vec();
-        idset.extend_from_slice(&[
-            0x03, 0x00, 0x00, 0x00, 0x52, 0x00, 0x00, 0x01, 0x78, 0x4D, 0x1D, 0x50, 0x00,
-        ]);
-        assert!(bound(&mut idset));
-        assert_eq!(&idset[16 + 8..16 + 11], [0xFF; 3]);
-        assert!(!bound(&mut idset), "idempotent");
-    }
-
-    /// Bytes after the last GLOBSET too few to be another replica are not a shape that was
-    /// observed, so the set is left alone.
-    #[test]
-    fn a_tail_short_of_another_replica_is_left_alone() {
-        let mut idset = GUID.to_vec();
-        idset.extend_from_slice(&[0x52, 0, 0, 0, 0, 0, 1, 0, 0, 0x32, 0xB3, 0x77, 0xB6, 0x00]);
-        idset.extend_from_slice(&[0x34; 5]);
-        let before = idset.clone();
-        assert!(!bound(&mut idset));
-        assert_eq!(idset, before);
-    }
-}
+mod tests;
