@@ -78,6 +78,34 @@ fn guid() -> String {
 /// # Ok(())
 /// # }
 /// ```
+///
+/// # More than one session
+///
+/// One Session Context runs one request at a time ([MS-OXCMAPIHTTP] §3.2.5.1), so concurrency means
+/// more than one: clone the client, and [`connect`](Self::connect) and log on through each clone.
+/// Clones share their HTTP connections, the authenticated ones included, and one client identity,
+/// so they count as one client with several sessions.
+///
+/// Each logon starts with no named properties resolved. A store's ids are the same in every
+/// session, so a second logon takes the first one's with
+/// [`Logon::seed_names`](crate::Logon::seed_names) rather than asking again:
+///
+/// ```no_run
+/// # use mapi_client::{APPOINTMENT_PROPERTIES, MapiClient};
+/// # async fn example(client: MapiClient) -> Result<(), mapi_client::Error> {
+/// let mut first = client.connect().await?.logon().await?;
+/// first.resolve_names(APPOINTMENT_PROPERTIES).await?;
+///
+/// let mut second = client.clone().connect().await?.logon().await?;
+/// assert!(second.seed_names(first.names()), "the same mailbox");
+/// second.resolve_names(APPOINTMENT_PROPERTIES).await?; // answered without a round trip
+/// //
+/// # Ok(())
+/// # }
+/// ```
+///
+/// How many sessions Exchange allows one user at once is set by its throttling policy, not by
+/// this crate.
 #[derive(Clone, Debug)]
 pub struct MapiClient {
     pub(crate) transport: Transport,

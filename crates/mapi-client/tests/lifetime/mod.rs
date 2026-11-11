@@ -19,3 +19,6 @@ mod reconnect;
 
 /// Handles given back when the object holding them is dropped rather than closed.
 mod hygiene;
+
+/// More than one Session Context to one mailbox, side by side.
+mod concurrent;
