@@ -284,13 +284,17 @@ fn a_ptypobject_says_to_open_a_stream_rather_than_decoding() {
 
 #[test]
 fn an_unmodelled_type_stops_rather_than_guessing_a_length() {
-    assert_eq!(
-        read(&[0u8; 8], PropertyType::new(0x00FD)),
-        Err(Error::UnsupportedPropertyType {
-            property_type: 0x00FD,
-            at: 0
-        })
-    );
+    for raw in [0x0000, 0x0001, 0x00FD, 0x00FE, 0x0099] {
+        let property_type = PropertyType::new(raw);
+        assert_eq!(
+            read(&[0u8; 8], property_type),
+            Err(Error::UnsupportedPropertyType {
+                tag: crate::PropertyTag::from_parts(0x6700, property_type),
+                at: 0
+            }),
+            "{property_type}"
+        );
+    }
 }
 
 /// The values that exist as decoding outcomes and are not things a client may send. Each is

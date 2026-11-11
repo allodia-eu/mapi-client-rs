@@ -94,9 +94,13 @@ impl PropertyValue {
             PropertyType::Object => {
                 return Err(Error::ObjectPropertyValue { at: r.position() });
             }
-            PropertyType::Unsupported(raw) => {
+            PropertyType::Unspecified
+            | PropertyType::Null
+            | PropertyType::Restriction
+            | PropertyType::RuleAction
+            | PropertyType::Unsupported(_) => {
                 return Err(Error::UnsupportedPropertyType {
-                    property_type: raw,
+                    tag,
                     at: r.position(),
                 });
             }

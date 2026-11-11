@@ -59,6 +59,12 @@ mailbox as it was first provisioned.
   A contents table cut a long `PtypString8` column at 255 whole characters, the last three a
   literal `...`, under 1252, 1251, 932 and 65001 alike — never part way through a multibyte
   character, though [MS-OXCTABL] §3.2.5.1 allows a cut at 510 bytes.
+- **A property asked for without a type comes back in a standard row.** `PidTagSubject` and
+  `PidTagMessageFlags` requested as `PtypUnspecified` arrived typed `PtypString` and
+  `PtypInteger32` behind a row flag of `0x00`, which [MS-OXCDATA] §2.8.1.1 allows and §2.8.1.2
+  forbids. An absent property asked for that way came back typed `PtypErrorCode` in a flagged row,
+  and one asked for as `PtypNull` — the type §3.2's example uses where it means `PtypUnspecified`
+  — came back `NotFound`.
 
 ### Added
 
@@ -160,6 +166,14 @@ mailbox as it was first provisioned.
   `PtypString8` in the stream is written in, and neither has a `Default` any more: a parser that
   assumed Windows-1252 would read a session connected with another code page as the wrong text.
   `Logon::download` passes its session's.
+- **Columns and fetched properties asked for as `PtypUnspecified`.** Each arrives with the type the
+  server chose in front of its value, in a standard row or a flagged one, and is reported under that
+  type; `get` finds it by the tag it was asked for as and by its usual one, and an absent one —
+  which arrives typed `PtypErrorCode` — by its usual tag as the error it is. `PropertyType` names
+  the four remaining types of [MS-OXCDATA] §2.11.1 — `Unspecified`, `Null`, `Restriction` and
+  `RuleAction` — and documents why a value of any of them is still refused: `PtypUnspecified` is
+  never a value's type, Exchange answers a `PtypNull` request with `NotFound`, and the other two
+  belong to rules tables, which nothing here opens.
 
 ### Changed
 
@@ -178,6 +192,9 @@ mailbox as it was first provisioned.
   since its length is known: the change it was in is reported as `SyncEvent::Unreadable` with its
   header, and the rest of the download reads as usual. A code-page string type whose code page has
   no decoder is treated the same way.
+- **`Error::UnsupportedPropertyType` names the property**, as a `tag`, where it carried only the
+  type code. A stream or a row stopped by a type nobody can step over now says which property it
+  was.
 
 ### Fixed
 

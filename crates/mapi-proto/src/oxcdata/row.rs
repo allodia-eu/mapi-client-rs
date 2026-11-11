@@ -11,7 +11,8 @@
 use crate::error::{Error, Result};
 use crate::oxcdata::kind::ValueContext;
 use crate::oxcdata::{
-    CodePage, FolderId, MessageId, PropertySet, PropertyTag, PropertyValue, TableString,
+    CodePage, FolderId, MessageId, PropertySet, PropertyTag, PropertyType, PropertyValue,
+    TableString,
 };
 use crate::wire::Reader;
 
@@ -43,7 +44,8 @@ pub struct Cell {
 }
 
 impl Cell {
-    /// The column this value belongs to.
+    /// The column this value belongs to: the tag it was asked for, or — for a column asked for as
+    /// [`PropertyType::Unspecified`] — that tag's id with the type the server answered in.
     #[must_use]
     pub const fn tag(&self) -> PropertyTag {
         self.tag
@@ -89,12 +91,13 @@ impl PropertyRow {
     }
 
     /// The value for one column, if it was among the columns requested.
+    ///
+    /// A column asked for as [`PropertyType::Unspecified`] is found by the tag it was asked for as
+    /// well as by the type it arrived in, and — since a property it could not return arrives typed
+    /// `PtypErrorCode` — a lookup by its usual tag falls back to an error under the same id.
     #[must_use]
     pub fn get(&self, tag: PropertyTag) -> Option<&PropertyValue> {
-        self.cells
-            .iter()
-            .find(|cell| cell.tag == tag)
-            .map(Cell::value)
+        find(&self.cells, tag)
     }
 
     /// A string column, still carrying whether the table truncated it.
@@ -154,7 +157,15 @@ impl PropertyRow {
         };
 
         let mut cells = Vec::with_capacity(columns.len());
-        for &tag in columns {
+        for &asked in columns {
+            // A column asked for as PtypUnspecified carries the type the server chose in front of
+            // its value — before the flag, in a flagged row — and is reported under it, so that a
+            // caller matching on the property's usual tag finds it. [MS-OXCDATA] §2.11.3, §2.11.6
+            let tag = if asked.property_type() == PropertyType::Unspecified {
+                PropertyTag::from_parts(asked.id(), PropertyType::new(r.u16()?))
+            } else {
+                asked
+            };
             let value = match form {
                 RowForm::Standard => PropertyValue::read(r, tag, context, code_page)?,
                 RowForm::Flagged => Self::read_flagged_value(r, tag, context, code_page)?,
@@ -178,6 +189,31 @@ impl PropertyRow {
             flag => Err(Error::InvalidValueFlag { flag, at }),
         }
     }
+}
+
+/// The cell for `tag`: by exact tag; by id alone for a tag of [`PropertyType::Unspecified`], which
+/// asked for whatever type the property has; and otherwise by id only when the cell under that id
+/// holds an error.
+///
+/// The fallback is confined to errors because one id can carry two real properties of different
+/// types — `PidTagMessageSize` and `PidTagMessageSizeExtended` share `0x0E08` — and matching on the
+/// id alone would hand back the wrong one of those.
+pub(crate) fn find(cells: &[Cell], tag: PropertyTag) -> Option<&PropertyValue> {
+    let same_id = |cell: &&Cell| cell.tag.id() == tag.id();
+    cells
+        .iter()
+        .find(|cell| cell.tag == tag)
+        .or_else(|| {
+            if tag.property_type() == PropertyType::Unspecified {
+                cells.iter().find(same_id)
+            } else {
+                cells
+                    .iter()
+                    .filter(same_id)
+                    .find(|cell| cell.value.as_error().is_some())
+            }
+        })
+        .map(Cell::value)
 }
 
 #[cfg(test)]

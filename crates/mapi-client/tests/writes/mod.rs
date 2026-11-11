@@ -28,6 +28,9 @@ mod events;
 /// A subject read back as `PtypString8` by sessions connected with three code pages.
 mod strings;
 
+/// Properties asked for without a type, and under the placeholder type.
+mod types;
+
 /// The subject every item this suite creates carries, so that anything it leaves behind after a
 /// crash is identifiable by eye rather than by date.
 pub(crate) const MARKER: &str = "mapi-client-rs write test";

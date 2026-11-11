@@ -174,6 +174,34 @@ pub enum PropertyType {
     MultipleTime,
     /// `PtypMultipleGuid`, `0x1048`: a COUNT of values, then that many `PtypGuid`.
     MultipleGuid,
+    /// `PtypUnspecified`, `0x0000`: no type at all — a request's way of asking for a property in
+    /// whatever type it has. "A server MUST return the actual type in its response", so a column
+    /// asked for this way arrives as a type and then a value ([MS-OXCDATA] §2.8.1), which
+    /// [`PropertyRow`](crate::PropertyRow) reads under the type it carries. Never the type of a
+    /// value: one that claims it is refused.
+    ///
+    /// Measured on Exchange Server SE `15.02.2562.056`: `PidTagSubject` and `PidTagMessageFlags`
+    /// asked for this way came back typed `PtypString` and `PtypInteger32` in a *standard* row,
+    /// which §2.8.1.1 allows and §2.8.1.2 forbids — it has the flag "MUST also be set to 0x01" when
+    /// a type is returned. A property the item does not have came back typed `PtypErrorCode`,
+    /// carrying `NotFound`, in a flagged row.
+    Unspecified,
+    /// `PtypNull`, `0x0001`: "a placeholder", with no value ([MS-OXCDATA] §2.11.1).
+    ///
+    /// Measured on Exchange Server SE `15.02.2562.056`: a property asked for under this type comes
+    /// back as `NotFound` in a flagged row, so no value of it is read. One that arrived anyway is
+    /// refused rather than read as zero bytes on the strength of a table cell saying "None".
+    Null,
+    /// `PtypRestriction`, `0x00FD`: a `Restriction` structure with no length of its own
+    /// ([MS-OXCDATA] §2.11.1, §2.12).
+    ///
+    /// Carried only by a rules table ([MS-OXORULE]), which this crate never opens, and not among
+    /// the types a `FastTransfer` stream can carry ([MS-OXCFXICS] §2.2.4.1.1). A value is refused
+    /// with its tag named: stepping over one means parsing it.
+    Restriction,
+    /// `PtypRuleAction`, `0x00FE`: a COUNT of rule actions ([MS-OXORULE] §2.2.5). A rules table's
+    /// alone, like [`Restriction`](Self::Restriction), and refused the same way.
+    RuleAction,
     /// A type this crate does not model. Its length is unknown, so a value of this type cannot be
     /// skipped over — decoding stops instead of guessing.
     Unsupported(u16),
@@ -212,6 +240,10 @@ impl PropertyType {
             0x101E => Self::MultipleString8,
             0x1040 => Self::MultipleTime,
             0x1048 => Self::MultipleGuid,
+            0x0000 => Self::Unspecified,
+            0x0001 => Self::Null,
+            0x00FD => Self::Restriction,
+            0x00FE => Self::RuleAction,
             other => Self::Unsupported(other),
         }
     }
@@ -248,6 +280,10 @@ impl PropertyType {
             Self::MultipleString8 => 0x101E,
             Self::MultipleTime => 0x1040,
             Self::MultipleGuid => 0x1048,
+            Self::Unspecified => 0x0000,
+            Self::Null => 0x0001,
+            Self::Restriction => 0x00FD,
+            Self::RuleAction => 0x00FE,
             Self::Unsupported(raw) => raw,
         }
     }
@@ -284,6 +320,10 @@ impl PropertyType {
             Self::MultipleString8 => "PtypMultipleString8",
             Self::MultipleTime => "PtypMultipleTime",
             Self::MultipleGuid => "PtypMultipleGuid",
+            Self::Unspecified => "PtypUnspecified",
+            Self::Null => "PtypNull",
+            Self::Restriction => "PtypRestriction",
+            Self::RuleAction => "PtypRuleAction",
             Self::Unsupported(_) => return None,
         })
     }
@@ -316,7 +356,7 @@ mod tests {
     /// Every modelled type, with the code [MS-OXCDATA] §2.11.1 gives it. Transcribed from the
     /// table rather than from this crate's own `new`, so a typo in one is not confirmed by the
     /// other.
-    const MODELLED: [(u16, PropertyType, &str); 28] = [
+    const MODELLED: [(u16, PropertyType, &str); 32] = [
         (0x0002, PropertyType::Integer16, "PtypInteger16"),
         (0x0003, PropertyType::Integer32, "PtypInteger32"),
         (0x0005, PropertyType::Floating64, "PtypFloating64"),
@@ -373,6 +413,10 @@ mod tests {
         (0x101E, PropertyType::MultipleString8, "PtypMultipleString8"),
         (0x1040, PropertyType::MultipleTime, "PtypMultipleTime"),
         (0x1048, PropertyType::MultipleGuid, "PtypMultipleGuid"),
+        (0x0000, PropertyType::Unspecified, "PtypUnspecified"),
+        (0x0001, PropertyType::Null, "PtypNull"),
+        (0x00FD, PropertyType::Restriction, "PtypRestriction"),
+        (0x00FE, PropertyType::RuleAction, "PtypRuleAction"),
     ];
 
     #[test]
@@ -401,12 +445,12 @@ mod tests {
 
     #[test]
     fn an_unmodelled_type_survives_being_read_and_says_so() {
-        // PtypRestriction, which only a rule or a search folder carries.
-        let restriction = PropertyType::new(0x00FD);
-        assert_eq!(restriction, PropertyType::Unsupported(0x00FD));
-        assert_eq!(restriction.as_u16(), 0x00FD);
-        assert_eq!(restriction.name(), None);
-        assert_eq!(restriction.to_string(), "unmodelled type 0x00FD");
+        // No type in [MS-OXCDATA] §2.11.1 has this code.
+        let unknown = PropertyType::new(0x0099);
+        assert_eq!(unknown, PropertyType::Unsupported(0x0099));
+        assert_eq!(unknown.as_u16(), 0x0099);
+        assert_eq!(unknown.name(), None);
+        assert_eq!(unknown.to_string(), "unmodelled type 0x0099");
     }
 
     /// The widths that decide how many bytes a variable-length value occupies. Wrong here means

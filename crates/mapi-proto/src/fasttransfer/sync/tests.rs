@@ -420,10 +420,7 @@ fn an_unknown_property_type_stops_the_stream() {
     };
     assert!(matches!(
         error,
-        Error::UnsupportedPropertyType {
-            property_type: 0x00FD,
-            ..
-        }
+        Error::UnsupportedPropertyType { tag, .. } if tag == PropertyTag::new(0x0001_00FD)
     ));
 }
 

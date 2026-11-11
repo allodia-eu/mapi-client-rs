@@ -271,10 +271,7 @@ fn a_column_of_an_unmodelled_type_stops_the_row() {
     let buf = [0x00, 0x01, 0x02, 0x03, 0x04];
     assert!(matches!(
         read(&buf, &[restriction]),
-        Err(Error::UnsupportedPropertyType {
-            property_type: 0x00FD,
-            ..
-        })
+        Err(Error::UnsupportedPropertyType { tag, .. }) if tag == restriction
     ));
 }
 
@@ -290,4 +287,106 @@ fn truncated_rows_never_panic() {
         let _ = read(buf, &HIERARCHY_COLUMNS);
         let _ = read(buf, &CONTENTS_COLUMNS);
     }
+}
+
+/// A column asked for as `PtypUnspecified` arrives with its type in front of its value, and is
+/// reported under that type. The bytes are what Exchange Server SE `15.02.2562.056` sent for
+/// `PidTagSubject` and `PidTagMessageFlags` asked for that way: a standard row, a type, a value.
+///
+/// [MS-OXCDATA] §2.8.1.1 — a `TypedPropertyValue` where the column was asked for as
+/// `PtypUnspecified`
+#[test]
+fn an_unspecified_column_is_read_under_the_type_it_arrives_with() {
+    let subject = PropertyTag::from_parts(0x0037, PropertyType::Unspecified);
+    let flags = PropertyTag::from_parts(0x0E07, PropertyType::Unspecified);
+    let mut w = Writer::new();
+    w.u8(0x00).u16(0x001F);
+    utf16_z(&mut w, "Hi");
+    w.u16(0x0003).u32(0x0409);
+    let row = read(&w.finish(), &[subject, flags]).unwrap();
+
+    assert_eq!(row.form(), RowForm::Standard);
+    let tags: Vec<PropertyTag> = row.cells().iter().map(Cell::tag).collect();
+    assert_eq!(tags, [PropertyTag::SUBJECT, PropertyTag::MESSAGE_FLAGS]);
+    assert_eq!(
+        row.string(PropertyTag::SUBJECT),
+        Some(&TableString::from("Hi"))
+    );
+    assert_eq!(
+        row.get(PropertyTag::MESSAGE_FLAGS),
+        Some(&PropertyValue::Integer32(0x0409))
+    );
+}
+
+/// [MS-OXCDATA] §3.2's worked example: a flagged row whose second column was asked for without a
+/// type, so it carries a `FlaggedPropertyValueWithType` — type, then flag, then value — between
+/// two ordinary flagged values. The example lists that column as `00370001`, which is
+/// `PtypNull`; its bytes and its prose are about `PtypUnspecified`, `0x0000`, which is what is
+/// asked for here.
+#[test]
+fn the_documents_flagged_row_with_a_typed_value_reads_as_described() {
+    let columns = [
+        PropertyTag::MESSAGE_FLAGS,
+        PropertyTag::from_parts(0x0037, PropertyType::Unspecified),
+        PropertyTag::BODY,
+    ];
+    #[rustfmt::skip]
+    let bytes = [
+        0x01,                                   // a flagged row
+        0x00, 0x13, 0x00, 0x00, 0x00,           // PidTagMessageFlags, present
+        0x1F, 0x00, 0x00,                       // PtypString, present
+        0x48, 0x00, 0x65, 0x00, 0x6C, 0x00, 0x6C, 0x00, 0x6F, 0x00, 0x00, 0x00,
+        0x0A, 0x0E, 0x00, 0x07, 0x80,           // PidTagBody: NotEnoughMemory
+    ];
+    let row = read(&bytes, &columns).unwrap();
+
+    assert_eq!(row.form(), RowForm::Flagged);
+    assert_eq!(
+        row.get(PropertyTag::MESSAGE_FLAGS),
+        Some(&PropertyValue::Integer32(0x13))
+    );
+    assert_eq!(
+        row.string(PropertyTag::SUBJECT),
+        Some(&TableString::from("Hello"))
+    );
+    assert_eq!(
+        row.get(PropertyTag::BODY).and_then(PropertyValue::as_error),
+        Some(ErrorCode::new(0x8007_000E))
+    );
+}
+
+/// A column asked for without a type, answered with one that is not a value's type either, is
+/// refused with the property named rather than read as something else.
+#[test]
+fn an_unspecified_column_answered_without_a_type_is_refused() {
+    let subject = PropertyTag::from_parts(0x0037, PropertyType::Unspecified);
+    assert!(matches!(
+        read(&[0x00, 0x00, 0x00, 0x41], &[subject]),
+        Err(Error::UnsupportedPropertyType { tag, at: 3 }) if tag == subject
+    ));
+}
+
+/// A column asked for without a type is found by the tag it was asked for as, and one the server
+/// could not return — which arrives typed `PtypErrorCode` — by its usual tag too.
+#[test]
+fn an_unspecified_column_is_found_by_the_tag_it_was_asked_for_as() {
+    let subject = PropertyTag::from_parts(0x0037, PropertyType::Unspecified);
+    let absent = PropertyTag::from_parts(0x6FFE, PropertyType::Unspecified);
+    let mut w = Writer::new();
+    w.u8(0x01).u16(0x001F).u8(0x00);
+    utf16_z(&mut w, "Hi");
+    w.u16(0x000A).u8(0x0A).u32(0x8004_010F);
+    let row = read(&w.finish(), &[subject, absent]).unwrap();
+
+    assert_eq!(row.string(subject), Some(&TableString::from("Hi")));
+    let not_found = Some(ErrorCode::new(0x8004_010F));
+    assert_eq!(row.get(absent).and_then(PropertyValue::as_error), not_found);
+    let usual = PropertyTag::from_parts(0x6FFE, PropertyType::String);
+    assert_eq!(row.get(usual).and_then(PropertyValue::as_error), not_found);
+    assert_eq!(row.clone().into_property_set().error(absent), not_found);
+    // A value of another type under the same id is not an error, and is not handed back for it.
+    assert_eq!(
+        row.get(PropertyTag::from_parts(0x0037, PropertyType::Binary)),
+        None
+    );
 }
