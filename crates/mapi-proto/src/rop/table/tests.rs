@@ -72,7 +72,8 @@ fn decodes_query_rows_with_two_rows() {
     let buf = w.finish();
 
     let mut r = Reader::new(&buf);
-    let response = QueryRowsResponse::read(&mut r, &HIERARCHY_COLUMNS).unwrap();
+    let response =
+        QueryRowsResponse::read(&mut r, &HIERARCHY_COLUMNS, CodePage::WINDOWS_1252).unwrap();
 
     assert_eq!(response.bookmark(), Bookmark::Beginning);
     assert_eq!(response.rows().len(), 2);
@@ -117,7 +118,12 @@ fn form_counts_report_what_the_server_chose() {
     w.u8(0x00).u8(1);
     let buf = w.finish();
 
-    let response = QueryRowsResponse::read(&mut Reader::new(&buf), &HIERARCHY_COLUMNS).unwrap();
+    let response = QueryRowsResponse::read(
+        &mut Reader::new(&buf),
+        &HIERARCHY_COLUMNS,
+        CodePage::WINDOWS_1252,
+    )
+    .unwrap();
     assert_eq!(response.form_counts(), (1, 1));
     assert_eq!(response.bookmark(), Bookmark::Current);
 }
@@ -128,7 +134,12 @@ fn zero_rows_is_an_answer_not_an_error() {
     w.u8(Bookmark::End.as_u8()).u16(0);
     let buf = w.finish();
 
-    let response = QueryRowsResponse::read(&mut Reader::new(&buf), &HIERARCHY_COLUMNS).unwrap();
+    let response = QueryRowsResponse::read(
+        &mut Reader::new(&buf),
+        &HIERARCHY_COLUMNS,
+        CodePage::WINDOWS_1252,
+    )
+    .unwrap();
     assert!(response.rows().is_empty());
     assert_eq!(response.bookmark(), Bookmark::End);
     assert_eq!(response.form_counts(), (0, 0));
@@ -141,7 +152,11 @@ fn a_lying_row_count_errors_rather_than_over_reading() {
     w.u8(0x00).u16(0xFFFF);
     let buf = w.finish();
     assert!(matches!(
-        QueryRowsResponse::read(&mut Reader::new(&buf), &HIERARCHY_COLUMNS),
+        QueryRowsResponse::read(
+            &mut Reader::new(&buf),
+            &HIERARCHY_COLUMNS,
+            CodePage::WINDOWS_1252
+        ),
         Err(Error::Truncated { .. })
     ));
 }
@@ -193,7 +208,11 @@ fn bookmarks_and_statuses_round_trip_through_their_raw_values() {
 #[test]
 fn truncated_table_responses_never_panic() {
     for buf in [&b""[..], &[0x00][..], &[0x00, 0x02][..], &[0xFF; 16][..]] {
-        let _ = QueryRowsResponse::read(&mut Reader::new(buf), &HIERARCHY_COLUMNS);
+        let _ = QueryRowsResponse::read(
+            &mut Reader::new(buf),
+            &HIERARCHY_COLUMNS,
+            CodePage::WINDOWS_1252,
+        );
         let _ = GetTableResponse::read(&mut Reader::new(buf));
         let _ = SetColumnsResponse::read(&mut Reader::new(buf));
     }
@@ -206,7 +225,12 @@ fn rows_expose_their_values_by_tag() {
     hierarchy_row(&mut w, 0x0D00_0000_0000_0004, "Inbox");
     let buf = w.finish();
 
-    let response = QueryRowsResponse::read(&mut Reader::new(&buf), &HIERARCHY_COLUMNS).unwrap();
+    let response = QueryRowsResponse::read(
+        &mut Reader::new(&buf),
+        &HIERARCHY_COLUMNS,
+        CodePage::WINDOWS_1252,
+    )
+    .unwrap();
     let row = response.rows().first().unwrap();
     assert_eq!(
         row.get(PropertyTag::CONTENT_COUNT),

@@ -9,19 +9,24 @@
 use crate::error::{Error, ErrorCode, Result};
 use crate::oxcdata::kind::{CountWidth, ValueContext};
 use crate::oxcdata::{
-    Currency, FileTime, Floating32, Floating64, Guid, PropertyType, PropertyValue, ServerEntryId,
-    TableString,
+    CodePage, Currency, FileTime, Floating32, Floating64, Guid, PropertyTag, PropertyType,
+    PropertyValue, ServerEntryId, TableString,
 };
 use crate::wire::{Reader, Writer};
 
 impl PropertyValue {
     /// Reads one value of the type its tag or its column declared.
+    ///
+    /// `code_page` is the session's, which every 8-bit string in a ROP buffer is written in
+    /// ([MS-OXCDATA] §2.11.1.2). `tag` is the property the value belongs to, named in the error
+    /// when one cannot be read.
     pub(crate) fn read(
         r: &mut Reader<'_>,
-        property_type: PropertyType,
+        tag: PropertyTag,
         context: ValueContext,
+        code_page: CodePage,
     ) -> Result<Self> {
-        Ok(match property_type {
+        Ok(match tag.property_type() {
             PropertyType::Integer16 => Self::Integer16(r.u16()?),
             PropertyType::Integer32 => Self::Integer32(r.u32()?),
             PropertyType::Integer64 => Self::Integer64(r.u64()?),
@@ -29,7 +34,7 @@ impl PropertyValue {
             PropertyType::ErrorCode => Self::Error(ErrorCode::new(r.u32()?)),
             PropertyType::Boolean => Self::Boolean(r.u8()? != 0),
             PropertyType::String => Self::String(string(r.utf16_z()?, context)),
-            PropertyType::String8 => Self::String8(string(r.ascii_z()?, context)),
+            PropertyType::String8 => Self::String8(string8(r, tag, context, code_page)?),
             PropertyType::Time => Self::Time(FileTime::new(r.u64()?)),
             PropertyType::Guid => Self::Guid(Guid::from_bytes(r.array::<16>()?)),
             PropertyType::Binary => Self::Binary(read_binary(r, context)?),
@@ -76,7 +81,7 @@ impl PropertyValue {
                 Self::MultipleInteger64(read_each(r, context, Reader::u64)?)
             }
             PropertyType::MultipleString8 => Self::MultipleString8(read_each(r, context, |r| {
-                Ok(string(r.ascii_z()?, context))
+                string8(r, tag, context, code_page)
             })?),
             PropertyType::MultipleTime => {
                 Self::MultipleTime(read_each(r, context, |r| Ok(FileTime::new(r.u64()?)))?)
@@ -96,6 +101,18 @@ impl PropertyValue {
                 });
             }
         })
+    }
+
+    /// Reads one value of `property_type`, for a test that asks about a type rather than a
+    /// property: under an arbitrary tag of that type, in a session connected with Windows-1252.
+    #[cfg(test)]
+    pub(crate) fn read_as(
+        r: &mut Reader<'_>,
+        property_type: PropertyType,
+        context: ValueContext,
+    ) -> Result<Self> {
+        let tag = PropertyTag::from_parts(0x6700, property_type);
+        Self::read(r, tag, context, CodePage::WINDOWS_1252)
     }
 
     /// Writes this value in the form a `TaggedPropertyValue` carries it.
@@ -143,9 +160,9 @@ impl PropertyValue {
             Self::String8(_) | Self::MultipleString8(_) => {
                 return Err(Error::UnencodableValue {
                     value: "a PtypString8 value",
-                    reason: "its code page is the one negotiated for the session, which this \
-                             crate never sets — send PtypString, which is UTF-16LE and what \
-                             [MS-OXCDATA] §2.11.1.2 says clients SHOULD use",
+                    reason: "the server would store it through the session's code page and lose \
+                             whatever that cannot hold — send PtypString, which is UTF-16LE and \
+                             what [MS-OXCDATA] §2.11.1.2 says clients SHOULD use",
                 });
             }
             Self::Object(_) => {
@@ -228,6 +245,27 @@ fn string(text: String, context: ValueContext) -> TableString {
     } else {
         TableString::Complete(text)
     }
+}
+
+/// A null-terminated 8-bit string, decoded in the session's code page.
+///
+/// **A table cuts an 8-bit string by characters, not by bytes**, so a value that does not decode
+/// is corrupt rather than cut, in a row as anywhere else. [MS-OXCTABL] §3.2.5.1 allows a cut by
+/// bytes — "If a property value is greater than 510 bytes in size, it MUST be truncated to 510
+/// bytes" — which in a double-byte code page could split a character. Measured on Exchange Server
+/// SE `15.02.2562.056`: subjects of 400 to 700 characters, read as a `PtypString8` contents-table
+/// column in sessions connected with 1252, 1251, 932 and 65001, every one came back as 252
+/// characters and a literal `...` — 255 characters, whole ones, the same cut a `PtypString`
+/// column gets — including a 932 subject placed one byte off so that a byte cut would land
+/// inside a character.
+fn string8(
+    r: &mut Reader<'_>,
+    tag: PropertyTag,
+    context: ValueContext,
+    code_page: CodePage,
+) -> Result<TableString> {
+    let text = code_page.decode_property(tag, r.bytes_z()?)?;
+    Ok(string(text, context))
 }
 
 /// A COUNT of bytes, then that many bytes.

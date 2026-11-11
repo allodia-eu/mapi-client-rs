@@ -22,7 +22,7 @@
 //! [MS-OXCROPS] §2.2.1 — ROP output buffers
 
 use crate::error::{Error, ErrorCode, Result};
-use crate::oxcdata::PropertyTag;
+use crate::oxcdata::{CodePage, PropertyTag};
 use crate::rop::send::is_null_destination;
 use crate::rop::sync::read_refusal;
 use crate::rop::{
@@ -38,9 +38,9 @@ use crate::wire::Reader;
 
 /// What a response stream cannot supply for itself.
 ///
-/// Both of these are facts about the *request*, and neither appears anywhere in the bytes coming
-/// back. Grouping them makes it obvious that decoding a buffer in isolation is not something this
-/// layer can do.
+/// Every one of these is a fact about the *request* or the session, and none appears anywhere in
+/// the bytes coming back. Grouping them makes it obvious that decoding a buffer in isolation is not
+/// something this layer can do.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Decoding<'a> {
     /// The column set each handle slot's table was given, indexed by slot. Supplies the types a
@@ -50,6 +50,8 @@ pub(crate) struct Decoding<'a> {
     /// issued. Consumed in that order, because a response says nothing about which request it
     /// answers.
     pub(crate) property_tags: &'a [Vec<PropertyTag>],
+    /// The code page the session connected with, which every 8-bit string in the buffer is in.
+    pub(crate) code_page: CodePage,
 }
 
 /// Decodes every response in a ROP output buffer.
@@ -167,9 +169,11 @@ fn decode_success(
         }
         RopId::WRITE_STREAM => RopResponse::WriteStream(WriteStreamResponse::read(r)?),
         RopId::DELETE_MESSAGES => RopResponse::DeleteMessages(DeleteMessagesResponse::read(r)?),
-        RopId::OPEN_MESSAGE => RopResponse::OpenMessage(OpenMessageResponse::read(r)?),
+        RopId::OPEN_MESSAGE => {
+            RopResponse::OpenMessage(OpenMessageResponse::read(r, context.code_page)?)
+        }
         RopId::OPEN_EMBEDDED_MESSAGE => {
-            RopResponse::OpenMessage(OpenMessageResponse::read_embedded(r)?)
+            RopResponse::OpenMessage(OpenMessageResponse::read_embedded(r, context.code_page)?)
         }
         RopId::OPEN_STREAM | RopId::GET_STREAM_SIZE => {
             RopResponse::StreamSize(StreamSizeResponse::read(r, rop)?)
@@ -181,14 +185,19 @@ fn decode_success(
                 .get(usize::from(handle_index))
                 .and_then(Option::as_deref)
                 .ok_or(Error::UnknownColumns { handle_index })?;
-            RopResponse::QueryRows(QueryRowsResponse::read(r, columns)?)
+            RopResponse::QueryRows(QueryRowsResponse::read(r, columns, context.code_page)?)
         }
         RopId::GET_PROPERTIES_SPECIFIC => {
             let tags = requested.ok_or(Error::UnrequestedProperties { at: r.position() })?;
-            RopResponse::GetProperties(GetPropertiesResponse::read_row(r, rop, tags)?)
+            RopResponse::GetProperties(GetPropertiesResponse::read_row(
+                r,
+                rop,
+                tags,
+                context.code_page,
+            )?)
         }
         RopId::GET_PROPERTIES_ALL => {
-            RopResponse::GetProperties(GetPropertiesResponse::read_all(r, rop)?)
+            RopResponse::GetProperties(GetPropertiesResponse::read_all(r, rop, context.code_page)?)
         }
         RopId::SET_PROPERTIES | RopId::DELETE_PROPERTIES => {
             RopResponse::PropertyProblems(PropertyProblemsResponse::read(r, rop)?)

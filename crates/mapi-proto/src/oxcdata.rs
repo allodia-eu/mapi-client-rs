@@ -8,6 +8,7 @@
 
 mod attach;
 mod class;
+mod codepage;
 mod columns;
 mod entryid;
 mod flag;
@@ -30,6 +31,7 @@ mod value;
 
 pub use attach::AttachMethod;
 pub use class::ContainerClass;
+pub use codepage::CodePage;
 pub use columns::{
     APPOINTMENT_COLUMNS, ATTACHMENT_COLUMNS, ATTACHMENT_PROPERTIES, CONTACT_COLUMNS,
     CONTENTS_COLUMNS, FOLDER_PROPERTIES, HIERARCHY_COLUMNS, MAILBOX_PROPERTIES, MESSAGE_PROPERTIES,

@@ -20,7 +20,7 @@
 
 use crate::error::{Error, Result};
 use crate::oxcdata::{
-    PropertyProblem, PropertyRow, PropertySet, PropertyTag, TaggedValue, ValueContext,
+    CodePage, PropertyProblem, PropertyRow, PropertySet, PropertyTag, TaggedValue, ValueContext,
 };
 use crate::rop::RopId;
 use crate::rop::batch::LOGON_ID;
@@ -80,8 +80,13 @@ impl GetPropertiesResponse {
     }
 
     /// Reads a `RopGetPropertiesSpecific` body: one row, against the tags that were requested.
-    pub(crate) fn read_row(r: &mut Reader<'_>, rop: RopId, tags: &[PropertyTag]) -> Result<Self> {
-        let row = PropertyRow::read(r, tags, ValueContext::Object)?;
+    pub(crate) fn read_row(
+        r: &mut Reader<'_>,
+        rop: RopId,
+        tags: &[PropertyTag],
+        code_page: CodePage,
+    ) -> Result<Self> {
+        let row = PropertyRow::read(r, tags, ValueContext::Object, code_page)?;
         Ok(Self {
             rop,
             properties: row.into_property_set(),
@@ -89,11 +94,11 @@ impl GetPropertiesResponse {
     }
 
     /// Reads a `RopGetPropertiesAll` body: a count, then that many tag/value pairs.
-    pub(crate) fn read_all(r: &mut Reader<'_>, rop: RopId) -> Result<Self> {
+    pub(crate) fn read_all(r: &mut Reader<'_>, rop: RopId, code_page: CodePage) -> Result<Self> {
         let count = usize::from(r.u16()?);
         Ok(Self {
             rop,
-            properties: PropertySet::read_tagged(r, count)?,
+            properties: PropertySet::read_tagged(r, count, code_page)?,
         })
     }
 }

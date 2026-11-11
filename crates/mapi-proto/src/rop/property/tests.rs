@@ -139,8 +139,13 @@ fn a_specific_fetch_decodes_its_row_against_the_tags_that_were_asked_for() {
 
     let tags = [PropertyTag::DISPLAY_NAME, PropertyTag::CONTENT_COUNT];
     let mut r = Reader::new(&bytes);
-    let response =
-        GetPropertiesResponse::read_row(&mut r, RopId::GET_PROPERTIES_SPECIFIC, &tags).unwrap();
+    let response = GetPropertiesResponse::read_row(
+        &mut r,
+        RopId::GET_PROPERTIES_SPECIFIC,
+        &tags,
+        CodePage::WINDOWS_1252,
+    )
+    .unwrap();
 
     assert!(r.is_empty());
     assert_eq!(response.rop(), RopId::GET_PROPERTIES_SPECIFIC);
@@ -161,7 +166,9 @@ fn an_all_fetch_reads_its_count_and_then_the_tagged_values() {
     let bytes = w.finish();
 
     let mut r = Reader::new(&bytes);
-    let response = GetPropertiesResponse::read_all(&mut r, RopId::GET_PROPERTIES_ALL).unwrap();
+    let response =
+        GetPropertiesResponse::read_all(&mut r, RopId::GET_PROPERTIES_ALL, CodePage::WINDOWS_1252)
+            .unwrap();
 
     assert!(r.is_empty());
     assert_eq!(response.rop(), RopId::GET_PROPERTIES_ALL);
@@ -212,11 +219,16 @@ fn truncated_responses_never_panic() {
         &[0xFF, 0xFF][..],
         &[0xFF, 0xFF, 0xFF, 0xFF][..],
     ] {
-        let _ = GetPropertiesResponse::read_all(&mut Reader::new(bytes), RopId::GET_PROPERTIES_ALL);
+        let _ = GetPropertiesResponse::read_all(
+            &mut Reader::new(bytes),
+            RopId::GET_PROPERTIES_ALL,
+            CodePage::WINDOWS_1252,
+        );
         let _ = GetPropertiesResponse::read_row(
             &mut Reader::new(bytes),
             RopId::GET_PROPERTIES_SPECIFIC,
             &MAILBOX_PROPERTIES,
+            CodePage::WINDOWS_1252,
         );
         let _ = PropertyProblemsResponse::read(&mut Reader::new(bytes), RopId::SET_PROPERTIES);
     }

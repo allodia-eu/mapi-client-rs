@@ -17,17 +17,18 @@
 //! fails to produce it and says so with an `errorInfo` element, which [MS-OXCFXICS] §2.2.4.3.4 has
 //! the reader unwind to `contentsSync` and carry on from; or the elements it sent do not fit the
 //! grammar. Both become an event naming what was lost, and the next unit is read as though nothing
-//! had happened. Only a stream that cannot be split into elements at all — an unknown property
-//! type, whose length nobody knows — stops the download.
+//! had happened. A value the lexer could step past but not read — an 8-bit string that is not text
+//! in its code page — costs its object the same way. Only a stream that cannot be split into
+//! elements at all — an unknown property type, whose length nobody knows — stops the download.
 
 use std::collections::VecDeque;
 
-use crate::error::Result;
+use crate::error::{Error, Result};
 use crate::fasttransfer::content::{Cursor, MessageContent, find, malformed};
 use crate::fasttransfer::group::PropertyGroupInfo;
 use crate::fasttransfer::{Element, Lexer, Marker, StreamProperty};
 use crate::ics::{IdSet, WireKey, read_idset};
-use crate::oxcdata::{PropertyTag, PropertyValue};
+use crate::oxcdata::{CodePage, PropertyTag, PropertyValue};
 
 mod events;
 
@@ -42,7 +43,7 @@ pub use events::{
 /// `RopFastTransferSourceGetBuffer` buffer as it arrives, and take events with
 /// [`next_event`](Self::next_event) until it answers `None` — which means "send another
 /// `GetBuffer`", until [`is_finished`](Self::is_finished).
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct ContentsSync {
     lexer: Lexer,
     unit: Vec<Element>,
@@ -50,17 +51,31 @@ pub struct ContentsSync {
     groups: Vec<PropertyGroupInfo>,
     group: Option<u32>,
     progress: Option<(u32, bool)>,
-    /// The unit an `errorInfo` interrupted, held until the error says whether it was the object
-    /// that failed.
-    interrupted: Option<Vec<Element>>,
+    /// Why the unit being read cannot be: the first value in it the lexer stepped past unread.
+    undecodable: Option<String>,
+    /// The unit an `errorInfo` interrupted, and why it could not be read if it could not, held
+    /// until the error says whether it was the object that failed.
+    interrupted: Option<(Vec<Element>, Option<String>)>,
     finished: bool,
 }
 
 impl ContentsSync {
-    /// A parser that has seen nothing.
+    /// A parser that has seen nothing, for a download from a session connected with `code_page` —
+    /// [`Session::code_page`](crate::Session::code_page). Required for the reason
+    /// [`Lexer::new`] gives.
     #[must_use]
-    pub fn new() -> Self {
-        Self::default()
+    pub const fn new(code_page: CodePage) -> Self {
+        Self {
+            lexer: Lexer::new(code_page),
+            unit: Vec::new(),
+            events: VecDeque::new(),
+            groups: Vec::new(),
+            group: None,
+            progress: None,
+            undecodable: None,
+            interrupted: None,
+            finished: false,
+        }
     }
 
     /// Hands the parser the next buffer of the stream.
@@ -88,10 +103,15 @@ impl ContentsSync {
             if self.finished {
                 return Ok(None);
             }
-            let Some(element) = self.lexer.next_element()? else {
-                return Ok(None);
-            };
-            self.accept(element);
+            match self.lexer.next_element() {
+                Ok(Some(element)) => self.accept(element),
+                Ok(None) => return Ok(None),
+                // Stepped past: the stream is still in step, and the object it was in is lost.
+                Err(error @ Error::UndecodableString { .. }) => {
+                    self.undecodable.get_or_insert_with(|| error.to_string());
+                }
+                Err(error) => return Err(error),
+            }
         }
     }
 
@@ -119,13 +139,14 @@ impl ContentsSync {
     fn accept(&mut self, element: Element) {
         if begins_unit(&element) && !self.unit.is_empty() {
             let unit = core::mem::take(&mut self.unit);
+            let undecodable = self.undecodable.take();
             // Only a message change can be the object an error interrupted. Anything else —
             // the previous error among them, which settles the change *it* interrupted — is
             // read as usual, so that two errors in a row never leave a change behind unread.
             if matches!(element, Element::Marker(Marker::ErrorInfo)) && is_change(&unit) {
-                self.interrupted = Some(unit);
+                self.interrupted = Some((unit, undecodable));
             } else {
-                self.complete(&unit);
+                self.complete(&unit, undecodable);
             }
         }
         let ends_now = matches!(
@@ -135,12 +156,26 @@ impl ContentsSync {
         self.unit.push(element);
         if ends_now {
             let unit = core::mem::take(&mut self.unit);
-            self.complete(&unit);
+            let undecodable = self.undecodable.take();
+            self.complete(&unit, undecodable);
         }
     }
 
-    /// Reads a complete unit, queueing whatever event it produces.
-    fn complete(&mut self, unit: &[Element]) {
+    /// Reads a complete unit, queueing whatever event it produces — or, for one holding a value
+    /// that could not be read, the event saying it was lost.
+    fn complete(&mut self, unit: &[Element], undecodable: Option<String>) {
+        // Only a message change is lost for a value it could not read. Any other unit holds
+        // meta-properties alone, none of them a string, and is read without the value as usual —
+        // so that a state still ends the download and an error still settles what it interrupted.
+        if let Some(reason) = undecodable.filter(|_| is_change(unit)) {
+            // The size announced for this change goes with it, as it does when it fails to read.
+            self.progress = None;
+            self.events.push_back(SyncEvent::Unreadable {
+                header: header_of(unit),
+                reason,
+            });
+            return;
+        }
         match self.read_unit(unit) {
             Ok(Some(event)) => self.events.push_back(event),
             Ok(None) => {}
@@ -226,8 +261,8 @@ impl ContentsSync {
                     Err(error) => {
                         // An error that cannot be read names nothing, so the change it followed
                         // is delivered: dropping it would lose a message without a word.
-                        if let Some(unit) = interrupted {
-                            self.complete(&unit);
+                        if let Some((unit, undecodable)) = interrupted {
+                            self.complete(&unit, undecodable);
                         }
                         return Err(error);
                     }
@@ -257,8 +292,12 @@ impl ContentsSync {
     /// its object by GID, and a message's `PidTagSourceKey` is the same 22 bytes — so the unit is
     /// dropped when it is the one named, and delivered as usual when it is not. A dropped change
     /// takes the progress announced for it along.
-    fn resolve_interrupted(&mut self, interrupted: Option<Vec<Element>>, info: &ErrorInfo) {
-        let Some(unit) = interrupted else {
+    fn resolve_interrupted(
+        &mut self,
+        interrupted: Option<(Vec<Element>, Option<String>)>,
+        info: &ErrorInfo,
+    ) {
+        let Some((unit, undecodable)) = interrupted else {
             return;
         };
         let failed = info.message().map(|(guid, counter)| {
@@ -271,7 +310,7 @@ impl ContentsSync {
         if named {
             self.progress = None;
         } else {
-            self.complete(&unit);
+            self.complete(&unit, undecodable);
         }
     }
 

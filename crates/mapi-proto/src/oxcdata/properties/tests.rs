@@ -21,7 +21,7 @@ fn tagged_values_carry_their_own_tags() {
     let bytes = w.finish();
 
     let mut r = Reader::new(&bytes);
-    let properties = PropertySet::read_tagged(&mut r, 2).unwrap();
+    let properties = PropertySet::read_tagged(&mut r, 2, CodePage::WINDOWS_1252).unwrap();
 
     assert!(r.is_empty());
     assert_eq!(properties.len(), 2);
@@ -215,6 +215,13 @@ fn a_property_problem_names_the_entry_the_tag_and_the_code() {
 #[test]
 fn a_lying_count_errors_rather_than_allocating() {
     let bytes = [0xFF, 0xFF, 0xFF, 0xFF];
-    assert!(PropertySet::read_tagged(&mut Reader::new(&bytes), 0xFFFF_FFFF).is_err());
-    assert!(PropertySet::read_tagged(&mut Reader::new(&[]), 1).is_err());
+    assert!(
+        PropertySet::read_tagged(
+            &mut Reader::new(&bytes),
+            0xFFFF_FFFF,
+            CodePage::WINDOWS_1252
+        )
+        .is_err()
+    );
+    assert!(PropertySet::read_tagged(&mut Reader::new(&[]), 1, CodePage::WINDOWS_1252).is_err());
 }

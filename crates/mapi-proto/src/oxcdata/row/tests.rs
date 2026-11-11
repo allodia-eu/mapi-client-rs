@@ -13,7 +13,12 @@ fn utf16_z(w: &mut Writer, text: &str) {
 /// Every row in this file comes off a table, which is the context that decides COUNT widths and
 /// the 255-character truncation rule.
 fn read(buf: &[u8], columns: &[PropertyTag]) -> Result<PropertyRow> {
-    PropertyRow::read(&mut Reader::new(buf), columns, ValueContext::TableRow)
+    PropertyRow::read(
+        &mut Reader::new(buf),
+        columns,
+        ValueContext::TableRow,
+        CodePage::WINDOWS_1252,
+    )
 }
 
 /// A hierarchy row exactly as the live Exchange lab sends one: standard form, the six columns of
@@ -31,7 +36,13 @@ fn standard_hierarchy_row(folder_id: u64, name: &str) -> Vec<u8> {
 fn decodes_a_standard_property_row() {
     let buf = standard_hierarchy_row(0x0D00_0000_0000_0001, "Inbox");
     let mut r = Reader::new(&buf);
-    let row = PropertyRow::read(&mut r, &HIERARCHY_COLUMNS, ValueContext::TableRow).unwrap();
+    let row = PropertyRow::read(
+        &mut r,
+        &HIERARCHY_COLUMNS,
+        ValueContext::TableRow,
+        CodePage::WINDOWS_1252,
+    )
+    .unwrap();
 
     assert_eq!(row.form(), RowForm::Standard);
     assert_eq!(row.folder_id(), Some(FolderId::new(0x0D00_0000_0000_0001)));
@@ -197,10 +208,20 @@ fn the_context_decides_whether_a_long_string_counts_as_truncated() {
     let buf = w.finish();
 
     let columns = [PropertyTag::DISPLAY_NAME];
-    let from_table =
-        PropertyRow::read(&mut Reader::new(&buf), &columns, ValueContext::TableRow).unwrap();
-    let from_object =
-        PropertyRow::read(&mut Reader::new(&buf), &columns, ValueContext::Object).unwrap();
+    let from_table = PropertyRow::read(
+        &mut Reader::new(&buf),
+        &columns,
+        ValueContext::TableRow,
+        CodePage::WINDOWS_1252,
+    )
+    .unwrap();
+    let from_object = PropertyRow::read(
+        &mut Reader::new(&buf),
+        &columns,
+        ValueContext::Object,
+        CodePage::WINDOWS_1252,
+    )
+    .unwrap();
 
     assert!(
         from_table

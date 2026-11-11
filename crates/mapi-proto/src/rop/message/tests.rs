@@ -68,7 +68,9 @@ fn every_typed_string_form_decodes_and_consumes_exactly_its_own_bytes() {
         buf.push(0xEE); // whatever follows the field
         let mut r = Reader::new(&buf);
         assert_eq!(
-            typed_string(&mut r).unwrap().as_deref(),
+            typed_string(&mut r, PropertyTag::SUBJECT_PREFIX, CodePage::WINDOWS_1252)
+                .unwrap()
+                .as_deref(),
             expected,
             "{bytes:?}"
         );
@@ -82,7 +84,33 @@ fn every_typed_string_form_decodes_and_consumes_exactly_its_own_bytes() {
 #[test]
 fn a_reduced_unicode_string_widens_each_byte_to_a_codepoint() {
     let mut r = Reader::new(&[0x03, b'c', b'a', b'f', 0xE9, 0x00]);
-    assert_eq!(typed_string(&mut r).unwrap().as_deref(), Some("caf\u{E9}"));
+    assert_eq!(
+        typed_string(&mut r, PropertyTag::SUBJECT_PREFIX, CodePage::WINDOWS_1252)
+            .unwrap()
+            .as_deref(),
+        Some("caf\u{E9}")
+    );
+}
+
+/// An 8-bit `TypedString` is in the session's code page, and one that is not text in it is refused
+/// with the property named.
+#[test]
+fn an_eight_bit_typed_string_is_read_in_the_sessions_code_page() {
+    let cyrillic = CodePage::new(1251).unwrap();
+    let mut r = Reader::new(&[0x02, 0xCF, 0xF0, 0xE8, 0x00]);
+    assert_eq!(
+        typed_string(&mut r, PropertyTag::NORMALIZED_SUBJECT, cyrillic)
+            .unwrap()
+            .as_deref(),
+        Some("\u{41F}\u{440}\u{438}")
+    );
+
+    let mut r = Reader::new(&[0x02, 0x93, 0x00]);
+    assert!(matches!(
+        typed_string(&mut r, eight_bit(PropertyTag::SUBJECT_PREFIX), CodePage::new(932).unwrap()),
+        Err(Error::UndecodableString { tag, code_page: 932, .. })
+            if tag == PropertyTag::new(0x003D_001E)
+    ));
 }
 
 /// An unrecognised `StringType` has no length, so decoding stops rather than continuing into the
@@ -91,7 +119,7 @@ fn a_reduced_unicode_string_widens_each_byte_to_a_codepoint() {
 fn an_unknown_string_type_stops_the_decode() {
     let mut r = Reader::new(&[0x05, 0x00]);
     assert!(matches!(
-        typed_string(&mut r),
+        typed_string(&mut r, PropertyTag::SUBJECT_PREFIX, CodePage::WINDOWS_1252),
         Err(Error::InvalidStringType { kind: 0x05, at: 0 })
     ));
 }
@@ -117,7 +145,7 @@ fn an_open_message_response_reads_its_recipient_table_whole() {
     let buf = w.finish();
 
     let mut r = Reader::new(&buf);
-    let response = OpenMessageResponse::read(&mut r).unwrap();
+    let response = OpenMessageResponse::read(&mut r, CodePage::WINDOWS_1252).unwrap();
 
     assert!(response.has_named_properties());
     assert_eq!(response.subject_prefix(), Some("RE: "));
@@ -162,7 +190,8 @@ fn an_embedded_message_response_reports_the_id_it_was_given() {
     w.u16(0).u16(0).u8(0); // no recipients at all
     let buf = w.finish();
 
-    let response = OpenMessageResponse::read_embedded(&mut Reader::new(&buf)).unwrap();
+    let response =
+        OpenMessageResponse::read_embedded(&mut Reader::new(&buf), CodePage::WINDOWS_1252).unwrap();
     assert_eq!(
         response.embedded_id(),
         Some(MessageId::new(0x0D01_0000_0000_00FF))
@@ -183,7 +212,8 @@ fn fewer_rows_than_recipients_is_reported_rather_than_hidden() {
     w.u16(9).u16(0).u8(0);
     let buf = w.finish();
 
-    let response = OpenMessageResponse::read(&mut Reader::new(&buf)).unwrap();
+    let response =
+        OpenMessageResponse::read(&mut Reader::new(&buf), CodePage::WINDOWS_1252).unwrap();
     assert_eq!(response.recipient_count(), 9);
     assert!(response.recipients().is_empty());
     assert!(response.is_truncated());
@@ -202,8 +232,8 @@ fn a_recipient_type_outside_the_table_still_prints() {
 fn truncated_message_responses_never_panic() {
     for length in 0..24 {
         let buf = vec![0x02; length];
-        let _ = OpenMessageResponse::read(&mut Reader::new(&buf));
-        let _ = OpenMessageResponse::read_embedded(&mut Reader::new(&buf));
+        let _ = OpenMessageResponse::read(&mut Reader::new(&buf), CodePage::WINDOWS_1252);
+        let _ = OpenMessageResponse::read_embedded(&mut Reader::new(&buf), CodePage::WINDOWS_1252);
     }
 }
 

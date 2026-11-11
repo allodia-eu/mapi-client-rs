@@ -11,7 +11,7 @@
 
 use crate::error::{Error, ErrorCode, Result};
 use crate::oxcdata::kind::ValueContext;
-use crate::oxcdata::{Cell, PropertyTag, PropertyValue, TableString};
+use crate::oxcdata::{Cell, CodePage, PropertyTag, PropertyValue, TableString};
 use crate::wire::{Reader, Writer};
 
 #[cfg(test)]
@@ -104,11 +104,15 @@ impl PropertySet {
     /// Nothing is pre-allocated from `count`: it is a number from a server nobody here controls.
     ///
     /// [MS-OXCDATA] §2.11.4 — `TaggedPropertyValue` structure
-    pub(crate) fn read_tagged(r: &mut Reader<'_>, count: usize) -> Result<Self> {
+    pub(crate) fn read_tagged(
+        r: &mut Reader<'_>,
+        count: usize,
+        code_page: CodePage,
+    ) -> Result<Self> {
         let mut cells = Vec::new();
         for _ in 0..count {
             let tag = PropertyTag::new(r.u32()?);
-            let value = PropertyValue::read(r, tag.property_type(), ValueContext::Object)?;
+            let value = PropertyValue::read(r, tag, ValueContext::Object, code_page)?;
             cells.push(Cell::new(tag, value));
         }
         Ok(Self { cells })

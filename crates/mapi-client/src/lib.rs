@@ -162,7 +162,7 @@ pub use mapi_proto;
 pub use mapi_proto::{
     APPOINTMENT_COLUMNS, APPOINTMENT_PROPERTIES, ATTACHMENT_COLUMNS, ATTACHMENT_PROPERTIES,
     AttachMethod, AttachmentNumber, Bookmark, COMPLETE_FLAG_PROPERTIES, CONTACT_COLUMNS,
-    CONTACT_PROPERTIES, CONTENTS_COLUMNS, Cell, ChangeNumber, Connected, ContainerClass,
+    CONTACT_PROPERTIES, CONTENTS_COLUMNS, Cell, ChangeNumber, CodePage, Connected, ContainerClass,
     ContentsDownload, ErrorCode, FOLDER_PROPERTIES, FOLLOW_UP_PROPERTIES, FileTime, FlagStatus,
     Floating64, FolderDepth, FolderEntryId, FolderId, FolderStamp, FolderStamps, FollowupIcon,
     FuzzyLevel, GlobCnt, Guid, HIERARCHY_COLUMNS, Headers, IcsState, IdSet, Lcid, LegacyDn,

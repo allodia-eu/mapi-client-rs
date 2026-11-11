@@ -16,7 +16,7 @@ use crate::http::{
     ConnectResponse, CookieJar, ExecuteResponse, Headers, Lcid, Payload, Request, RequestType,
     ResponseCode, connect_body, disconnect_body, execute_body,
 };
-use crate::oxcdata::{LegacyDn, PropertyTag};
+use crate::oxcdata::{CodePage, LegacyDn, PropertyTag};
 use crate::rop::{Decoding, ObjectHandle, RopBatch, RopBuffer, decode_all};
 
 mod builder;
@@ -90,6 +90,7 @@ pub struct Session {
     client_info: String,
     request_guid: String,
     counter: u64,
+    code_page: CodePage,
     lcid_sort: Lcid,
     lcid_string: Lcid,
     cookies: CookieJar,
@@ -117,6 +118,13 @@ impl Session {
     #[must_use]
     pub fn builder() -> SessionBuilder {
         SessionBuilder::new()
+    }
+
+    /// The code page this session connects with, and so the one every 8-bit string in its ROP
+    /// buffers is written in. See [`SessionBuilder::code_page`].
+    #[must_use]
+    pub const fn code_page(&self) -> CodePage {
+        self.code_page
     }
 
     /// Whether a Session Context has been established.
@@ -203,7 +211,7 @@ impl Session {
             });
         }
 
-        let body = connect_body(user_dn, self.lcid_sort, self.lcid_string);
+        let body = connect_body(user_dn, self.code_page, self.lcid_sort, self.lcid_string);
         let request = self.request(RequestType::Connect, body);
         self.pending = Some(Pending::Connect(user_dn.clone()));
         Ok(request)
@@ -241,7 +249,7 @@ impl Session {
             });
         }
 
-        let body = connect_body(user_dn, self.lcid_sort, self.lcid_string);
+        let body = connect_body(user_dn, self.code_page, self.lcid_sort, self.lcid_string);
         let request = self.request(RequestType::Connect, body);
         self.pending = Some(Pending::Connect(user_dn.clone()));
         Ok(request)
@@ -429,6 +437,7 @@ impl Session {
             Decoding {
                 columns,
                 property_tags,
+                code_page: self.code_page,
             },
         )?;
         self.remember_columns(columns, &buffer.handles);

@@ -3,7 +3,7 @@
 use core::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
-use mapi_proto::{Lcid, LegacyDn, Outcome, Session};
+use mapi_proto::{CodePage, Lcid, LegacyDn, Outcome, Session};
 
 use crate::builder::MapiClientBuilder;
 use crate::connection::Connection;
@@ -84,6 +84,7 @@ pub struct MapiClient {
     pub(crate) identity: Arc<Identity>,
     pub(crate) user_dn: LegacyDn,
     pub(crate) locale: Lcid,
+    pub(crate) code_page: CodePage,
     pub(crate) client_application: String,
 }
 
@@ -181,6 +182,7 @@ impl MapiClient {
     fn session(&self) -> Session {
         Session::builder()
             .locale(self.locale)
+            .code_page(self.code_page)
             .client_application(self.client_application.clone())
             .client_info(self.identity.next_session())
             .request_guid(guid())

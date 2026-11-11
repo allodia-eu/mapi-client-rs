@@ -10,7 +10,7 @@
 //! [MS-OXCMAPIHTTP] §2.2.4 — request types for the mailbox server endpoint
 
 use crate::http::Headers;
-use crate::oxcdata::LegacyDn;
+use crate::oxcdata::{CodePage, LegacyDn};
 use crate::wire::Writer;
 
 /// `Connect`'s `Flags`, where `0x00000000` requests a connection **without** administrator
@@ -22,10 +22,6 @@ use crate::wire::Writer;
 /// reference client does, under a comment about compression — gets an ordinary user's logon
 /// refused with `LoginPermission`, which reads like an authentication failure and is not one.
 const CONNECT_NO_ADMIN_PRIVILEGE: u32 = 0x0000_0000;
-
-/// `DefaultCodePage`: Windows-1252. Requesting `PtypString` columns means text comes back as
-/// UTF-16 regardless, so this never decides an encoding in practice.
-const CONNECT_CODE_PAGE: u32 = 1252;
 
 /// A language code identifier: the locale a Session Context runs under.
 ///
@@ -194,12 +190,20 @@ impl Request {
 /// else second. They are separate fields because they answer separate questions, and a client that
 /// swaps them sorts in one language and reads in another.
 ///
+/// `DefaultCodePage` is the code page every 8-bit string in a ROP buffer is then written in, in
+/// both directions ([MS-OXCDATA] §2.11.1.2).
+///
 /// [MS-OXCMAPIHTTP] §2.2.4.1.1 — request body
-pub(crate) fn connect_body(user_dn: &LegacyDn, lcid_sort: Lcid, lcid_string: Lcid) -> Vec<u8> {
+pub(crate) fn connect_body(
+    user_dn: &LegacyDn,
+    code_page: CodePage,
+    lcid_sort: Lcid,
+    lcid_string: Lcid,
+) -> Vec<u8> {
     let mut w = Writer::new();
     w.ascii_z(user_dn.as_str())
         .u32(CONNECT_NO_ADMIN_PRIVILEGE)
-        .u32(CONNECT_CODE_PAGE)
+        .u32(u32::from(code_page.as_u16()))
         .u32(lcid_sort.as_u32())
         .u32(lcid_string.as_u32())
         .u32(EMPTY_AUXILIARY_BUFFER);
@@ -237,7 +241,7 @@ mod tests {
     #[test]
     fn connect_body_matches_the_spec_layout() {
         let dn = LegacyDn::new("/o=X").unwrap();
-        let body = connect_body(&dn, Lcid::EN_US, Lcid::EN_US);
+        let body = connect_body(&dn, CodePage::WINDOWS_1252, Lcid::EN_US, Lcid::EN_US);
 
         #[rustfmt::skip]
         let expected = vec![
@@ -257,7 +261,12 @@ mod tests {
     #[test]
     fn connect_body_writes_sort_before_string() {
         let dn = LegacyDn::new("/o=X").unwrap();
-        let body = connect_body(&dn, Lcid::new(0x0413), Lcid::new(0x0407));
+        let body = connect_body(
+            &dn,
+            CodePage::WINDOWS_1252,
+            Lcid::new(0x0413),
+            Lcid::new(0x0407),
+        );
 
         assert_eq!(&body[13..17], &[0x13, 0x04, 0x00, 0x00]); // LcidSort = nl-NL
         assert_eq!(&body[17..21], &[0x07, 0x04, 0x00, 0x00]); // LcidString = de-DE

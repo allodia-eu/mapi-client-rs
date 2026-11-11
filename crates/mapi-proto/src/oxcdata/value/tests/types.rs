@@ -30,7 +30,7 @@ fn the_remaining_scalars_read_exactly_their_own_width() {
     ];
     for (property_type, bytes, expected) in cases {
         let mut r = Reader::new(bytes);
-        let value = PropertyValue::read(&mut r, property_type, ValueContext::Object).unwrap();
+        let value = PropertyValue::read_as(&mut r, property_type, ValueContext::Object).unwrap();
         assert_eq!(value, expected, "{property_type}");
         assert!(r.is_empty(), "{property_type} left bytes unread");
         assert_eq!(value.property_type(), Some(property_type));
@@ -116,20 +116,21 @@ fn every_list_type_is_a_long_count_then_its_values() {
 
     for (property_type, bytes, expected) in cases {
         let mut r = Reader::new(&bytes);
-        let value = PropertyValue::read(&mut r, property_type, ValueContext::Object).unwrap();
+        let value = PropertyValue::read_as(&mut r, property_type, ValueContext::Object).unwrap();
         assert_eq!(value, expected, "{property_type}");
         assert!(r.is_empty(), "{property_type} left bytes unread");
         assert_eq!(value.property_type(), Some(property_type));
         assert_eq!(write(&value).unwrap(), bytes, "{property_type}");
 
         let mut r = Reader::new(&bytes);
-        let in_a_row = PropertyValue::read(&mut r, property_type, ValueContext::TableRow).unwrap();
+        let in_a_row =
+            PropertyValue::read_as(&mut r, property_type, ValueContext::TableRow).unwrap();
         assert_eq!(in_a_row, expected, "a table row counts values the same way");
     }
 }
 
-/// `PtypMultipleString8` decodes as `PtypString8` does, and like it is never sent: its code page is
-/// the session's, which this crate never sets.
+/// `PtypMultipleString8` decodes as `PtypString8` does, and like it is never sent: a client SHOULD
+/// send `PtypString` ([MS-OXCDATA] §2.11.1.2).
 #[test]
 fn a_multiple_string8_reads_but_is_never_written() {
     let bytes = [0x02, 0x00, 0x00, 0x00, b'a', 0x00, b'b', b'c', 0x00];

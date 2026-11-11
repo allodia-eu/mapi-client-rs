@@ -5,12 +5,13 @@ use crate::oxcdata::{Guid, PropertyName, PropertySetId};
 
 mod example;
 mod recovery;
+mod strings;
 
 use example::EXAMPLE;
 
 /// Feeds a whole stream, `chunk` bytes at a time, and collects every event.
 fn events_of(stream: &[u8], chunk: usize) -> Vec<SyncEvent> {
-    let mut sync = ContentsSync::new();
+    let mut sync = ContentsSync::new(CodePage::WINDOWS_1252);
     let mut events = Vec::new();
     for piece in stream.chunks(chunk) {
         sync.feed(piece);
@@ -156,7 +157,7 @@ fn the_example_reads_the_same_however_it_is_split() {
 
 #[test]
 fn a_stream_that_ends_early_is_reported_at_the_end() {
-    let mut sync = ContentsSync::new();
+    let mut sync = ContentsSync::new(CodePage::WINDOWS_1252);
     sync.feed(&EXAMPLE[..EXAMPLE.len() - 4]);
     while sync.next_event().unwrap().is_some() {}
     assert!(!sync.is_finished());
@@ -408,7 +409,7 @@ fn an_unknown_property_type_stops_the_stream() {
     let mut stream = Stream::default().full_change(1, "first");
     stream.0.extend_from_slice(&0x0001_00FD_u32.to_le_bytes());
     stream.0.extend_from_slice(&[0; 8]);
-    let mut sync = ContentsSync::new();
+    let mut sync = ContentsSync::new(CodePage::WINDOWS_1252);
     sync.feed(&stream.0);
     let error = loop {
         match sync.next_event() {
@@ -526,14 +527,14 @@ fn a_group_mapping_can_name_by_lid_and_refuses_what_it_cannot_read() {
 
 #[test]
 fn a_parser_reports_when_it_is_finished_and_markers_print_their_values() {
-    let mut sync = ContentsSync::new();
+    let mut sync = ContentsSync::new(CodePage::WINDOWS_1252);
     sync.feed(&Stream::default().end());
     while sync.next_event().unwrap().is_some() {}
     assert!(sync.is_finished());
     assert_eq!(sync.next_event().unwrap(), None);
     assert_eq!(Marker::IncrSyncEnd.to_string(), "IncrSyncEnd (0x40140003)");
 
-    let mut extra = ContentsSync::new();
+    let mut extra = ContentsSync::new(CodePage::WINDOWS_1252);
     extra.feed(&[Stream::default().end(), vec![0x01]].concat());
     while extra.next_event().unwrap().is_some() {}
     assert!(matches!(

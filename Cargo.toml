@@ -28,6 +28,8 @@ mapi-autodiscover = { version = "0.4.0", path = "crates/mapi-autodiscover" }
 mapi-client = { version = "0.4.0", path = "crates/mapi-client" }
 
 thiserror = "2"
+# The WHATWG decoders for the Windows code pages an 8-bit MAPI string can be written in.
+encoding_rs = "0.8"
 roxmltree = "0.21"
 
 # ---------------------------------------------------------------------------

@@ -17,7 +17,8 @@
 use std::borrow::Cow;
 
 use mapi_proto::{
-    Connected, Execution, LegacyDn, Outcome, Request, ResponseCode, RopBatch, RopResponse, Session,
+    CodePage, Connected, Execution, LegacyDn, Outcome, Request, ResponseCode, RopBatch,
+    RopResponse, Session,
 };
 
 use crate::describe;
@@ -79,6 +80,11 @@ impl Connection {
     #[must_use]
     pub const fn server(&self) -> &Connected {
         &self.connected
+    }
+
+    /// The code page the session connected with, which every 8-bit string it reads is in.
+    pub(crate) const fn code_page(&self) -> CodePage {
+        self.session.code_page()
     }
 
     /// Logs on to the mailbox, which is what every later ROP hangs off.

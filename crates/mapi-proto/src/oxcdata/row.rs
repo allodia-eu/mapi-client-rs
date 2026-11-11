@@ -10,7 +10,9 @@
 
 use crate::error::{Error, Result};
 use crate::oxcdata::kind::ValueContext;
-use crate::oxcdata::{FolderId, MessageId, PropertySet, PropertyTag, PropertyValue, TableString};
+use crate::oxcdata::{
+    CodePage, FolderId, MessageId, PropertySet, PropertyTag, PropertyValue, TableString,
+};
 use crate::wire::Reader;
 
 /// Which of the two row encodings the server chose.
@@ -144,6 +146,7 @@ impl PropertyRow {
         r: &mut Reader<'_>,
         columns: &[PropertyTag],
         context: ValueContext,
+        code_page: CodePage,
     ) -> Result<Self> {
         let form = match r.u8()? {
             0x00 => RowForm::Standard,
@@ -153,8 +156,8 @@ impl PropertyRow {
         let mut cells = Vec::with_capacity(columns.len());
         for &tag in columns {
             let value = match form {
-                RowForm::Standard => PropertyValue::read(r, tag.property_type(), context)?,
-                RowForm::Flagged => Self::read_flagged_value(r, tag, context)?,
+                RowForm::Standard => PropertyValue::read(r, tag, context, code_page)?,
+                RowForm::Flagged => Self::read_flagged_value(r, tag, context, code_page)?,
             };
             cells.push(Cell { tag, value });
         }
@@ -165,10 +168,11 @@ impl PropertyRow {
         r: &mut Reader<'_>,
         tag: PropertyTag,
         context: ValueContext,
+        code_page: CodePage,
     ) -> Result<PropertyValue> {
         let at = r.position();
         match r.u8()? {
-            0x00 => PropertyValue::read(r, tag.property_type(), context),
+            0x00 => PropertyValue::read(r, tag, context, code_page),
             0x01 => Ok(PropertyValue::Absent),
             0x0A => Ok(PropertyValue::Error(r.u32()?.into())),
             flag => Err(Error::InvalidValueFlag { flag, at }),

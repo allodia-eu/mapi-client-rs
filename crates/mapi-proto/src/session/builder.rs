@@ -10,6 +10,7 @@
 
 use super::{DEFAULT_CLIENT_APPLICATION, DEFAULT_GUID, Session};
 use crate::http::{CookieJar, Lcid};
+use crate::oxcdata::CodePage;
 
 /// Builds a [`Session`] with a client identity and locale of your own.
 ///
@@ -19,6 +20,7 @@ pub struct SessionBuilder {
     client_application: String,
     client_info: String,
     request_guid: String,
+    code_page: CodePage,
     lcid_sort: Lcid,
     lcid_string: Lcid,
 }
@@ -37,6 +39,7 @@ impl SessionBuilder {
             client_application: DEFAULT_CLIENT_APPLICATION.to_owned(),
             client_info: format!("{DEFAULT_GUID}:1"),
             request_guid: DEFAULT_GUID.to_owned(),
+            code_page: CodePage::WINDOWS_1252,
             lcid_sort: Lcid::EN_US,
             lcid_string: Lcid::EN_US,
         }
@@ -89,6 +92,28 @@ impl SessionBuilder {
         self
     }
 
+    /// Sets the code page the Session Context runs under: `Connect`'s `DefaultCodePage`.
+    ///
+    /// Defaults to [`CodePage::WINDOWS_1252`]. It decides one thing: what the bytes of an 8-bit
+    /// string mean, in a request and in a response — a `PtypString8` value, a table column asked
+    /// for as one, an 8-bit `TypedString` ([MS-OXCDATA] §2.11.1.2). Every such value this session
+    /// reads is decoded in it. A recipient row without its Unicode flag is in it too (§2.8.3.1),
+    /// but [`OpenRecipient`](crate::OpenRecipient) hands rows back undecoded, naming their code
+    /// page. A `PtypString` is UTF-16 whatever this says, which is why this crate asks for that
+    /// wherever a request lets it.
+    ///
+    /// Exchange converts each string from the Unicode it stores into this code page, and a
+    /// character the code page cannot hold arrives as `?` or as the nearest letter it has. Measured
+    /// on Exchange Server SE `15.02.2562.056`: a subject `Café € ž При` read as `PtypString8`
+    /// arrived as `Café € ž ???` under 1252 and as `Cafe € z При` under 1251.
+    ///
+    /// [MS-OXCMAPIHTTP] §2.2.4.1.1 — `DefaultCodePage`
+    #[must_use]
+    pub const fn code_page(mut self, code_page: CodePage) -> Self {
+        self.code_page = code_page;
+        self
+    }
+
     /// Sets `X-ClientApplication`, whose documented format is `Outlook/15.xx.xxxx.xxxx`.
     ///
     /// [MS-OXCMAPIHTTP] §2.2.3.3.6
@@ -127,6 +152,7 @@ impl SessionBuilder {
             client_info: self.client_info,
             request_guid: self.request_guid,
             counter: 0,
+            code_page: self.code_page,
             lcid_sort: self.lcid_sort,
             lcid_string: self.lcid_string,
             cookies: CookieJar::new(),
@@ -174,5 +200,26 @@ mod tests {
             ),
             [0x13, 0x04, 0, 0, 0x09, 0x04, 0, 0]
         );
+    }
+
+    /// The code page defaults to 1252 and an override is what `Connect` carries and what the
+    /// session then reads 8-bit strings in.
+    ///
+    /// [MS-OXCMAPIHTTP] §2.2.4.1.1 — `DefaultCodePage`
+    #[test]
+    fn the_builders_code_page_is_what_connect_carries() {
+        let dn = LegacyDn::new("/o=X").unwrap();
+        // UserDn is null-terminated, then Flags precede DefaultCodePage.
+        let at = dn.as_str().len() + 1 + 4;
+        let code_page = |mut session: Session| {
+            session.begin_connect(&dn).unwrap().into_body()[at..at + 4].to_vec()
+        };
+        assert_eq!(code_page(Session::new()), [0xE4, 0x04, 0, 0]);
+        assert_eq!(Session::new().code_page(), CodePage::WINDOWS_1252);
+
+        let cyrillic = CodePage::new(1251).unwrap();
+        let session = SessionBuilder::new().code_page(cyrillic).build();
+        assert_eq!(session.code_page(), cyrillic);
+        assert_eq!(code_page(session), [0xE3, 0x04, 0, 0]);
     }
 }

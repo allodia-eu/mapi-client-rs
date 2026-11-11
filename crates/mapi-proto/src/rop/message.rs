@@ -21,7 +21,7 @@
 //! [MS-OXCMSG] §2.2.3 — semantics
 
 use crate::error::{Error, Result};
-use crate::oxcdata::{FolderId, MessageId, RecipientType};
+use crate::oxcdata::{CodePage, FolderId, MessageId, PropertyTag, PropertyType, RecipientType};
 use crate::rop::RopId;
 use crate::rop::batch::LOGON_ID;
 use crate::wire::{Reader, Writer};
@@ -235,24 +235,30 @@ impl OpenMessageResponse {
     }
 
     /// Reads a `RopOpenMessage` body, after `RopId`, `OutputHandleIndex` and a zero `ReturnValue`.
-    pub(crate) fn read(r: &mut Reader<'_>) -> Result<Self> {
-        Self::read_body(r, RopId::OPEN_MESSAGE, None)
+    pub(crate) fn read(r: &mut Reader<'_>, code_page: CodePage) -> Result<Self> {
+        Self::read_body(r, RopId::OPEN_MESSAGE, None, code_page)
     }
 
     /// Reads a `RopOpenEmbeddedMessage` body, whose only difference is a `Reserved` byte and the
     /// `MessageId` in front of the rest.
     ///
     /// [MS-OXCROPS] §2.2.6.16.2 — success response buffer
-    pub(crate) fn read_embedded(r: &mut Reader<'_>) -> Result<Self> {
+    pub(crate) fn read_embedded(r: &mut Reader<'_>, code_page: CodePage) -> Result<Self> {
         let _reserved = r.u8()?;
         let id = MessageId::new(r.u64()?);
-        Self::read_body(r, RopId::OPEN_EMBEDDED_MESSAGE, Some(id))
+        Self::read_body(r, RopId::OPEN_EMBEDDED_MESSAGE, Some(id), code_page)
     }
 
-    fn read_body(r: &mut Reader<'_>, rop: RopId, embedded_id: Option<MessageId>) -> Result<Self> {
+    fn read_body(
+        r: &mut Reader<'_>,
+        rop: RopId,
+        embedded_id: Option<MessageId>,
+        code_page: CodePage,
+    ) -> Result<Self> {
         let has_named_properties = r.u8()? != 0;
-        let subject_prefix = typed_string(r)?;
-        let normalized_subject = typed_string(r)?;
+        let subject_prefix = typed_string(r, eight_bit(PropertyTag::SUBJECT_PREFIX), code_page)?;
+        let normalized_subject =
+            typed_string(r, eight_bit(PropertyTag::NORMALIZED_SUBJECT), code_page)?;
         let recipient_count = r.u16()?;
 
         // The column set is read and dropped: it describes the RecipientProperties inside each
@@ -290,19 +296,33 @@ impl OpenMessageResponse {
 /// codepoint is below 0x100" — so this decodes byte-by-byte to a `char`, which is that rule stated
 /// forwards rather than a lucky coincidence.
 ///
+/// `0x02` is in the code page of the message, which this crate always opens with the Logon
+/// object's and so the session's (`CodePageId` `0x0FFF`). `tag` names the property the string is,
+/// for the error when it is not text in that code page.
+///
 /// [MS-OXCDATA] §2.11.7 — `TypedString` structure
-fn typed_string(r: &mut Reader<'_>) -> Result<Option<String>> {
+fn typed_string(
+    r: &mut Reader<'_>,
+    tag: PropertyTag,
+    code_page: CodePage,
+) -> Result<Option<String>> {
     let at = r.position();
     Ok(match r.u8()? {
         0x00 => None,
         0x01 => Some(String::new()),
-        0x02 => Some(r.ascii_z()?),
+        0x02 => Some(code_page.decode_property(tag, r.bytes_z()?)?),
         0x03 => Some(r.bytes_z()?.iter().copied().map(char::from).collect()),
         0x04 => Some(r.utf16_z()?),
         kind => {
             return Err(Error::InvalidStringType { kind, at });
         }
     })
+}
+
+/// The `PtypString8` form of a string property's tag, which is what a `TypedString` of type `0x02`
+/// carried.
+fn eight_bit(tag: PropertyTag) -> PropertyTag {
+    PropertyTag::from_parts(tag.id(), PropertyType::String8)
 }
 
 /// Encodes a `RopOpenMessage` request.
