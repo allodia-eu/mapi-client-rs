@@ -142,6 +142,79 @@ impl<'a> Exchange<'a> {
 pub trait Observer: Debug + Send + Sync {
     /// Reports one completed exchange.
     fn observe(&self, exchange: &Exchange<'_>);
+
+    /// Reports that Autodiscover was sent somewhere other than where it asked.
+    ///
+    /// Called once per redirect followed, before the request that follows it, so a transcript reads
+    /// in the order the search went. Where credentials go next is decided by these steps, which
+    /// is why they are reported: a lookup that ends up somewhere surprising should be visible as
+    /// the hop that took it there. Nothing is reported for a redirect that is not followed — the
+    /// plain-HTTP probe's, which comes back to the caller as
+    /// [`Error::RedirectNeedsConsent`](crate::Error::RedirectNeedsConsent) instead.
+    ///
+    /// Does nothing unless implemented, so an observer that only records exchanges need not say
+    /// so.
+    #[cfg(feature = "autodiscover")]
+    fn redirected(&self, redirect: &Redirect<'_>) {
+        let _ = redirect;
+    }
+}
+
+/// One redirect an Autodiscover search followed: who answered, how, and where it was sent.
+///
+/// [MS-OXDSCLI] §3.1.5.2 — HTTP 302 redirects
+/// [MS-OXDSCLI] §3.1.5.3 — `redirectAddr` and `redirectUrl`
+#[cfg(feature = "autodiscover")]
+#[derive(Clone, Copy, Debug)]
+pub struct Redirect<'a> {
+    kind: RedirectKind,
+    from: &'a str,
+    to: &'a str,
+}
+
+#[cfg(feature = "autodiscover")]
+impl<'a> Redirect<'a> {
+    pub(crate) const fn new(kind: RedirectKind, from: &'a str, to: &'a str) -> Self {
+        Self { kind, from, to }
+    }
+
+    /// How the answer asked for it.
+    #[must_use]
+    pub const fn kind(&self) -> RedirectKind {
+        self.kind
+    }
+
+    /// The URL whose answer asked for it.
+    #[must_use]
+    pub const fn from(&self) -> &'a str {
+        self.from
+    }
+
+    /// Where the search goes next: a URL, or for [`RedirectKind::Address`] an email address whose
+    /// own candidates the search starts again from.
+    #[must_use]
+    pub const fn to(&self) -> &'a str {
+        self.to
+    }
+}
+
+/// How an Autodiscover answer redirected the search.
+#[cfg(feature = "autodiscover")]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[non_exhaustive]
+pub enum RedirectKind {
+    /// An HTTP 302 in answer to the POST, whose `Location` the request is posted to again.
+    ///
+    /// [MS-OXDSCLI] §3.1.5.2
+    Http,
+    /// A response whose `Action` is `redirectUrl`: the same request, to the URL it names.
+    ///
+    /// [MS-OXDSCLI] §3.1.5.3
+    Url,
+    /// A response whose `Action` is `redirectAddr`: a new request, for the address it names.
+    ///
+    /// [MS-OXDSCLI] §3.1.5.3
+    Address,
 }
 
 #[cfg(test)]

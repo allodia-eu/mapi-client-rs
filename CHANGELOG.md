@@ -139,6 +139,12 @@ mailbox as it was first provisioned.
   wait for `ServerBusy` or a buffer for anything else. On Exchange Server SE `15.02.2562.056`, a
   refusal with `ecNotSupported` carried the nine bytes of the transfer fields and an empty buffer.
   Reading any of them as a bare failure would desynchronise the rest of the buffer.
+- **An HTTP 302 in answer to an Autodiscover POST is followed**, to an `https` URL only, as
+  [MS-OXDSCLI] §3.1.5.2 says the client "SHOULD repost the request to the redirection URL".
+  Before, it ended that candidate.
+- **`Observer::redirected`**, with `Redirect` and `RedirectKind`, reports each redirect a search
+  follows: a 302, a `redirectUrl` or a `redirectAddr`, where it came from and where it went. The
+  method has a default body, so an existing observer needs no change.
 
 ### Changed
 
@@ -155,6 +161,11 @@ mailbox as it was first provisioned.
 
 ### Fixed
 
+- **A `WWW-Authenticate` header carrying several challenges was read as one.** [RFC 9110]
+  §11.6.1 makes the header a comma-separated list, which a proxy in front of IIS may fold one
+  header per scheme into. The whole value was matched as one challenge, so every scheme after the
+  first went unseen. Each element now starts a challenge unless it is an auth-param, a token
+  followed by `=`, and a comma inside a quoted string separates nothing.
 - **A table read abandoned during its first round trip reported an empty table.** `Rows` took the
   unopened table out before the request and put it back only on failure, so a future dropped
   mid-open lost it, and the next `try_next` found nothing to do and answered `None`. It is now
@@ -165,6 +176,31 @@ mailbox as it was first provisioned.
   `Resolve-Path -Relative`, as `Verify-Fixtures.ps1` already did for the same reason. Only the
   scratch manifest was ever wrong: the comparison skips `MANIFEST.toml`, and the committed one is
   built from a long path.
+
+### Security
+
+- **Autodiscover sends credentials only to a candidate that asks for them.** Before, Basic and
+  Bearer went out with the first request to every candidate, and NTLM's opening message did too.
+  The first candidate is `https://<domain>/Autodiscover/Autodiscover.xml`, which is usually the
+  organisation's website, run by whoever runs it. Every candidate is now asked without credentials
+  first, and is sent them only in answer to a 401 offering their scheme. Measured against
+  `15.02.2562.056`: Exchange answers an unauthenticated POST with a 401 offering `Negotiate`,
+  `NTLM` and Basic, so this costs one round trip per candidate and breaks nothing. It offers
+  `Bearer` only to a request that names it, so a Bearer lookup opens with `Authorization: Bearer`
+  and no token. A 401 offering only other schemes is a candidate this client cannot use, and the
+  search moves on to the next, as [MS-OXDSCLI] §3.1.5.1 says for a nonfunctional URI. If nothing
+  else answers, the search ends with that refusal as `Unauthorized`, its `sent` saying nothing
+  was sent. The MAPI endpoint still gets Basic and Bearer preemptively: it is the caller's own
+  URL, or the one Autodiscover named.
+- **The plain-HTTP redirect probe's `Location` is no longer followed.** [MS-OXDISCO] §3.1.5.4 says
+  to "prompt the user to warn them of the redirection", and anyone on the path of a cleartext
+  request can write that header. Before, the search posted the request, and then the credentials,
+  wherever it pointed, as long as it was `https`. Now the search ends with
+  `Error::RedirectNeedsConsent`, which carries the location. A caller whose user agrees passes it
+  to the new `MapiClientBuilder::discover_at`, or to `lookup_at` or `mailboxes_at`. An alternative
+  mailbox whose own lookup ends there is listed with the location in the new
+  `Mailbox::redirect_needing_consent`, so one mailbox needing consent does not fail the list. Only
+  a 302 counts, as §3.1.5.4 says; the probe used to accept any 3xx.
 
 ## [0.4.0] - 2026-10-17
 

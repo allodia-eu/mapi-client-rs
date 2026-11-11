@@ -67,9 +67,15 @@ pub fn candidate_urls(address: &EmailAddress) -> CandidateUrls {
 
 /// The URL to `GET` when the candidates have not answered.
 ///
-/// A `302` response's `Location` header is itself a candidate — that is how a domain that hosts no
+/// A `302` response's `Location` header names a candidate — that is how a domain that hosts no
 /// Autodiscover service points at the one that does. This is a `GET` and carries no body, which is
 /// why plain HTTP is the specification's choice here and is kept.
+///
+/// **Ask the user before asking that candidate.** The answer came over plain HTTP, so anyone on
+/// the path could have written the `Location`, and the next request is the one that may be
+/// challenged for credentials. The specification says as much: "If this URI results in an HTTP 302
+/// redirect, prompt the user to warn them of the redirection. If the user accepts, the new
+/// location is added to the list of possible Autodiscover server URIs."
 ///
 /// [MS-OXDISCO] §3.1.5.4 — locations found by an HTTP redirect
 #[must_use]

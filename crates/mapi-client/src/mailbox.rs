@@ -49,6 +49,7 @@ pub struct Mailbox {
     pub(crate) smtp_address: Option<String>,
     pub(crate) endpoint: Option<String>,
     pub(crate) user_dn: Option<LegacyDn>,
+    pub(crate) redirect: Option<String>,
 }
 
 impl Mailbox {
@@ -96,19 +97,35 @@ impl Mailbox {
 
     /// Whether a session can be opened on it.
     ///
-    /// `false` for exactly one shape: an `AlternativeMailbox` given in the directory form of
-    /// [MS-OXDSCLI] §2.2.4.1.1.2.5.2 — a `LegacyDN` and a `Server` — because a MAPI/HTTP endpoint
-    /// needs a `?MailboxId=<guid>@<domain>` and a server's fully qualified name is not one. There
-    /// is no arithmetic from the first to the second, and the primary mailbox's endpoint is not a
+    /// `false` when the second lookup found no endpoint — see
+    /// [`redirect_needing_consent`](Self::redirect_needing_consent) for the one way that is
+    /// recoverable — and for an `AlternativeMailbox` given in the directory form of
+    /// [MS-OXDSCLI] §2.2.4.1.1.2.5.2, a `LegacyDN` and a `Server`. A MAPI/HTTP endpoint needs a
+    /// `?MailboxId=<guid>@<domain>`, and a server's fully qualified name is not one. There is no
+    /// arithmetic from the first to the second, and the primary mailbox's endpoint is not a
     /// substitute: it is refused at logon with
     /// [`ErrorCode::WRONG_SERVER`](mapi_proto::ErrorCode::WRONG_SERVER).
     ///
-    /// The shape is documented rather than hypothetical, and also rather than observed: it is what
-    /// [MS-OXDSCLI]'s notes 8 and 10 describe for Exchange 2007 and 2010, neither of which speaks
-    /// MAPI/HTTP at all. Every mailbox the lab reported arrived openable.
+    /// The directory form is documented rather than hypothetical, and also rather than observed:
+    /// it is what [MS-OXDSCLI]'s notes 8 and 10 describe for Exchange 2007 and 2010, neither of
+    /// which speaks MAPI/HTTP at all. Every mailbox the lab reported arrived openable.
     #[must_use]
     pub const fn is_openable(&self) -> bool {
         self.endpoint.is_some() && self.user_dn.is_some()
+    }
+
+    /// Where the plain-HTTP probe would send this mailbox's lookup, when that is where it ended.
+    ///
+    /// The same decision [`Error::RedirectNeedsConsent`] hands back for the account's own lookup,
+    /// left with the mailbox instead so that one alternative needing it does not fail the whole
+    /// list. If the user agrees, look the mailbox up there with
+    /// [`MapiClientBuilder::lookup_at`] and its [`smtp_address`](Self::smtp_address), and open it
+    /// with [`MapiClient::at`].
+    ///
+    /// [MS-OXDISCO] §3.1.5.4 — locations found by an HTTP redirect
+    #[must_use]
+    pub fn redirect_needing_consent(&self) -> Option<&str> {
+        self.redirect.as_deref()
     }
 
     /// The mailbox the lookup was made for, which needs no second round trip.
@@ -119,6 +136,7 @@ impl Mailbox {
             smtp_address: settings.user().smtp_address().map(str::to_owned),
             endpoint: endpoint.mail_store_url().map(str::to_owned),
             user_dn: LegacyDn::new(endpoint.legacy_dn()).ok(),
+            redirect: None,
         }
     }
 
@@ -131,6 +149,7 @@ impl Mailbox {
             smtp_address: alternative.smtp_address().map(str::to_owned),
             endpoint: None,
             user_dn: None,
+            redirect: None,
         }
     }
 }
@@ -246,8 +265,15 @@ impl MapiClientBuilder {
         let found = self
             .search_with(http.clone(), &address, queue(&address, url), url.is_none())
             .await;
-        let Ok(found) = found else {
-            return Mailbox::unopenable(alternative);
+        let found = match found {
+            Ok(found) => found,
+            Err(Error::RedirectNeedsConsent { location, .. }) => {
+                return Mailbox {
+                    redirect: Some(location),
+                    ..Mailbox::unopenable(alternative)
+                };
+            }
+            Err(_) => return Mailbox::unopenable(alternative),
         };
 
         let endpoint = found.settings.mapi_http();
@@ -267,6 +293,7 @@ impl MapiClientBuilder {
                 .and_then(|endpoint| endpoint.mail_store_url())
                 .map(str::to_owned),
             user_dn: endpoint.and_then(|endpoint| LegacyDn::new(endpoint.legacy_dn()).ok()),
+            redirect: None,
         }
     }
 }
@@ -367,6 +394,7 @@ mod tests {
                 "https://mail.example.test/mapi/emsmdb/?MailboxId=a@example.test".to_owned(),
             ),
             user_dn: LegacyDn::new("/o=Example/cn=alice").ok(),
+            redirect: None,
         }
     }
 
@@ -414,5 +442,60 @@ mod tests {
         assert!(!mailbox.is_openable());
         assert_eq!(mailbox.endpoint(), None);
         assert_eq!(mailbox.user_dn(), None);
+    }
+
+    /// An alternative mailbox whose own lookup ends at the plain-HTTP probe's redirect is listed
+    /// with the location, for the caller to put to the user — not followed, and not lost in a
+    /// mailbox that only says it cannot be opened.
+    #[tokio::test]
+    async fn an_alternative_needing_consent_carries_the_location() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let server = MockServer::start().await;
+        let location = format!(
+            "http://elsewhere.test:{}/Autodiscover/Autodiscover.xml",
+            server.address().port()
+        );
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(302).append_header("Location", &location))
+            .mount(&server)
+            .await;
+        let http = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
+            .resolve("autodiscover.shared.test", *server.address())
+            .build()
+            .unwrap();
+
+        let xml = r"<Autodiscover><Response><Account>
+             <Action>settings</Action>
+             <AlternativeMailbox>
+               <Type>Delegate</Type>
+               <DisplayName>Shared</DisplayName>
+               <SmtpAddress>team@shared.test</SmtpAddress>
+             </AlternativeMailbox>
+           </Account></Response></Autodiscover>";
+        let Ok(mapi_autodiscover::AutodiscoverResponse::Settings(settings)) =
+            mapi_autodiscover::AutodiscoverResponse::parse(xml)
+        else {
+            panic!("a settings response");
+        };
+        let alternative = settings.alternative_mailboxes().first().cloned().unwrap();
+
+        let mailbox = MapiClient::builder()
+            .connect_timeout(core::time::Duration::from_millis(500))
+            .danger_allow_plaintext_http()
+            .resolve(&http, &alternative, None)
+            .await;
+
+        assert!(!mailbox.is_openable());
+        assert_eq!(mailbox.redirect_needing_consent(), Some(location.as_str()));
+        assert_eq!(mailbox.smtp_address(), Some("team@shared.test"));
+        let requests = server.received_requests().await.unwrap();
+        assert!(
+            requests
+                .iter()
+                .all(|request| request.method.as_str() == "GET")
+        );
     }
 }

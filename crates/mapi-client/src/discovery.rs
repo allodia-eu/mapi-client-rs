@@ -5,11 +5,52 @@
 //! turn, follow whatever redirects the answers ask for, and only then fall back to the plain-HTTP
 //! redirect probe.
 //!
+//! # Where credentials go
+//!
+//! **Only where they are asked for.** Every candidate is first asked without them, and is sent
+//! them only in answer to a 401 offering their scheme — Basic and Bearer as a header, NTLM and
+//! `Negotiate` as the handshake's opening. A candidate is a guess built from the address's domain,
+//! and the first is usually the organisation's website, run by whoever runs it; a credential sent
+//! to it unasked is sent to them. Exchange asks: [MS-OXDSCLI] §5.1 recommends "that a server not
+//! answer Autodiscover queries unless the Autodiscover client has been authenticated", and
+//! measured against Exchange Server SE `15.02.2562.056`, an unauthenticated POST is answered 401
+//! with `Negotiate`, `NTLM` and Basic on offer. The cost is that round trip, once per candidate.
+//!
+//! Bearer is the exception that proves the rule: the same server offers `Bearer` only to a request
+//! that names it, so a Bearer lookup's first request carries `Authorization: Bearer` with no token
+//! — a question, not a credential — and the token goes only to a 401 that answers with a `Bearer`
+//! challenge.
+//!
+//! What this does not stop is a candidate that answers instead of challenging. Its settings name
+//! the MAPI endpoint, and the client built from them sends Basic or Bearer there unasked. That
+//! gives whoever runs the candidate nothing a 401 offering Basic would not have got them: what is
+//! withheld here is credentials sent to a server that never wanted them, not credentials a server
+//! sets out to collect.
+//!
+//! Redirects decide where the next request goes, so each is checked before it is followed:
+//!
+//! - **An HTTP 302** in answer to a POST, and a `redirectUrl`, are followed to an `https` URL only
+//!   ([MS-OXDSCLI] §3.1.5.2, §3.1.5.3). They come from a candidate that answered over TLS.
+//! - **A `redirectAddr`** starts the search again for the new address, under the same rules.
+//! - **The plain-HTTP probe's 302 is never followed on its own.** [MS-OXDISCO] §3.1.5.4 says to
+//!   "prompt the user to warn them of the redirection", and anyone on the path of a cleartext
+//!   request can write its `Location`. The search ends with [`Error::RedirectNeedsConsent`]
+//!   instead, and the caller follows it — or not — with [`MapiClientBuilder::discover_at`].
+//!
+//! Each redirect followed is reported to the [`Observer`](crate::Observer), if there is one.
+//!
+//! # What ends a search
+//!
 //! **A candidate that does not answer is not a failure** — a refused connection, a timeout, a page
 //! that is not Autodiscover at all, or a server that answers with an `<Error>` element all mean
-//! "try the next one", which is why an unreachable first candidate does not stop the search. A
-//! **401 does** stop it: the service is there and has refused these credentials, and grinding
-//! through the remaining candidates would replace that diagnosis with "nothing was found".
+//! "try the next one", which is why an unreachable first candidate does not stop the search. So
+//! does a 401 offering only schemes these credentials are not, which was sent nothing: it cannot
+//! be used, which is [MS-OXDSCLI] §3.1.5.1's nonfunctional URI. If nothing else answers, that
+//! refusal is what the search ends with, rather than "nothing was found", since it says why.
+//!
+//! **A 401 to the credentials does** stop it: the service is there and has refused them, and
+//! grinding through the remaining candidates would replace that diagnosis with "nothing was
+//! found".
 //!
 //! DNS `SRV` lookup is not performed here — it needs a resolver, and this crate has no opinion
 //! about which one. [`mapi_autodiscover::srv_query`] gives the query to make and
@@ -17,22 +58,23 @@
 //! [`MapiClientBuilder::lookup_at`].
 //!
 //! [MS-OXDISCO] §3.1.5 — how a client builds its list of candidate URIs
+//! [MS-OXDSCLI] §3.1.5.2 — following an HTTP 302
 //! [MS-OXDSCLI] §3.1.5.3 — acting on `redirectAddr` and `redirectUrl`
 
 use std::collections::VecDeque;
 
 use mapi_autodiscover::{
-    AutodiscoverRequest, AutodiscoverResponse, EmailAddress, MapiHttpEndpoint, Settings,
-    candidate_urls, redirect_probe_url,
+    AutodiscoverResponse, EmailAddress, MapiHttpEndpoint, Settings, candidate_urls,
+    redirect_probe_url,
 };
 use mapi_proto::LegacyDn;
-use reqwest::{Client, Response, StatusCode, Url};
+use reqwest::Client;
+use search::{Answer, Search};
 
-use crate::builder::{MapiClientBuilder, parse_endpoint};
+use crate::builder::MapiClientBuilder;
 use crate::client::MapiClient;
-use crate::credentials::Credentials;
 use crate::error::{Error, Result};
-use crate::transport::{challenges, scheme_names};
+use crate::observer::{Redirect, RedirectKind};
 
 /// How many redirects to follow before calling it a loop.
 ///
@@ -63,11 +105,52 @@ impl MapiClientBuilder {
     /// # Errors
     ///
     /// [`Error::NoEndpoint`] if no candidate produced a MAPI/HTTP endpoint,
-    /// [`Error::Unauthorized`] if one refused the credentials, [`Error::TooManyRedirects`] if the
-    /// deployment describes a loop, and whatever [`build`](MapiClientBuilder::build) reports once
-    /// the answer is in hand.
+    /// [`Error::RedirectNeedsConsent`] if none did and the plain-HTTP probe redirects somewhere
+    /// only the user can agree to, [`Error::Unauthorized`] if one refused the credentials,
+    /// [`Error::TooManyRedirects`] if the deployment describes a loop, and whatever
+    /// [`build`](MapiClientBuilder::build) reports once the answer is in hand.
     pub async fn discover(self, address: &EmailAddress) -> Result<MapiClient> {
         let endpoint = self.lookup(address).await?;
+        self.for_endpoint(&endpoint, address)
+    }
+
+    /// Locates the mailbox starting from an Autodiscover URL, and builds a client for it.
+    ///
+    /// [`discover`](MapiClientBuilder::discover) for a service the caller has named, which is how
+    /// a redirect the user agreed to is followed: the `location` an
+    /// [`Error::RedirectNeedsConsent`] carries goes here.
+    ///
+    /// ```no_run
+    /// use mapi_client::{Credentials, EmailAddress, Error, MapiClient};
+    ///
+    /// # fn the_user_agrees(_: &str) -> bool { true }
+    /// # async fn example() -> Result<(), Error> {
+    /// let builder =
+    ///     MapiClient::builder().credentials(Credentials::basic("alice", "hunter2"));
+    /// let address = EmailAddress::new("alice@example.test")?;
+    /// let client = match builder.clone().discover(&address).await {
+    ///     Err(Error::RedirectNeedsConsent { location, .. })
+    ///         if the_user_agrees(&location) =>
+    ///     {
+    ///         builder.discover_at(location, &address).await?
+    ///     }
+    ///     other => other?,
+    /// };
+    /// # let _ = client;
+    /// # Ok(())
+    /// # }
+    /// ```
+    ///
+    /// # Errors
+    ///
+    /// As [`lookup_at`](MapiClientBuilder::lookup_at), and whatever
+    /// [`build`](MapiClientBuilder::build) reports once the answer is in hand.
+    pub async fn discover_at(
+        self,
+        url: impl Into<String>,
+        address: &EmailAddress,
+    ) -> Result<MapiClient> {
+        let endpoint = self.lookup_at(url, address).await?;
         self.for_endpoint(&endpoint, address)
     }
 
@@ -167,22 +250,15 @@ impl MapiClientBuilder {
         mut queue: VecDeque<String>,
         probe: bool,
     ) -> Result<Found> {
-        let search = Search {
-            http,
-            credentials: &self.credentials,
-            allow_plaintext_http: self.allows_plaintext_http(),
-            #[cfg(feature = "kerberos")]
-            kerberos: Some(&self.kerberos),
-            #[cfg(all(feature = "ntlm", not(feature = "kerberos")))]
-            kerberos: None,
-            #[cfg(feature = "ntlm")]
-            kdc_timeout: self.connect_timeout,
-        };
+        let search = Search::new(self, http);
 
         let mut address = address.clone();
         let mut tried: Vec<String> = Vec::new();
         let mut redirects = 0_usize;
         let mut probed = !probe;
+        // The first candidate that asked for credentials in another scheme, for an error that says
+        // more than "nothing was found" if nothing else answers.
+        let mut unasked = None;
 
         loop {
             let Some(url) = queue.pop_front() else {
@@ -192,16 +268,34 @@ impl MapiClientBuilder {
                 probed = true;
                 // Last resort: a GET over plain HTTP whose `Location` names the real service.
                 // It carries no body and no credentials, which is why plain HTTP is tolerable
-                // here and nowhere else. [MS-OXDISCO] §3.1.5.4
-                if let Some(target) = search.probe(&address).await {
-                    queue.push_back(target);
+                // here and nowhere else — and why what it says is the user's to accept, not
+                // this crate's. [MS-OXDISCO] §3.1.5.4
+                let from = redirect_probe_url(&address);
+                if let Some(location) = search.probe(&from).await {
+                    return Err(Error::RedirectNeedsConsent {
+                        address: address.to_string(),
+                        from,
+                        location,
+                        tried,
+                    });
                 }
                 continue;
             };
 
             tried.push(url.clone());
-            let Some(response) = search.ask(&url, &address).await? else {
-                continue;
+            let response = match search.ask(&url, &address).await? {
+                Answer::Nothing => continue,
+                Answer::Unasked(error) => {
+                    unasked.get_or_insert(error);
+                    continue;
+                }
+                Answer::Moved(target) => {
+                    redirects = bump(redirects)?;
+                    search.report(Redirect::new(RedirectKind::Http, &url, &target));
+                    queue.push_front(target);
+                    continue;
+                }
+                Answer::Response(response) => response,
             };
 
             match response {
@@ -214,10 +308,12 @@ impl MapiClientBuilder {
                 }
                 AutodiscoverResponse::RedirectUrl(target) => {
                     redirects = bump(redirects)?;
+                    search.report(Redirect::new(RedirectKind::Url, &url, &target));
                     queue.push_front(target);
                 }
                 AutodiscoverResponse::RedirectAddress(next) => {
                     redirects = bump(redirects)?;
+                    search.report(Redirect::new(RedirectKind::Address, &url, next.as_str()));
                     // A new address means a new domain, so the candidate list starts over.
                     queue = candidate_urls(&next).collect();
                     probed = !probe;
@@ -230,10 +326,10 @@ impl MapiClientBuilder {
             }
         }
 
-        Err(Error::NoEndpoint {
+        Err(unasked.unwrap_or_else(|| Error::NoEndpoint {
             address: address.to_string(),
             tried,
-        })
+        }))
     }
 }
 
@@ -282,199 +378,10 @@ fn bump(redirects: usize) -> Result<usize> {
     Ok(next)
 }
 
-/// The HTTP side of one lookup.
-#[derive(Debug)]
-struct Search<'a> {
-    http: Client,
-    credentials: &'a Credentials,
-    allow_plaintext_http: bool,
-    /// The builder's KDCs and tickets, for `Negotiate`.
-    #[cfg(feature = "ntlm")]
-    kerberos: Option<&'a crate::handshake::Kdcs>,
-    /// How long to wait for each KDC: the connect timeout. See
-    /// [`Context::kdc_timeout`](crate::handshake::Context::kdc_timeout).
-    #[cfg(feature = "ntlm")]
-    kdc_timeout: core::time::Duration,
-}
-
-impl Search<'_> {
-    /// Asks one candidate URL.
-    ///
-    /// `Ok(None)` means "this URL had nothing useful to say" — refused, timed out, answered with
-    /// something that is not an Autodiscover response, or is not a URL this crate will POST
-    /// credentials to. Every one of those means the next candidate, not the end of the search.
-    async fn ask(&self, url: &str, address: &EmailAddress) -> Result<Option<AutodiscoverResponse>> {
-        let Ok(url) = parse_endpoint(url, self.allow_plaintext_http) else {
-            return Ok(None);
-        };
-
-        // A connection-oriented scheme has to run its handshake here too. Autodiscover is the
-        // *first* thing a caller does, so NTLM that worked only on the MAPI endpoint would fail at
-        // the step before it.
-        #[cfg(feature = "ntlm")]
-        let Some(response) = self.authenticate(&url, address).await? else {
-            return Ok(None);
-        };
-        #[cfg(not(feature = "ntlm"))]
-        let Some(response) = self.post(&url, address, None).await else {
-            return Ok(None);
-        };
-
-        if response.status() == StatusCode::UNAUTHORIZED {
-            return Err(Error::Unauthorized {
-                url: url.to_string(),
-                offered: scheme_names(&challenges(&response)),
-                sent: self.credentials.describe(),
-            });
-        }
-
-        if !response.status().is_success() {
-            return Ok(None);
-        }
-
-        let Ok(body) = response.text().await else {
-            return Ok(None);
-        };
-
-        // Not every 200 on this path is an Autodiscover response — the first candidate URL is
-        // often just the organisation's website — so a body that will not parse is one more
-        // candidate that did not answer.
-        Ok(AutodiscoverResponse::parse(&body).ok())
-    }
-
-    /// POSTs one Autodiscover request, with an optional `Authorization` value of our own.
-    ///
-    /// `None` means the candidate did not answer at all, which is a reason to try the next one
-    /// rather than to stop.
-    async fn post(
-        &self,
-        url: &Url,
-        address: &EmailAddress,
-        authorization: Option<&str>,
-    ) -> Option<Response> {
-        let request = AutodiscoverRequest::new(address);
-        let mut builder = self.http.post(url.clone());
-        for (name, value) in request.headers() {
-            builder = builder.header(name, value);
-        }
-        builder = if let Some(value) = authorization {
-            builder.header(reqwest::header::AUTHORIZATION, value)
-        } else {
-            match self.credentials {
-                Credentials::Basic { username, password } => {
-                    builder.basic_auth(username, Some(password))
-                }
-                Credentials::Bearer { token } => builder.bearer_auth(token),
-                // `None`, and the handshake schemes, which supply their own header above.
-                _ => builder,
-            }
-        };
-
-        builder.body(request.into_body()).send().await.ok()
-    }
-
-    /// The plain-HTTP redirect probe: a `GET` whose `Location` header names the real service.
-    ///
-    /// Redirects are not followed automatically anywhere in this crate, which is what makes this
-    /// readable at all: the 302 arrives as a 302.
-    ///
-    /// [MS-OXDISCO] §3.1.5.4 — locations found by an HTTP redirect
-    async fn probe(&self, address: &EmailAddress) -> Option<String> {
-        let response = self
-            .http
-            .get(redirect_probe_url(address))
-            .send()
-            .await
-            .ok()?;
-
-        if !response.status().is_redirection() {
-            return None;
-        }
-        response
-            .headers()
-            .get("Location")?
-            .to_str()
-            .ok()
-            .map(str::to_owned)
-    }
-}
+mod search;
 
 #[cfg(feature = "ntlm")]
 mod negotiated;
 
 #[cfg(test)]
-mod tests {
-    use mapi_autodiscover::{AutodiscoverResponse, Settings};
-
-    use super::*;
-
-    /// The `MailStore` URL the fixture carries, which is what a discovered client must post to.
-    const MAIL_STORE_URL: &str = "https://mail.example.test/mapi/emsmdb/\
-                                  ?MailboxId=00000000-0000-0000-0000-000000000000@example.test";
-
-    fn settings_from(xml: &str) -> Settings {
-        match AutodiscoverResponse::parse(xml) {
-            Ok(AutodiscoverResponse::Settings(settings)) => settings,
-            other => panic!("the fixture is a settings response, not {other:?}"),
-        }
-    }
-
-    fn settings() -> Settings {
-        settings_from(include_str!("../tests/autodiscover-settings.xml"))
-    }
-
-    fn address() -> EmailAddress {
-        EmailAddress::new("alice@example.test").expect("a valid address")
-    }
-
-    /// The handover: what Autodiscover said becomes the endpoint and the distinguished name, which
-    /// are precisely the two settings a client cannot be built without.
-    #[test]
-    fn a_discovered_endpoint_fills_in_both_settings_that_have_no_default() {
-        let endpoint = settings().mapi_http().expect("the fixture offers mapiHttp");
-        let client = MapiClient::builder()
-            .for_endpoint(&endpoint, &address())
-            .expect("a client");
-
-        assert_eq!(client.endpoint(), MAIL_STORE_URL);
-        assert!(client.user_dn().as_str().ends_with("cn=alice"));
-        assert!(
-            endpoint
-                .address_book_url()
-                .is_some_and(|url| url.contains("/nspi/")),
-            "the address book URL is carried through for whoever needs it"
-        );
-    }
-
-    /// A `mapiHttp` block with no `MailStore` URL describes nothing this crate can connect to, and
-    /// saying so beats building a client that cannot work.
-    #[test]
-    fn an_endpoint_with_no_mail_store_url_is_refused() {
-        let xml = include_str!("../tests/autodiscover-settings.xml")
-            .replace("<MailStore>", "<MailStore><!--")
-            .replace("</MailStore>", "--></MailStore>");
-        let endpoint = settings_from(&xml)
-            .mapi_http()
-            .expect("still offers mapiHttp");
-
-        let error = MapiClient::builder()
-            .for_endpoint(&endpoint, &address())
-            .expect_err("no URL to connect to");
-        assert!(matches!(error, Error::NoEndpoint { .. }), "{error:?}");
-    }
-
-    #[test]
-    fn a_redirect_chain_is_followed_up_to_the_limit_and_then_refused() {
-        let mut count = 0;
-        for _ in 0..MAX_REDIRECTS {
-            count = bump(count).expect("within the limit");
-        }
-        assert_eq!(count, MAX_REDIRECTS);
-        assert!(matches!(
-            bump(count),
-            Err(Error::TooManyRedirects {
-                limit: MAX_REDIRECTS
-            })
-        ));
-    }
-}
+mod tests;

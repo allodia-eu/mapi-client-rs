@@ -72,7 +72,7 @@ pub struct MapiClientBuilder {
     root_certificates: Vec<Vec<u8>>,
     accept_invalid_certificates: bool,
     allow_plaintext_http: bool,
-    observer: Option<Arc<dyn Observer>>,
+    pub(crate) observer: Option<Arc<dyn Observer>>,
     /// Shared with every client this builds, so that a lookup's tickets serve the session after
     /// it.
     #[cfg(feature = "kerberos")]
